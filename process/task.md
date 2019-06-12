@@ -268,3 +268,246 @@ struct fs_struct *fs;
 /* Open file information: */
 struct files_struct *files;
 ```
+
+### 用户态/内核态的切换
+```c
+struct thread_info		thread_info;
+void				*stack; // 内核栈
+```
+
+#### 用户态函数栈
+在用户态中,程序的执行往往是一个函数调用另一个函数(通过指令跳转), 函数调用都是通过栈来进行的.
+
+在进程的内存空间里面,栈是一个从高地址到低地址,往下增长的结构,也就是上面是栈底,下面是栈顶,入栈和出栈的操作都是从下面的栈顶开始的
+
+![x86_64的栈示意图](images/stack_64.png)
+
+对于64位操作系统,模式多少有些不一样. 因为64位操作系统的寄存器数目比较多. rax用于保存函数调用的返回结果. 栈顶指针寄存器变成了rsp,指向栈顶位置. 堆栈的Pop和Push操作会自动调整rsp,栈基指针
+寄存器变成了rbp,指向当前栈帧的起始位置. 
+
+改变比较多的是参数传递. rdi、rsi、rdx、rcx、r8、r9这6个寄存器,用于传递存储函数调用时的6个参数. 如果超过6的时候,还是需要放到栈里面. 
+
+然而,前6个参数有时候需要进行寻址,但是如果在寄存器里面,是没有地址的,因而还是会放到栈里面,只不过放到栈里面的操作是被调用函数做的
+#### 内核态函数栈
+内核栈在64位系统上arch/x86/include/asm/page_64_types.h,是这样定义的:在PAGE_SIZE的基础上左移两位,也即16K,并且要求起始地址必须是8192的整数倍
+```
+#ifdef CONFIG_KASAN
+#define KASAN_STACK_ORDER 1
+#else
+#define KASAN_STACK_ORDER 0
+#endif
+
+#define THREAD_SIZE_ORDER	(2 + KASAN_STACK_ORDER)
+#define THREAD_SIZE  (PAGE_SIZE << THREAD_SIZE_ORDER)
+```
+
+![内核栈示意图](images/kernel_stack.png)
+
+64位的工作模式:
+- 在用户态,应用程序进行了至少一次函数调用, 64位的前6个参数用寄存器,其他的用函数栈
+- 在内核态,32位和64位都使用内核栈,格式也稍有不同,主要集中在pt_regs结构上
+- 在内核态,32位和64位的内核栈和task_struct的关联关系不同, 32位主要靠thread_info,64位主要靠Per-CPU变量
+
+这段空间的最低位置,是一个thread_info结构, 这个结构是对task_struct结构的补充, 因为task_struct结构庞大但是通用,不同的体系结构就需要保存不同的东西,所以往往与体系结构有关的,都放在thread_info
+里面
+
+在内核代码里面有这样一个union: [thread_union](https://sourcegraph.com/github.com/torvalds/linux@d1fdb6d8f6a4109a4263176c84b899076a5f8008/-/blob/include/linux/sched.h#L1566:7),它将thread_info和stack放在一起:
+```c
+// 开头是thread_info,后面是stack
+union thread_union {
+#ifndef CONFIG_ARCH_TASK_STRUCT_ON_STACK
+	struct task_struct task;
+#endif
+#ifndef CONFIG_THREAD_INFO_IN_TASK
+	struct thread_info thread_info;
+#endif
+	unsigned long stack[THREAD_SIZE/sizeof(long)];
+};
+```
+
+在内核栈的最高地址端,存放的是另一个结构[pt_regs](https://sourcegraph.com/github.com/torvalds/linux@d1fdb6d8f6a4109a4263176c84b899076a5f8008/-/blob/arch/x86/include/asm/ptrace.h#L12:8),定义如下:
+```c
+#ifdef __i386__
+
+struct pt_regs {
+	/*
+	 * NB: 32-bit x86 CPUs are inconsistent as what happens in the
+	 * following cases (where %seg represents a segment register):
+	 *
+	 * - pushl %seg: some do a 16-bit write and leave the high
+	 *   bits alone
+	 * - movl %seg, [mem]: some do a 16-bit write despite the movl
+	 * - IDT entry: some (e.g. 486) will leave the high bits of CS
+	 *   and (if applicable) SS undefined.
+	 *
+	 * Fortunately, x86-32 doesn't read the high bits on POP or IRET,
+	 * so we can just treat all of the segment registers as 16-bit
+	 * values.
+	 */
+	unsigned long bx;
+	unsigned long cx;
+	unsigned long dx;
+	unsigned long si;
+	unsigned long di;
+	unsigned long bp;
+	unsigned long ax;
+	unsigned short ds;
+	unsigned short __dsh;
+	unsigned short es;
+	unsigned short __esh;
+	unsigned short fs;
+	unsigned short __fsh;
+	/* On interrupt, gs and __gsh store the vector number. */
+	unsigned short gs;
+	unsigned short __gsh;
+	/* On interrupt, this is the error code. */
+	unsigned long orig_ax;
+	unsigned long ip;
+	unsigned short cs;
+	unsigned short __csh;
+	unsigned long flags;
+	unsigned long sp;
+	unsigned short ss;
+	unsigned short __ssh;
+};
+
+#else /* __i386__ */
+
+struct pt_regs {
+/*
+ * C ABI says these regs are callee-preserved. They aren't saved on kernel entry
+ * unless syscall needs a complete, fully filled "struct pt_regs".
+ */
+	unsigned long r15;
+	unsigned long r14;
+	unsigned long r13;
+	unsigned long r12;
+	unsigned long bp;
+	unsigned long bx;
+/* These regs are callee-clobbered. Always saved on kernel entry. */
+	unsigned long r11;
+	unsigned long r10;
+	unsigned long r9;
+	unsigned long r8;
+	unsigned long ax;
+	unsigned long cx;
+	unsigned long dx;
+	unsigned long si;
+	unsigned long di;
+/*
+ * On syscall entry, this is syscall#. On CPU exception, this is error code.
+ * On hw interrupt, it's IRQ number:
+ */
+	unsigned long orig_ax;
+/* Return frame for iretq */
+	unsigned long ip;
+	unsigned long cs;
+	unsigned long flags;
+	unsigned long sp;
+	unsigned long ss;
+/* top of stack page */
+};
+```
+
+当系统调用从用户态到内核态的时候,首先要做的第一件事情,就是将用户态运行过程中的CPU上下文保存起来,其实主要就是保存在这个结构的寄存器变量里. 这样当从内核系统调用返回的时候,才能让进程在刚才的地方接着运行下去. 系统调用的时候,压栈的值的顺序和struct pt_regs中寄存器定义的顺序是一样的.
+
+在内核中,CPU的寄存器ESP或者RSP,已经指向内核栈的栈顶,在内核态里的调用都有和用户态相似的过程
+
+**通过task_struct找内核栈**:
+```c
+/*
+ * When accessing the stack of a non-current task that might exit, use
+ * try_get_task_stack() instead.  task_stack_page will return a pointer
+ * that could get freed out from under you.
+ */
+static inline void *task_stack_page(const struct task_struct *task)
+{
+	return task->stack;
+}
+```
+
+从task_struct得到相应的[pt_regs](https://sourcegraph.com/github.com/torvalds/linux@d1fdb6d/-/blob/arch/x86/include/asm/processor.h#L816):
+```c
+#define task_top_of_stack(task) ((unsigned long)(task_pt_regs(task) + 1))
+
+#define task_pt_regs(task) \
+({									\
+	unsigned long __ptr = (unsigned long)task_stack_page(task);	\
+	__ptr += THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;		\
+	((struct pt_regs *)__ptr) - 1;					\
+})
+```
+
+先从task_struct找到内核栈的开始位置. 然后这个位置加上THREAD_SIZE就到了最后的位置,然后转换为struct pt_regs,再减一,就相当于减少了一个pt_regs的位置,就得到了这个结构的首地址
+
+[TOP_OF_KERNEL_STACK_PADDING](https://sourcegraph.com/github.com/torvalds/linux@d1fdb6d8f6a4109a4263176c84b899076a5f8008/-/blob/arch/x86/include/asm/thread_info.h):
+```c
+#ifdef CONFIG_X86_32
+# ifdef CONFIG_VM86
+#  define TOP_OF_KERNEL_STACK_PADDING 16
+# else
+#  define TOP_OF_KERNEL_STACK_PADDING 8
+# endif
+#else
+# define TOP_OF_KERNEL_STACK_PADDING 0
+#endif
+``
+
+也就是说,64位机器上是0, 其他情况看定义. 这是因为压栈pt_regs有两种情况。我们知道,CPU用
+ring来区分权限,从而Linux可以区分内核态和用户态。
+1. 涉及从用户态到内核态的变化的系统调用来说. 因为涉及权限的改变,会压栈保存SS、ESP寄存器的,这两个寄存器共占用N个byte.
+1. 不涉及权限的变化,就不会压栈这N个byte. 这样就会使得两种情况不兼容. 如果没有压栈还访问,就会报错,所以还不如预留在这里,保证安全. 在64位上,修改了这个问题,变成了定长的.
+
+**通过内核栈找task_struct**
+```c
+// include/linux/thread_info.h
+#include <asm/current.h>
+#define current_thread_info() ((struct thread_info *)current)
+#endif
+```
+
+...c
+// arch/x86/include/asm/current.h
+struct task_struct;
+
+DECLARE_PER_CPU(struct task_struct *, current_task);
+
+static __always_inline struct task_struct *get_current(void)
+{
+	return this_cpu_read_stable(current_task);
+}
+
+#define current get_current()
+...
+
+每个CPU运行的task_struct不通过thread_info获取了,而是直接放在Per CPU 变量里面了
+
+多核情况下,CPU是同时运行的,但是它们共同使用其他的硬件资源的时候,我们需要解决多个CPU之间的同步问题.
+Per CPU变量是内核中一种重要的同步机制。顾名思义,Per CPU变量就是为每个CPU构造一个变量的副本,这样多个CPU各自操作自己的副本,互不干涉. 比如,当前进程的变量current_task就被声明为Per CPU
+变量
+
+然后是定义这个变量在arch/x86/kernel/cpu/common.c中:
+```c
+DEFINE_PER_CPU(struct task_struct *, current_task) = &init_task;
+```
+
+也就是说,系统刚刚初始化的时候,current_task都指向init_task
+
+当某个CPU上的进程进行切换的时候,current_task被修改为将要切换到的目标进程. 例如,进程切换函数__switch_to就会改变current_task:
+```c
+__visible __notrace_funcgraph struct task_struct *
+__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
+{
+......
+this_cpu_write(current_task, next_p);
+......
+return prev_p;
+}
+```
+
+当要获取当前的运行中的task_struct的时候,就需要调用this_cpu_read_stable进行读取.
+```c
+#define this_cpu_read_stable(var)
+percpu_stable_op("mov", var)
+```
+好了,现在如果你是一个进程,正在某个CPU上运行,就能够轻松得到task_struct了
