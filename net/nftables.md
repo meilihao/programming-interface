@@ -1,5 +1,7 @@
 # nftables 基于[nftables HOWTO](https://wiki.nftables.org/wiki-nftables/index.php/Main_Page)
 
+[**!!!bpfilter可能正在取代nftables**](https://lwn.net/Articles/747551/)
+
 nftables是新的数据包分类框架，旨在替代现存的{ip,ip6,arp,eb}_tables, 即它是新一代包过滤框架.
 
 其他:
