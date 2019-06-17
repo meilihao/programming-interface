@@ -6,7 +6,7 @@
 
 ![操作数格式](images/register_value_format.png)
 
-`subq $8 %rsp // align stack frame`: 为了让栈帧16位对齐, 因为在64位Linux机器上，要求函数调用前%rsp是16位对齐的, 阅读时可忽略.
+`subq $8 %rsp // align stack frame`: 为了让栈顶(%rsp)16位对齐, 因为在64位Linux机器上，要求函数调用前%rsp是16位对齐的, 阅读时可忽略, 可通过GNU的`-mpreferred-stack-boundary`选项调整.
 
 ## 数据传送
 参考:
