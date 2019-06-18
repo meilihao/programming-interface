@@ -1,4 +1,8 @@
-# asm指令
+# asm
+## 数据对齐
+计算机系统对基本数据类型的合法地址做出限制: 其地址必须是某个K(通常是2, 4, 8)的倍数, 该设计简化了cpu与memory间的硬件接口设计, 提高内存系统的性能.
+
+## asm指令
 操作数类型:
 - 立即数,即常量
 - 寄存器
@@ -8,7 +12,7 @@
 
 `subq $8 %rsp // align stack frame`: 为了让栈顶(%rsp)16位对齐, 因为在64位Linux机器上，要求函数调用前%rsp是16位对齐的, 阅读时可忽略, 可通过GNU的`-mpreferred-stack-boundary`选项调整.
 
-## 数据传送
+### 数据传送
 参考:
 - [简单的汇编学习笔记与总结](http://rinchannow.club/2018/11/08/%E7%AE%80%E5%8D%95%E7%9A%84%E6%B1%87%E7%BC%96%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0%E4%B8%8E%E6%80%BB%E7%BB%93/)
 
@@ -26,28 +30,33 @@
     特殊:
     - cltq : 把%eax符号扩展到%rax
 
-## 压入和弹出栈数据
-push src ：把数据压入栈中
-pop dst ：弹出栈顶数据
+### 压入和弹出栈数据
+push src ：把数据压入栈中: `subq $8, %rsp` + `movq src, (%rsp)`
+pop dst ：弹出栈顶数据: `movq (%rsp), dst`+`addq $8, %rsp`
 
-## 算术和逻辑操作
+```
+pushq	%rbp  // 保存调用者的%rbp = `subq $8, %rsp`(分配栈空间) + `movq %rbp, (%rsp)`(向分配的栈空间写入%rbp). 因为栈是从高地址到低地址增长, %rsp-=8后向%rsp处写入数据即是为其赋值.
+popq	%rbp  // = `movq (%rsp), %rbp`(读数据)+`addq $8, %rsp`
+```
+
+### 算术和逻辑操作
 ![算术和逻辑操作](images/register_integer_operate.png)
 
 sal和shl是一样的，因为左移不会涉及符号位
 计算时会设置eflags.
 
-## 加载有效地址
+### 加载有效地址
 leaq指令 ： leaq Src, Dst : 直接将有效地址（即：把括号内的值，不读入对应内存的数据）写入到目的
 
     leaq 7(%rdi, %rsi, 4), %rax // offset(base, index, width) = %rsi * 4 + %rdi + 7
 
-## 特殊算术操作
+### 特殊算术操作
 ![特殊算术操作](images/register_special_value.png)
 
 mulq/imulq(乘法)要求一个参数必须在%rax中, 另一个数是源操作数, 将乘积的高64位存在%rdx中，低64位存在%rax中.
 divq/idivq(除法)会把R[%rdx]:R[%rax]作为被除数（128位），S为除数，将结果的商存在%rax中，余存在%rdx中
 
-## 比较和控制指令
+### 比较和控制指令
 这两种指令不修改任何寄存器的值，只设置eflags.
 
 - CMP (cmpb, cmpw, cmpl, cmpq)
@@ -62,7 +71,7 @@ divq/idivq(除法)会把R[%rdx]:R[%rax]作为被除数（128位），S为除数�
     SF = 1: S1 & S2 < 0（补码运算意义上的）
     经常使用这个指令测试一个数是不是负数：testq %rax, %rax
 
-## set指令
+### set指令
 SET类的指令可以将一个字节的值设置为条件码的某种组合，这种指令的目的操作数是低位单字节寄存器之一或一个字节的内存位置（如%al），一般是配合比较和测试指令使用，下面列出常用的SET类指令：
 
 指令	同义名	效果	设置条件
@@ -79,7 +88,7 @@ setae D	setnb	D <– ~CF	无符号>=
 setb D	setnae	D <– CF	无符号< (below)
 setbe D	setna	D <– CF | ZF	无符号<=
 
-## 跳转指令
+### 跳转指令
 `jmp`切换到程序的另一个位置开始执行, 常与lable联用
 
 ![jump指令](images/asm_jmp.png)
@@ -88,5 +97,8 @@ setbe D	setna	D <– CF | ZF	无符号<=
 
 ![条件传送](images/asm_cmovX.png)
 
-## 转移控制
+### 转移控制
 call + ret
+
+## 指令集
+- simd最新是avx版本.
