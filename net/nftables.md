@@ -24,10 +24,10 @@ nftables是新的数据包分类框架，旨在替代现存的{ip,ip6,arp,eb}_ta
 - 支持set/map等
 - 支持级连（需要内核4.1+）
 
-![nftables](images/nftables-the-evolution-of-linux-firewall-8-1024.jpg)
-![nftables with ingress filter](images/nftables-the-evolution-of-linux-firewall-9-638.jpg)
-![netfilter数据流图(更直观)](images/Netfilter_packet_flow2.png)
-![netfilter数据流图(更细节)](images/Netfilter-packet-flow.svg)
+![nftables](/images/nftables-the-evolution-of-linux-firewall-8-1024.jpg)
+![nftables with ingress filter](/images/nftables-the-evolution-of-linux-firewall-9-638.jpg)
+![netfilter数据流图(更直观)](/images/Netfilter_packet_flow2.png)
+![netfilter数据流图(更细节)](/images/Netfilter-packet-flow.svg)
 
 参考:
 - [UCloud 基于 Linux 内核新特性的下一代外网网关设计及相关开源工作](https://www.infoq.cn/article/Ep1KRyW*zFLGbSpK7Cq7)
@@ -214,9 +214,9 @@ matches的内容非常多，可以识别以下几种类型的报文：
     - l4proto l4proto, `meta l4proto { 33-55 }`
     - nfproto nfproto, `meta nfproto { ipv4, ipv6 }`
 
-![ct](images/nft_ct_expression.png)
-![ipv4+ipv6](images/nft_ipv4_ipv6_expression.png)
-![tcp+upd](images/nft_tcp_udp_expression.png)
+![ct](/images/nft_ct_expression.png)
+![ipv4+ipv6](/images/nft_ipv4_ipv6_expression.png)
+![tcp+upd](/images/nft_tcp_udp_expression.png)
 
 对每一种类型，又可以检查多个字段，具体查看[Quick reference-nftables in 10 minutes](https://wiki.nftables.org/wiki-nftables/index.php/Quick_reference-nftables_in_10_minutes#Matches)或[Linux-nftables](https://www.cnblogs.com/sztom/p/10947111.html)
 
