@@ -224,7 +224,7 @@ statement是报文匹配rule时触发的操作：
 - Verdict : 裁决
     - accept : 接受数据包并且停止处理
     - drop : 停止处理并丢弃此数据包, 即drop是终止行为，你不能在它之后添加任何其它行为
-    - queue : 发送数据包到用户空间并停止处理
+    - queue : 发送数据包到用户空间并停止处理, 如果没有处理程序, 数据包就会被丢弃
     - continue : 继续处理此数据包
     - return : 返回到调用的规则链继续处理
     - jump <chain> : 跳到指定的规则链进行处理, 而且当完成时或执行了return时返回到调用的规则链
@@ -384,3 +384,8 @@ demo:
 # nft add rule ip filter input ip saddr { 192.168.1.1-192.168.1.200, 192.168.2.1-192.168.2.200 } drop // 也可以在集合（sets）中使用集合，比如拉黑两个 IP 区间的数据包
 # nft add rule ip filter forward ip daddr vmap { 192.168.1.1-192.168.1.200 : jump chain-dmz, 192.168.2.1-192.168.20.250 : jump chain-desktop } // 也可以在字典（dictionaries）中使用
 ```
+
+## FAQ
+### reject与drop的区别
+reject会更为礼貌地返回一个拒绝(终止)数据包(TCP FIN或UDP-ICMP-PORT-UNREACHABLE)，明确的拒绝对方的连接动作.
+drop只是简单的直接丢弃数据，并不反馈任何回应. 需要Client等待超时，发现自己被防火墙所阻挡.
