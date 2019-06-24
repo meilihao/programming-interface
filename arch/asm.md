@@ -104,6 +104,10 @@ call + ret
 - simd最新是avx版本.
 
 ## 扩展
+### plan9
+参考:
+- [plan9 assembly 入门](https://gocn.vip/article/733)
+
 在plan9汇编里还可以直接使用的amd64的通用寄存器，应用代码层面会用到的通用寄存器主要是: rax, rbx, rcx, rdx, rdi, rsi, r8~r15这14个寄存器，虽然rbp和rsp也可以用，不过bp和sp会被用来管理栈顶和栈底，最好不要拿来进行运算. plan9中使用寄存器不需要带r或e的前缀，例如rax，只要写AX即可.
 
 通用通用寄存器的名字在 IA64 和 plan9 中的对应关系:
