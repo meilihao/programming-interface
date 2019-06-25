@@ -1,9 +1,9 @@
 # ELF
-ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行程序的格式.
+ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行程序的格式, 可通过`readelf -a xxx`查看.
 
-![程序编译过程](http://scand75.gz01.bdysite.com/l/?n=8&i=blog/1671100/201905/1671100-20190512202937314-1323961004.jpg)
+![程序编译过程](/images/compile/1671100-20190512202937314-1323961004.jpg)
 
-### 可重定位文件 (RelocatableFile),
+### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
 
 ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中有定义,分别为 `struct elf32_hdr 和 struct elf64_hdr`.
@@ -11,19 +11,23 @@ ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中�
 节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 struct elf64_shdr`
 
 文件的各section:
-- .text:放编译好的二进制可执行代码
+- .text:放编译好的二进制可执行代码, 进程代码段不仅包括`.text`, 还有`.init`, `.fini`等.
 - .data:已经初始化好的全局变量
+- .bss:未初始化的全局变量,运行时会分配空间并置零, 因此比`.data`节省空间
+    `.bss`的size仅表示程序加载器在加载程序时候, 需要为该段分配的空间大小
 - .rodata:只读数据,例如字符串常量、const 的变量
-- .bss:未初始化全局变量,运行时会置零
-- .symtab:符号表,记录的则是函数和变量的信息
-- .strtab:字符串表、字符串常量和变量名
+- .symtab:符号表,保存了符号信息, 可通过`readelf -s xxx`查看
+- .strtab:字符串表、保存的是被`.symtab`引用的符号名称
+- .shstrtab: 用于保存section header中用到的字符串
 - .comment :注释信息段
 - .node.GUN-stack :堆栈提示段
 - .debug: 一个调试符号表
+- .eh_frame: 记录调试和异常处理时用到的信息
+- 以`.rec`开头的 sections 里面装载了需要重定位的符号
 
-![.o文件的ELF](http://scand75.gz01.bdysite.com/l/?n=8&i=blog/1671100/201905/1671100-20190512203047832-334199166.jpg)
+![.o文件的ELF](/images/compile/1671100-20190512203047832-334199166.jpg)
 
-### 可执行文件
+### 可执行文件(Executable File)
 ELF 的第二种格式
 
 这个格式和.o 文件大致相似,还是分成一个个的 section,并且被节头表描述. 只不过这些
@@ -48,7 +52,7 @@ section 是多个.o 文件合并过的. 但是这个文件已经是可以加载�
 GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的
 入口函数,这个函数会找到加载到内存中的 xxx.so 里面的 具体 函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
 
-### 静/动态链接
+### 静/动态链接(Shared Object File)
 静态链接库一旦链接进去,代码和变量的 section 都合并了,因而程序运行的时候,就不依赖于这个库是否存在. 但是这样有一个缺点,就是相同的代码段,如果被多个程序使用的话,在内存里面就有多份,而且一旦静态链接库更新了,如果二进制执行文件不重新编译,也不随着更新.
 
 因而就出现了另一种,动态链接库 (Shared Libraries),不仅仅是一组对象文件的简单归档,而
