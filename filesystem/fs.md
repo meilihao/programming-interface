@@ -92,3 +92,9 @@ func CheckErr(err error) {
 进程会为每个文件分配一个文件描述符(File Descriptor, 一个整数), 有了它我们就可以使用系统调用操作文件了
 
 > Linux 里一切皆文件
+
+## FAQ
+1. umount: /home/chen/lfs: target is busy
+	```
+	$ fuser -m /home/chen/lfs # 查找哪个进程在使用文件
+	```
