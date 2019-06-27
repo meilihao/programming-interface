@@ -1,9 +1,9 @@
-# lfs
+# lfs 8.4
 参考:
 - [Linux From Scratch SVN-20190618 中文翻译版](https://bf.mengyan1223.wang/lfs/zh_CN/)
 - [LCTT/LFS-BOOK](https://github.com/LCTT/LFS-BOOK)
 
-## 1. 准备
+## 1. 准备, 先看FAQ的问题
 1. 创建lfs用户, 建立干净的编译环境, 以避免其他环境变量的影响
 
     ```sh
@@ -15,9 +15,13 @@
     $ export LFS=/home/lfs/lfs
     $ mkdir -v $LFS/sources # 建立sources, 放需要下载的资源
     $ mkdir -v $LFS/tools # 建立tools, 编译生成的临时工具都会安装到这里
+    $ cat > ~/.bash_profile << EOF
+    exec env -i HOME=$HOME TERM=$TERM PS1='\u:\w\$ ' /bin/bash
+    EOF # 新建一个除了 HOME, TERM 以及 PS1 外没有任何环境变量的 shell ，替换当前 shell ， 防止宿主环境中不必要和有潜在风险的环境变量进入编译环境
     $ cat > ~/.bashrc << EOF
     set +h                  # 关闭了 bash 的哈希功能, 使得程序执行的时候就会一直搜索 PATH
     umask 022
+    unset LANG # 避免字符集影响
     LFS=/home/lfs/lfs
     LC_ALL=POSIX
     LFS_TGT=x86_64-lfs-linux-gnu
@@ -35,7 +39,9 @@
     1. `readlink -f /usr/bin/awk`是否`gawk`
     1. `readlink -f /usr/bin/yacc`是否`bsion`, 否则编译glic时会报错
 
-1. 下载所需all Packages
+1. 下载所需all Packages, `bison`使用`3.0.5`
+
+    **每次需要编译的包使用完成后需要删除**.
 
     根据[lfs 的 `Files Mirrors`](http://www.linuxfromscratch.org/mirrors.html#files)下载所需的版本的[all packages, **推荐**](http://mirrors-usa.go-parts.com/lfs/lfs-packages/lfs-packages-8.4.tar), 该tar已打包所有所需, 各包的作用在[这里](https://lctt.github.io/LFS-BOOK/lfs-systemd/prologue/package-choices.html).
 
@@ -46,7 +52,7 @@
     ```
 
 ## 2. 第一次编译
-这里没有将`/tools`软连接到`$LFS/tools`
+将`$LFS/tools`软连接到`/tools`
 
 1. Binutils
     ```
@@ -54,9 +60,9 @@
     $ mkdir lib
     $ ln -s lib lib64
     ...
-    $../configure --prefix=$LFS/tools \
+    $../configure --prefix=/tools \
     --with-sysroot=$LFS \
-    --with-lib-path=$LFS/tools/lib \
+    --with-lib-path=/tools/lib \
     --target=$LFS_TGT \
     --disable-nls \
     --disable-werror
@@ -87,13 +93,13 @@
     $ mkdir build && cd build
     $ ../configure \
     --target=$LFS_TGT \
-    --prefix=$LFS/tools \
+    --prefix=/tools \
     --with-glibc-version=2.11 \
     --with-sysroot=$LFS \
     --with-newlib \
     --without-headers \
-    --with-local-prefix=$LFS/tools \
-    --with-native-system-header-dir=$LFS/tools/include \
+    --with-local-prefix=/tools \
+    --with-native-system-header-dir=/tools/include \
     --disable-nls \
     --disable-shared \
     --disable-multilib \
@@ -112,11 +118,21 @@
 3. glibc
     ```
     $ cd glibc-2.29
-    $ patch -p1 < ../glibc-2.29-fhs-1.patch
+    $ patch -p1 < ../glibc-2.29-fhs-1.patch # 这里其实不用打patch, 是在`6. 安装基本系统软件`编译glic时打
     ...
     ```
 
 3. 第二次编译
+
+4. 备份
+在`6. 安装基本系统软件`前备份`$LFS/lfs`, 避免之后的流程出错可供还原.
+
+5. `6.9.1. 安装 Glibc`
+`../lib/ld-linux-x86-64.so.2`不明, 在宿主机用了locate查找得到.
+```sh
+(lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64
+(lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64/ld-lsb-x86-64.so.3
+```
 
 ## FAQ
 ### Binutils, GCC编译了两遍
@@ -127,4 +143,52 @@ $ ldd /home/lfs/lfs/tools/bin/x86_64-lfs-linux-gnu-ar # 第一遍编译Binutils
 	libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007fd6ffa59000)
 	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fd6ff6ba000)
 	/lib64/ld-linux-x86-64.so.2 (0x00007fd6fff8e000)
+$ $ ldd /home/lfs/lfs/tools/bin/x86_64-lfs-linux-gnu-ar # 第二遍编译
+	linux-vdso.so.1 (0x00007ffd79c87000)
+	libdl.so.2 => /tools/lib/libdl.so.2 (0x00007f86cb493000)
+	libc.so.6 => /tools/lib/libc.so.6 (0x00007f86cb2d9000)
+	/lib64/ld-linux-x86-64.so.2 => /tools/lib64/ld-linux-x86-64.so.2 (0x00007f86cb7cb000)
+
 ```
+
+Binutils, GCC, Glibc均设置了HOST,TARGET:
+- HOST=TARGET : 编译脚本就构建本地编译工具
+- HOST!=TARGET : 编译脚本就构建交叉编译工具, 指导宿主os上的工具链编译"运行在本机, 但是最后编译链接的程序/lib是运行在$TARGET上"的交叉二进制工具
+
+### 报错`x86_64-lfs-linux-gnu/bin/ld: cannot find /home/lfs/lfs/tools/lib/libc.so.6 inside /home/lfs/lfs`
+比如在编译Binutils时使用了`--prefix=$LFS/tools`, 即未将`$LFS/tools`软连接到`/tools`. 而导致`$LFS_TGT-gcc dummy.c`报错
+
+参考[Can not hardcode library search path of binutils](https://unix.stackexchange.com/questions/350944/can-not-hardcode-library-search-path-of-binutils)
+
+解决方法:
+将`$LFS/tools`软连接到`/tools`, 具体原因未知.
+
+### bison : cannot stat 'examples/c/reccalc/scan.stamp.tmp': No such file or directory
+参考[bug#36238: Problems cross-compiling on core-updates](https://www.mail-archive.com/bug-guix@gnu.org/msg13512.html), 是并行编译问题, 使用`make -j1`即可.
+
+### 6.9. Glibc-2.29 报错`bison --yacc --name-prefix=__gettext --output /sources/glibc-2.29/build/intl/plural.c plural.y`
+使用`bison-3.0.5`.
+
+### 6.12. File-5.37 报错`/sources/file-5.36/src/.libs/lt-file: error while loading shared libraries: libz.so.1: cannot open shared object file: No such file or directory`
+检查依赖`ldd src/.libs/lt-file`
+
+解决方法: `export LD_LIBRARY_PATH=/lib:/usr/lib`
+
+查看[FHS 兼容性说明](https://bf.mengyan1223.wang/lfs/zh_CN/systemd/chapter06/zlib.html)
+
+### 6.15. Bc-1.07.1 报错`/bin/sh: /tools/bin/makeinfo: /home/lfs/lfs/tools/bin/perl: bad interpreter: No such file or directory`
+makeinfo使用了错误的依赖`/home/lfs/lfs/tools/bin/perl`, 先重新编译texinfo, 再编译bc即可.
+
+### 6.17. GMP-6.1.2报错`ar: error while loading shared libraries: libbfd-2.32.so: cannot open shared object file: No such file or directory`
+使用`whereis ar`确定ar位置, 再使用`ldd /usr/bin/ar`查看其使用的共享库.
+
+通过宿主机查找`libbfd-2.32.so`
+```
+$ sudo updatedb --localpaths='/home/lfs'                    
+$ locate libbfd-2.32.so |grep lfs
+/home/lfs/lfs/sources/binutils-2.32/build/bfd/.libs/libbfd-2.32.so
+```
+不知之前编译安装binutils时`libbfd-2.32.so`没有复制到`/lib`,复制即可.
+
+### 6.18. MPFR-4.0.2 的测试结果tests/test-suite.log报错`./tversion: error while loading shared libraries: libgmp.so.10: cannot open shared object file: No such file or directory`
+gmp安装时so安装在`/usr/lib`修正LD_LIBRARY_PATH即可.
