@@ -3,7 +3,11 @@
 - [Linux From Scratch SVN-20190618 中文翻译版](https://bf.mengyan1223.wang/lfs/zh_CN/)
 - [LCTT/LFS-BOOK](https://github.com/LCTT/LFS-BOOK)
 
+> 编译过程不要随意关机或退出环境, 否则再次进入编译环境进行操作时会碰到未知错误.
+> lfs里的相对路径操作要留意, 有时候真的很模糊.
+
 ## 1. 准备, 先看FAQ的问题
+1. [宿主系统需求](https://bf.mengyan1223.wang/lfs/zh_CN/8.4-systemd/chapter02/hostreqs.html)
 1. 创建lfs用户, 建立干净的编译环境, 以避免其他环境变量的影响
 
     ```sh
@@ -39,7 +43,7 @@
     1. `readlink -f /usr/bin/awk`是否`gawk`
     1. `readlink -f /usr/bin/yacc`是否`bsion`, 否则编译glic时会报错
 
-1. 下载所需all Packages, `bison`使用`3.0.5`
+1. 下载所需all Packages, `bison`使用`3.0.5`,否则glic.2.29无法通过编译
 
     **每次需要编译的包使用完成后需要删除**.
 
@@ -129,10 +133,16 @@
 
 5. `6.9.1. 安装 Glibc`
 `../lib/ld-linux-x86-64.so.2`不明, 在宿主机用了locate查找得到.
+
 ```sh
 (lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64
 (lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64/ld-lsb-x86-64.so.3
 ```
+因此`ln -sfv ../lib`应是指`/tools/lib`
+
+6. `6.21. GCC-9.1.0`
+`ln -sv ../usr/bin/cpp /lib` -> `ln -sv /usr/bin/cpp /lib`
+`ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/9.1.0` -> `ln -sfv /usr/libexec/gcc/x86_64-pc-linux-gnu/9.1.0`
 
 ## FAQ
 ### Binutils, GCC编译了两遍
@@ -155,6 +165,9 @@ Binutils, GCC, Glibc均设置了HOST,TARGET:
 - HOST=TARGET : 编译脚本就构建本地编译工具
 - HOST!=TARGET : 编译脚本就构建交叉编译工具, 指导宿主os上的工具链编译"运行在本机, 但是最后编译链接的程序/lib是运行在$TARGET上"的交叉二进制工具
 
+### 5.5. GCC-8.2.0 - 第一遍 报错`../.././gcc/libgcc.mvars: No such file or directory`
+编译gcc时，需要注意一个原则：不要再gcc的源码中直接执行./configure、make、make install等命令，需要在源码目录下另外新建一个目录，在新建的目录中执行以上命令.
+
 ### 报错`x86_64-lfs-linux-gnu/bin/ld: cannot find /home/lfs/lfs/tools/lib/libc.so.6 inside /home/lfs/lfs`
 比如在编译Binutils时使用了`--prefix=$LFS/tools`, 即未将`$LFS/tools`软连接到`/tools`. 而导致`$LFS_TGT-gcc dummy.c`报错
 
@@ -176,6 +189,8 @@ Binutils, GCC, Glibc均设置了HOST,TARGET:
 
 查看[FHS 兼容性说明](https://bf.mengyan1223.wang/lfs/zh_CN/systemd/chapter06/zlib.html)
 
+我的建议是等所有的编译都完成了,一次性移动到`/lib`.
+
 ### 6.15. Bc-1.07.1 报错`/bin/sh: /tools/bin/makeinfo: /home/lfs/lfs/tools/bin/perl: bad interpreter: No such file or directory`
 makeinfo使用了错误的依赖`/home/lfs/lfs/tools/bin/perl`, 先重新编译texinfo, 再编译bc即可.
 
@@ -192,3 +207,19 @@ $ locate libbfd-2.32.so |grep lfs
 
 ### 6.18. MPFR-4.0.2 的测试结果tests/test-suite.log报错`./tversion: error while loading shared libraries: libgmp.so.10: cannot open shared object file: No such file or directory`
 gmp安装时so安装在`/usr/lib`修正LD_LIBRARY_PATH即可.
+
+### 6.21. GCC-9.1.0 检查编译结果时报错`su: Cannot drop the controlling terminal`
+```
+$ su nobody -s /bin/bash -c "PATH=$PATH make -k check"
+su: Cannot drop the controlling terminal
+```
+
+参考[Chroot problem](https://lfs-support.linuxfromscratch.narkive.com/sZIeWLZk/chroot-problem): `Before you enter chroot, mount /dev, /proc, /sys, etc according to Section 6.2.`
+
+根本原因是:中途关机了, 再次chroot时编译环境重置. 切记编译中途不许退出环境.
+
+### 6.21. GCC-9.1.0 `grep found dummy.log`返回`found ld-linux-x86-64.so.2 at /tools/lib/ld-linux-x86-64.so.2`
+`grep 'SEARCH.*/usr/lib' dummy.log |sed 's|; |\n|g'`返回结果也包含了`/tools`, 原因未知.
+
+### 6.25. Attr-2.4.48 make报错`gcc: error: ./.libs/libattr.so: No such file or directory`
+未知
