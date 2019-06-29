@@ -1,6 +1,9 @@
 # filesystem
 类Unix文件系统是目录和文件的一种层次结构, 像一颗倒置的树, 起点是`/`(root目录).
 
+[linux有FHS(Filesystem Hierarchy Standard,文件系统层次结构)标准](http://refspecs.linuxfoundation.org/fhs.shtml):
+![](/images/fs/052049040017593.png)
+
 **目录(directory)**是一种逻辑上包含若干文件的文件. 每个文件都会包含一个文件名(filename)和若干文件属性(文件类型, 大小, 所有者, 权限, 最后访问时间/修改时间等).
 
 创建新目录时会自动创建两个文件名： `.`和`..`, 分别表示当前目
@@ -13,16 +16,18 @@
 - 目录文件(directory file)
 - 块特殊文件(block special file) : 提供对设备(比如磁盘)带缓冲的访问, 每次访问以固定长度为单位进行.
 - 字符特殊文件(character special file) :
-- FIFO : 管道, 用于进程间通信
+- FIFO : 管道, 用于进程间通信. 与socket类似, 以由socket取代. 
 - 套接字(socket) : 用于进程间的网络通信
 - 符号链接(symbolic link) : 指向另一个文件
 
-## 粘滞位(sticky bit)
-仅针对⽬录, 对于文件无效. 表现: `o-x` -> `t`
+可通过`ls -ld xxx`查看.
 
-- 目录(需要有写权限) : 任何用户可以创建文件; 但只有目录内文件(包括目录)的所有者或者root才可以删除或移动该文件
+### 设备文件
+设备文件让程序能够同系统的硬件和外围设备进行通信. 在Linux中,所有的设备以文件的形式出现在目录 /dev 中, 由`systemd-udevd`管理(随着kernel报告的硬件变化创建或删除设备文件).
 
-实际应用中，粘滞位一般用于/tmp目录，以防止普通用户删除或移动其他用户的文件
+设备用主设备号和次设备号表示其特征, 主设备号和次设备号统称为设备号. 主设备号用来表示一个特定的驱动程序, 次设备号用来表示使用该驱动程序的各设备.
+
+`crw-rw-rw-  1 root tty       4,     3 6月  26 21:34 tty3`, `4`是主设备号, `3`是次设备号.
 
 ## inode
 Linux 在生成文件的时候，内容会为每一个文件生成一个唯一的索引节点（Inode），文件的属性都会保存在这个Inode中.
@@ -43,6 +48,8 @@ Linux 在生成文件的时候，内容会为每一个文件生成一个唯一�
 > 可使用`readlink`命令读取链接
 > 这两种链接的本质区别关键点在于inode
 > 针对目录的软链接删除: `rm -rf symbol_name(删除软链接symbol_name)` 和 `rm -rf symbol_name/(仅删除symbol_name目录下的所有文件, 其他不变)`
+
+![](/images/fs/7b670449a3faa6a2cdab45c2298b66dd.png)
 
 ## example
 1. 列出一个目录中所有的文件
@@ -93,8 +100,9 @@ func CheckErr(err error) {
 
 > Linux 里一切皆文件
 
-## FAQ
-1. umount: /home/chen/lfs: target is busy
-	```
-	$ fuser -m /home/chen/lfs # 查找哪个进程在使用文件
-	```
+## mount
+将文件系统挂载到文件树上, 挂载的目录会映射为新加入的文件系统的根,而原目录内容就被隐藏,该目录也叫挂载点(mount point).
+
+需永久挂载时可将信息保持到`/etcd/fstab`
+
+umount用于卸载文件系统, 但不能卸载正处于"busy"状态的文件系统, 此时可以使用`fuser -c /xxx`查找哪个进程在使用文件.

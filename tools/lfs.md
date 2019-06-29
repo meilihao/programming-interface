@@ -4,14 +4,17 @@
 - [LCTT/LFS-BOOK](https://github.com/LCTT/LFS-BOOK)
 
 > 编译过程不要随意关机或退出环境, 否则再次进入编译环境进行操作时会碰到未知错误.
-> lfs里的相对路径操作要留意, 有时候真的很模糊.
+>
+> lfs里的相对路径操作要留意, 有时候真的很模糊, 必要时通过locate定位.
+>
+> [必须严格按照给出的顺序安装软件包,且不要同时构建多个软件包，这可能节约时间， 但往往会导致某个程序包含一个硬编码的，指向 /tools 的路径， 结果删除该目录后程序不能工作](https://bf.mengyan1223.wang/lfs/zh_CN/development/chapter06/introduction.html)
 
 ## 1. 准备, 先看FAQ的问题
 1. [宿主系统需求](https://bf.mengyan1223.wang/lfs/zh_CN/8.4-systemd/chapter02/hostreqs.html)
 1. 创建lfs用户, 建立干净的编译环境, 以避免其他环境变量的影响
 
     ```sh
-    $ sudo useradd -s /bin/bash -m lfs
+    $ sudo useradd -s /bin/bash -m -k /dev/null lfs // `-k`需与`-m`连用表示当useradd创建主目录时，将缺省文件从 指定目录(通常是/etc/skel) 复制到用户的主目录, 这里用`/dev/null`表示不复制
     $ sudo mkdir /home/lfs/lfs # 建立 base 目录
     $ sudo mount -v -t ext4 /dev/sdb /home/lfs/lfs # 挂载硬盘, 但这里仅单纯的新建目录也可以
     $ sudo chown -R lfs:lfs /home/lfs/lfs # 挂载后需修改所属
@@ -33,13 +36,14 @@
     MAKEFLAGS='-j 8' # 根据机器cpu配置
     export LFS LC_ALL LFS_TGT PATH MAKEFLAGS
     EOF
-    $ source ~/.bashrc # 使环境变量生效
+    $ exit
+    $ su - lfs
     $ env # 输出env并检查
     ```
 
 1. 环境/依赖检查
     1. `echo $SHELL`是否`bash`
-    1. `/bin/sh`和`/usr/bin/sh`是否指向`bash`, 否则通过`sudo dpkg-reconfigure bash`来修改
+    1. `/bin/sh`是否指向`bash`, 否则通过`sudo dpkg-reconfigure bash`来修改或重建ln
     1. `readlink -f /usr/bin/awk`是否`gawk`
     1. `readlink -f /usr/bin/yacc`是否`bsion`, 否则编译glic时会报错
 
@@ -145,7 +149,7 @@
 `ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/9.1.0` -> `ln -sfv /usr/libexec/gcc/x86_64-pc-linux-gnu/9.1.0`
 
 ## FAQ
-### Binutils, GCC编译了两遍
+### Binutils(链接器), GCC(编译器)编译了三遍
 为了构建交叉编译环境, 解除目标系统与宿主系统的关系. 比如:
 ```
 $ ldd /home/lfs/lfs/tools/bin/x86_64-lfs-linux-gnu-ar # 第一遍编译Binutils
@@ -165,16 +169,39 @@ Binutils, GCC, Glibc均设置了HOST,TARGET:
 - HOST=TARGET : 编译脚本就构建本地编译工具
 - HOST!=TARGET : 编译脚本就构建交叉编译工具, 指导宿主os上的工具链编译"运行在本机, 但是最后编译链接的程序/lib是运行在$TARGET上"的交叉二进制工具
 
+编译次数:
+1. Pass 1: 生成交叉工具Binutils, Freestanding GCC(它们运行在host, 生成代码是target), 它们会使用host /lib目录下的dynamic linker,这步仅是为了编译glic得到target glibc.
+2. Pass 2: 利用交叉工具Binutils编译target Binutils, 并[为第6章的 “重新调整” 阶段准备链接器](https://bf.mengyan1223.wang/lfs/zh_CN/development/chapter05/binutils-pass2.html). 再利用Pass1的target glibc编译生成全功能的hosted target GCC.
+3. Pass 2生成的target Binutils和GCC也是在host上编译, 因此再在chroot环境self compile一次,检查编译环境是否正常. 如果不打算在目标系统中安装编译工具链，这个就可以不做了.
+
+[交叉编译gcc时为什么一定要编译glibc](https://www.zhihu.com/question/41672814):
+为了解决“鸡和蛋”的循环依赖问题.
+
+1. 编译 glibc 需要目标一致的gcc
+编译运行 (--host=$TARGET) 在目标平台上的 glibc，需要 (--target=$TARGET) 设置一致的 gcc，而不是目标为本地的 gcc
+2. 编译完整版gcc需要glibc
+    1. 理论上，gcc不应该依赖于C库。但是，gcc 需要包含一些 glibc 的头文件来了解要支持哪些 C 库的特性
+    2. gcc 中也使用了一些C库的接口 (有现成的接口，谁还想再发明一遍轮子)
+    3. gcc 不光是编译器，它还包含了一些库，这些库依赖于 glibc.
+    
+freestanding 的gcc不需要依赖于glibc，所以用它先编译glibc，然后完整版的gcc就有了.
+
 ### 5.5. GCC-8.2.0 - 第一遍 报错`../.././gcc/libgcc.mvars: No such file or directory`
 编译gcc时，需要注意一个原则：不要再gcc的源码中直接执行./configure、make、make install等命令，需要在源码目录下另外新建一个目录，在新建的目录中执行以上命令.
 
-### 报错`x86_64-lfs-linux-gnu/bin/ld: cannot find /home/lfs/lfs/tools/lib/libc.so.6 inside /home/lfs/lfs`
-比如在编译Binutils时使用了`--prefix=$LFS/tools`, 即未将`$LFS/tools`软连接到`/tools`. 而导致`$LFS_TGT-gcc dummy.c`报错
+### 5.7. Glibc-2.29的`$LFS_TGT-gcc dummy.c`报错`x86_64-lfs-linux-gnu/bin/ld: cannot find crt1.o: No such file or directory`+`x86_64-lfs-linux-gnu/bin/ld: cannot find /home/lfs/lfs/tools/lib/libc.so.6 inside /home/lfs/lfs`
+之前编译Binutils,gcc,glibc时使用了`--prefix=$LFS/tools`, 即未将`$LFS/tools`软连接到`/tools`而导致报错.
+
+看了`x86_64-lfs-linux-gnu/bin/ld --verbose | grep SEARCH`的输出`有SEARCH_DIR("/home/lfs/tools/lib")`且也有`/home/lfs/lfs/tools/lib/crt1.o`, 怎么就找不到呢. 而且`/home/lfs/lfs/tools/lib/libc.so.6`也是存在的.
+看了` $LFS_TGT-gcc dummy.c -Wl,--verbose 2>&1 | grep succeeded`发现`attempt to open /home/lfs/home/lfs/tools/lib/libc.so.6 failed`
+
+> libc.so.6是glibc的软链接.
 
 参考[Can not hardcode library search path of binutils](https://unix.stackexchange.com/questions/350944/can-not-hardcode-library-search-path-of-binutils)
 
 解决方法:
-将`$LFS/tools`软连接到`/tools`, 具体原因未知.
+1. 将`$LFS/tools`软连接到`/tools`, 具体原因未知,应该是编译时不了解参数而配置错误(**推荐**, 毕竟参数组合太多, 编译又耗时).
+1. [执行`ln -s /home/lfs/lfs/tools/lib/crt*.o /home/lfs/lfs/tools/lib/gcc/x86_64-lfs-linux-gnu/8.2.0`后`crt1.o`错误消失](https://unix.stackexchange.com/questions/154083/how-to-provide-crt1-o-and-crti-o-for-lfs).
 
 ### bison : cannot stat 'examples/c/reccalc/scan.stamp.tmp': No such file or directory
 参考[bug#36238: Problems cross-compiling on core-updates](https://www.mail-archive.com/bug-guix@gnu.org/msg13512.html), 是并行编译问题, 使用`make -j1`即可.
