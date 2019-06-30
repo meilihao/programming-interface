@@ -201,7 +201,9 @@ freestanding 的gcc不需要依赖于glibc，所以用它先编译glibc，然后
 
 解决方法:
 1. 将`$LFS/tools`软连接到`/tools`, 具体原因未知,应该是编译时不了解参数而配置错误(**推荐**, 毕竟参数组合太多, 编译又耗时).
-1. [执行`ln -s /home/lfs/lfs/tools/lib/crt*.o /home/lfs/lfs/tools/lib/gcc/x86_64-lfs-linux-gnu/8.2.0`后`crt1.o`错误消失](https://unix.stackexchange.com/questions/154083/how-to-provide-crt1-o-and-crti-o-for-lfs).
+1. [执行`ln -s /home/lfs/lfs/tools/lib/crt*.o /home/lfs/lfs/tools/lib/gcc/x86_64-lfs-linux-gnu/8.2.0`后`crt1.o`错误消失](https://unix.stackexchange.com/questions/154083/how-to-provide-crt1-o-and-crti-o-for-lfs). 但`libc.so.6`错误无解
+
+    实在想修改`--prefix`的话, 可参考[clfs](http://clfs.org/view/clfs-embedded/arm/), 未尝试, **不推荐**.
 
 ### bison : cannot stat 'examples/c/reccalc/scan.stamp.tmp': No such file or directory
 参考[bug#36238: Problems cross-compiling on core-updates](https://www.mail-archive.com/bug-guix@gnu.org/msg13512.html), 是并行编译问题, 使用`make -j1`即可.

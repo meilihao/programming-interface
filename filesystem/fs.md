@@ -29,6 +29,10 @@
 
 `crw-rw-rw-  1 root tty       4,     3 6月  26 21:34 tty3`, `4`是主设备号, `3`是次设备号.
 
+实际上设备文件也分块设备文件(block special file) 和 字符设备文件(character special file).  块设备每次读取或写入一块数据(一组字节, 通常是512的倍数), 字符设备每次读取或写入一个字节.
+
+还有一种有设备驱动但没有实际设备的虚拟设备称为伪设备, 比如pty(伪tty), /dev/null, /dev/random等. 
+
 ## inode
 Linux 在生成文件的时候，内容会为每一个文件生成一个唯一的索引节点（Inode），文件的属性都会保存在这个Inode中.
 
@@ -106,3 +110,6 @@ func CheckErr(err error) {
 需永久挂载时可将信息保持到`/etcd/fstab`
 
 umount用于卸载文件系统, 但不能卸载正处于"busy"状态的文件系统, 此时可以使用`fuser -c /xxx`查找哪个进程在使用文件.
+
+## lost+found
+fsck(文件系统一致性检查工具)找到一个无法确定其父目录的文件时就会将其放入其中.
