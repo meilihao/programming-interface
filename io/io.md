@@ -17,5 +17,11 @@ $ cat /sys/block/sda/queue/scheduler
 noop deadline [cfq] # `[]`表示选中
 ```
 
+算法:
+- CFQ （Completely Fair Scheduler完全公平调度器）（cfq） ：它是许多 Linux 发行版的默认调度器；它将由进程提交的同步请求放到多个进程队列中，然后为每个队列分配时间片以访问磁盘.
+- Noop 调度器（noop） ： 基于先入先出（FIFO）队列概念的 Linux 内核里最简单的 I/O 调度器. 此调度程序最适合于 SSD.
+- 截止时间调度器（deadline） ： 尝试保证请求的开始服务时间, 力求将每次请求的延迟降到最低.
+
 参考:
 - [详解Linux 磁盘I/O优化（oracle RAC）]https://www.tuicool.com/articles/NFZZfqY
+- [如何更改 Linux I/O 调度器来调整性能 for ssd](https://linux.cn/article-8179-1.html), 修改后需更新grub: `sudo update-grub`.
