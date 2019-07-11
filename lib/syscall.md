@@ -10,6 +10,8 @@ glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提�
 > [linux x86的系统调用](linux-5.2/arch/x86/entry/syscalls/syscall_32.tbl)
 
 ## fork
+![](/images/5uugf8fxqg.png)
+
 创建进程
 
 在linux中, 新进程(即子进程, child process)由老进程(即父进程, parent process)fork而来.
@@ -18,6 +20,11 @@ glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提�
 
 有时候,父进程要留意子进程的运行情况, 通过系统调用waitpid即可,父进程将子进程的pid作为参数传给它,这样父进程就知道子进程运行结束与否了.
 完了没有,成功与否
+
+## clone
+在 Linux 下，通过 pthread_create 创建一个线程.
+
+![](/images/qvgisc7uyy.png)
 
 ## exec
 fork之后执行, 改变进程正在执行的程序正文, 把内存段重置为预先定义的初始状态等, 最后开始执行该新程序.
