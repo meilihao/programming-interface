@@ -1,6 +1,7 @@
 # 存储
 参考:
 - [阿里云分布式存储系统的研究与分享](https://blog.7street.top/2018/04/13/pangu/)
+- [浅谈分布式存储系统Pangu2.0——它让双11运维变得智能起来](https://segmentfault.com/a/1190000012526855)
 
 ## RAID
 Redundant Array of Indepent Disks (独立磁盘冗余阵列) 
