@@ -102,6 +102,9 @@ IP存储的优势：
 它是一种智能的通用接口标准，它具备与多种类型的外设进行通信的功能. SCSI采用ASPI（高级SCSI编程接口）的标准软件接口使驱动器和计算机内部安装的SCSI适配器进行通信.
 SCSI接口广泛应用于小型机上的高速数据传输技术。SCSI接口具有应用范围广、多任务、带宽大、CPU占用率低，以及热插拔等优点.
 
+> SAS(serial attached SCSI)是串行连接的SCSI,是新一代的SCSI技术，和现在流行的Serial ATA(SATA)硬盘相同，都是采用串行技术以获得更高的传输速度，并通过缩短连结线改善内部空间等.
+> 此接口的设计是为了改善存储系统的效能、可用性和扩充性，提供与串行ATA (Serial ATA，缩写为SATA)硬盘的兼容性.
+
 ### iSCSI
 参考:
 - [iSCSI存储技术全攻略](https://www.sansky.net/article/2007-12-03-iscsi-storage.html)
