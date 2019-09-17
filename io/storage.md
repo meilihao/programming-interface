@@ -48,10 +48,12 @@ Redundant Array of Indepent Disks (独立磁盘冗余阵列)
 
 一共有0~6一共7种，这其中RAID 0、RAID1、RAID 5和RAID6比较常用.
 
-![总结](https://img-blog.csdn.net/20160712135213243?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![总结](/images/io/20160712135213243.png)
+
+软raid是允许在操作系统之上, 因此系统盘无法设置成raid模式, 解决方法: raid卡.
 
 ### RAID 0
-![](https://img-blog.csdn.net/20160712135137243?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![](/images/io/20160712135137243.png)
 RAID 0的特点：
 - 最少需要2块磁盘
 - 数据条带式分布
@@ -60,7 +62,7 @@ RAID 0的特点：
 - 磁盘空间使用率：100%，成本最低
 
 ### RAID 1
-![](https://img-blog.csdn.net/20160712135148165?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![](/images/io/20160712135148165.png)
 RAID 1的特点：
 - 最少需要2块磁盘
 - 提供数据块冗余, 磁盘的利用率却只有50%，磁盘利用率最低，成本最高
@@ -77,7 +79,7 @@ RAID 1的特点：
 - 校验码集中在单独的一块磁盘
 
 ### RAID 5
-![](https://img-blog.csdn.net/20160712135201306?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![](/images/io/20160712135201306.png)
 RAID 5特点：
 - 最少3块磁盘
 - 数据条带形式分布
@@ -92,7 +94,7 @@ Raid6:
 相对于RAID 5有更大的`写损失`，因此`写性能`非常差.
 
 ### RAID 10
-![](https://img-blog.csdn.net/20160712135207894?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![](/images/io/20160712135207894.png)
 RAID 10(又叫RAID 1+0)特点：
 - 最少需要4块磁盘
 - 先按RAID 0分成两组，再分别对两组按RAID 1方式镜像, 安全性上RAID10要好于 RAID01
@@ -105,7 +107,7 @@ RAID 10(又叫RAID 1+0)特点：
 参考:
 - [存储相关知识-DAS/SAN/NAS](https://yq.aliyun.com/articles/467199)
 
-![](http://n.sinaimg.cn/translate/20170530/s8xI-fyfrfvv5160915.jpg)
+![](/images/io/s8xI-fyfrfvv5160915.jpg)
 NAS、SAN和DAS三者的目的相同：存储, 但是初衷、达成路径和结果也不相同.
 
 > 从NAS与SAN系统的角度来看，NAS用于文件I/O，SAN用于块I/O. 比较NAS与SAN时需要记住的另一件事是，NAS最终将文件I/O请求转换为与其相连的存储设备的块访问.

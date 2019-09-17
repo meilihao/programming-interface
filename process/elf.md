@@ -1,7 +1,16 @@
 # ELF
-ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行程序的格式, 可通过`readelf -a xxx`查看.
+参考:
+- [ELF Format](http://www.skyfree.org/linux/references/ELF_Format.pdf)
+- [Linux内核之ELF格式解析](https://mudongliang.github.io/2015/10/31/linuxelf.html)
+- [计算机那些事(4)——ELF文件结构](http://chuquan.me/2018/05/21/elf-introduce/)
+
+ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
 
 ![程序编译过程](/images/compile/1671100-20190512202937314-1323961004.jpg)
+
+![可执行程序的ELF](/images/process/v2-85a5b44f20d53e6e992269dccc20ac6b_1200x500.jpg)
+
+> 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
@@ -32,15 +41,8 @@ ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中�
 ### 可执行文件(Executable File)
 ELF 的第二种格式
 
-这个格式和.o 文件大致相似,还是分成一个个的 section,并且被节头表描述. 只不过这些
-section 是多个.o 文件合并过的. 但是这个文件已经是可以加载到内存里面执
-行的文件了,因而这些 section 被分成了需要加载到内存里面的代码段、数据段和不需要加载到
-内存里面的部分,**将小的 section 合成了大的段 segment**,并且在最前面加一个段头表
-(Segment Header Table). 在代码里面的定义为 `struct elf32_phdr 和 struct elf64_phdr`,这里
-面除了有对于段的描述之外,最重要的是 p_vaddr,这个是这个段加载到内存的虚拟地址. 在 ELF 头里面有一项 e_entry,也是个虚拟地址,是这个程序运行的入口
-
-![可执行程序的ELF](http://scand75.gz01.bdysite.com/l/?n=8&i=blog/1671100/201905/1671100-20190512203151552-476702079.jpg)
-
+这个格式和.o 文件大致相似,还是分成一个个的 section,并且被节头表描述. 只不过这些section 是多个.o 文件合并过的. 但是这个文件已经是可以加载到内存里面执行的文件了,因而这些 section 被分成了需要加载到内存里面的代码段、数据段和不需要加载到内存里面的部分,**将小的 section 合成了大的段 segment**,并且在最前面加一个段头表
+(Segment Header Table). 在代码里面的定义为 `struct elf32_phdr 和 struct elf64_phdr`,这里面除了有对于段的描述之外,最重要的是 p_vaddr,这个是这个段加载到内存的虚拟地址. 在 ELF 头里面有一项 e_entry,也是个虚拟地址,是这个程序运行的入口.
 
 基于动态连接库创建出来的二进制文件格式:
 - 多了一个.interp 的 Segment,这里面是 ld-linux.so,这是动态链接器, 即运行时的链接动作都是它做的
@@ -51,8 +53,7 @@ section 是多个.o 文件合并过的. 但是这个文件已经是可以加载�
 
 查找具体被调函数的方法: GOT也会为 被调 函数创建一项 GOT[y], 它是运行时 被调 函数在内存中真正的地址. 如果这个地址在, 程序 调用 PLT[x] 里面的代理代码,代理代码调用 GOT 表中对应项 GOT[y],调用的就是加载到内存中的 xxx.so 里面的 具体 函数了.
 
-GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的
-入口函数,这个函数会找到加载到内存中的 xxx.so 里面的 具体 函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
+GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的入口函数,这个函数会找到加载到内存中的 xxx.so 里面的 具体 函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
 
 ### 静/动态链接(Shared Object File)
 静态链接库一旦链接进去,代码和变量的 section 都合并了,因而程序运行的时候,就不依赖于这个库是否存在. 但是这样有一个缺点,就是相同的代码段,如果被多个程序使用的话,在内存里面就有多份,而且一旦静态链接库更新了,如果二进制执行文件不重新编译,也不随着更新.
@@ -79,7 +80,7 @@ sys_execve -> do_execve -> load_elf_binary -> 具体程序
 
 使用进程实现并行执行的问题:
 1. 创建进程占用资源太多
-1. 进程之间的通信需要数据在不同的内存空间传来传去, 共享起来复杂
+2. 进程之间的通信需要数据在不同的内存空间传来传去, 共享起来复杂
 
 线程的数据:
 1. 线程栈上的本地数据 : 栈的大小可以通过命令 ulimit -a 查看,默认情况下线程栈大小为 8192(8MB); 也可通过`pthread_attr_setstacksize()`修改

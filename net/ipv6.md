@@ -16,7 +16,7 @@ IPv6（IP version 6）是为了根本解决 IPv4 地址耗尽的问题而被标�
 其中,`扩展报头+上层协议数据单元`称为`有效载荷`.
 
 ### 报头
-![IPv6 Fixed Header](https://7n.w3cschool.cn/attachments/tuploads/ipv6/IPv6_header.jpg)
+![IPv6 Fixed Header](/images/net/IPv6_header.jpg)
 
 IPv6固定报头长度为40字节，8个字段,包含以下信息:
 1. 版本(version:4b):表示Internet协议的版本，即0110=6
@@ -35,7 +35,7 @@ IPv6固定报头长度为40字节，8个字段,包含以下信息:
 > ipv4有选项字段,因此其报头长度可变;ipv6选项由扩展报头处理,因此长度固定.
 
 ### 扩展报头
-![RFC 2460定义的必须支持的扩展报头](https://7n.w3cschool.cn/attachments/tuploads/ipv6/extension_headers.jpg)
+![RFC 2460定义的必须支持的扩展报头](/images/net/ipv6_extension_headers.jpg)
 
 1. 逐跳扩展头（Hop-by-Hop option）:代码是0。用来携带一些可选信息，数据包所经由的路径上的所有路由器**都必须**处理该可选信息。可选信息的结构包括可选数据类型、可选数据长度和可选数据3部分。RFC2460附录B介绍了如何定义可选数据结构。
 1. 目标扩展头（Destination option）：代码是60。用来携带那些仅需要数据包目的地节点处理的可选信息。可选信息的结构包括可选数据类型、可选数据长度和可选数据3部分。
@@ -48,11 +48,11 @@ IPv6固定报头长度为40字节，8个字段,包含以下信息:
 
 扩展报头的顺序:
 
-![扩展报头的顺序](https://7n.w3cschool.cn/attachments/tuploads/ipv6/extension_headers_sequence.jpg)
+![扩展报头的顺序](/images/net/ipv6_extension_headers_sequence.jpg)
 
 上图中上标注释:
 1. 应由第一个和后续目的地处理。
-1. 应由最终目的地处理。
+2. 应由最终目的地处理。
 
 ## ICMPv6
 ICMPv6包有类型（Type:1B），代码（Code:1B），校验和（Checksum:2B）和消息体（Message Body）等几个字段,分类:
