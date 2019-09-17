@@ -29,7 +29,7 @@
 - [从linux源码看epoll](https://www.jishuwen.com/d/2dNT)
 
 ### 基于 TCP 协议的 Socket 函数调用过程:
-![](/images/net/v2-067f27c436ae555b059c4a0792e556a1_hd.jpg)
+![](/misc/img/net/v2-067f27c436ae555b059c4a0792e556a1_hd.jpg)
 
 在内核中,为每个 Socket 维护两个队列: 
 1. 一个是已经建立了连接的队列,这时候连接三次握手已经完毕,处于 established 状态
@@ -38,7 +38,7 @@
 默认情况，内核会认为socket函数创建的套接字是主动套接字（active socket），它存在于一个连接的客户端. 而服务器调用listen函数告诉内核，该套接字是被服务器而不是客户端使用的，即listen函数将一个主动套接字转化为**监听socket**. 监听套接字可以接受来自客户端的连接请求. 服务器通过accept函数等待来自客户端的连接请求到达监听套接字, 处理后返回一个**已连接socket**.
 
 socket内核描述:
-![](/images/net/qsrseeds2x.png)
+![](/misc/img/net/qsrseeds2x.png)
 
 每一个进程都有一个数据结构 task_struct，里面指向一个文件描述符数组fds，来列出这个进程打开的所有文件的文件描述符. 该数组中的内容是一个指针，指向内核中所有打开的文件列表, 而每个文件也会有一个 inode（索引节点）.
 
@@ -64,7 +64,7 @@ socket内核描述:
 1. IO 多路复用, select(轮循)到epoll(事件通知)
     epoll在内核中的实现不是通过轮询的方式,而是通过注册 callback 函数的方式,当某个文件描述符发送变化的时候,就会主动通知.
 
-    ![](/images/net/zqugepbmve.png)
+    ![](/misc/img/net/zqugepbmve.png)
 
     epoll_create 创建一个 epoll 对象,也是一个文件,也对应一个文件描述符,同样也对应着打开文件列表中的一项. 在这项里面有一个红黑树,在红黑树里,要保存这个 epoll要监听的所有 Socket.
 
@@ -73,7 +73,7 @@ socket内核描述:
     这种通知方式使得监听的 Socket 数据增加的时候,效率不会大幅度降低,能够同时监听的 Socket 的数目也非常的多了, 上限就为系统定义的进程打开的最大文件描述符个数. 因而,epoll 被称为解决C10K 问题的利器
 
 ### 基于 UDP 协议的 Socket 程序函数调用过程
-![](/images/net/qofe1t7ocm.png)
+![](/misc/img/net/qofe1t7ocm.png)
 
 UDP 是没有连接的,所以不需要三次握手,也就不需要调用 listen 和 connect,但是,UDP 的的交互仍然需要 IP 和端口号,因而也需要 bind. 同样因为UDP 是没有维护连接状态的,因而不需要每对连接建立一组 Socket,而是只要有一个 Socket就能够和多个客户端通信.
 

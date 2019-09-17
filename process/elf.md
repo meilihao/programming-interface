@@ -6,9 +6,9 @@
 
 ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
 
-![程序编译过程](/images/compile/1671100-20190512202937314-1323961004.jpg)
+![程序编译过程](/misc/img/compile/1671100-20190512202937314-1323961004.jpg)
 
-![可执行程序的ELF](/images/process/v2-85a5b44f20d53e6e992269dccc20ac6b_1200x500.jpg)
+![可执行程序的ELF](/misc/img/process/v2-85a5b44f20d53e6e992269dccc20ac6b_1200x500.jpg)
 
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 
@@ -36,7 +36,7 @@ ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中�
 
 > .data与.bss没有本质区别, 都是用于存放静态变量, 只是.data是已初始化过的静态数据, 而.bss程序是运行时会分配空间并置零的静态数据.
 
-![.o文件的ELF](/images/compile/1671100-20190512203047832-334199166.jpg)
+![.o文件的ELF](/misc/img/compile/1671100-20190512203047832-334199166.jpg)
 
 ### 可执行文件(Executable File)
 ELF 的第二种格式

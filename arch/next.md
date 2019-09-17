@@ -10,13 +10,13 @@
   Nitro系统的主要职责，它将存储、网络、管理和安全能力都offload到专有的硬件之上，免去了与通用计算设备抢占资源的各种麻烦，节省资源的同时提升效率.
 
   有无Nitro架构上发生的变化:
-  ![](/images/arch/279072a9d5c1422c94a495997a59b884.jpeg)
+  ![](/misc/img/arch/279072a9d5c1422c94a495997a59b884.jpeg)
 
   实际实现中，Nitro分为三大方向，彼此相互独立:
   - NitroHypervisior：专有硬件(ASIC芯片)上承载hypervisior(基于KVM的Hypervisior)，实现近似裸机服务器的性能表现
     直接接管原本需要在CPU上运行的Hypervisor做的事
   - NitroCards：专有硬件承载存储、网络功能，以及控制EC2实例的业务逻辑.
-    ![](/images/arch/79d2775165d246078905972ebb94c0d4.jpeg)
+    ![](/misc/img/arch/79d2775165d246078905972ebb94c0d4.jpeg)
     Nitro Card 控制器是一个大管家，可以管理Nitro的Hypervisior、存储、网络以及安全功能. AWS通过它在后台进行系统管理, 比如:
     1. 充当NVMe控制器的角色，从Hypervisior做offload.
     1. VPC网络方面，Nitro card充当网卡、ENA控制器的角色，是具备SDN功能的专有硬件. 同样从Hypervisior做offload，让服务器CPU无需预留资源处理网络事务
@@ -24,11 +24,11 @@
 
 - Aliyun的`X-Dragon架构`
 
-  ![](/images/arch/25c7936befd17a4230afacb6bae45164fcc35ef2.png)
+  ![](/misc/img/arch/25c7936befd17a4230afacb6bae45164fcc35ef2.png)
 
-  ![](/images/arch/09148045f2d6738deba330df18df6ff4dda9d696.png)
+  ![](/misc/img/arch/09148045f2d6738deba330df18df6ff4dda9d696.png)
 
-  ![](/images/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
+  ![](/misc/img/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
 
 ### 指令集
 AVX 512指令集强化的向量和浮点计算

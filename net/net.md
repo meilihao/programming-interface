@@ -3,9 +3,9 @@
 - [太厉害了，终于有人能把TCP/IP协议讲的明明白白了](http://developer.51cto.com/art/201906/597961.htm)
 - [wireshark使用教程及过滤语法总结](https://www.zhoulujun.cn/html/theory/network/2016_1130_7908.html)
 
-![全协议关系图](/images/net/network_protocal_all.png)
-![TCP/IP协议关系图](/images/net/tcpip_protocal_r.png)
-![protocols](/images/net/protocols.pdf)
+![全协议关系图](/misc/img/net/network_protocal_all.png)
+![TCP/IP协议关系图](/misc/img/net/tcpip_protocal_r.png)
+![protocols](/misc/img/net/protocols.pdf)
 [TCP/IP详解 卷1：协议](http://www.52im.net/topic-tcpipvol1.html)
 
 计算机网络就是将多个独立工作的计算机系统通过通信线路相互连接构成的集合, 即其由计算机设备, 网络设备, 传输介质以及支持这些硬件的软件组成.
@@ -48,11 +48,11 @@ vpn(virtual private network)是在公用网络上建立虚拟私有网的技术.
 端到端: 两个终端系统的连接, 中间经过至少一个路由器.
 
 ### 分层结构
-![OSI(Open System Interconnect, 开放系统互连参考模型) vs TCP/IP model](/images/net/OSI-vs-TCP-IP-model.jpg)
-![OSI, TCP/IP, protocol](/images/net/tcp_ip_layers.png)
-![各层数据封装,像俄罗斯套娃](/images/net/package_layers.png)
-![各层数据封装2](/images/net/packet_layer2.png)
-![各层硬件](/images/net/tcp_ip_hardware.png)
+![OSI(Open System Interconnect, 开放系统互连参考模型) vs TCP/IP model](/misc/img/net/OSI-vs-TCP-IP-model.jpg)
+![OSI, TCP/IP, protocol](/misc/img/net/tcp_ip_layers.png)
+![各层数据封装,像俄罗斯套娃](/misc/img/net/package_layers.png)
+![各层数据封装2](/misc/img/net/packet_layer2.png)
+![各层硬件](/misc/img/net/tcp_ip_hardware.png)
 
 > 分层(是计算机领域的常用技巧)是为了隔离, 过分层划分职能, 解问题, 与层之间约定接口, 蔽实现细节. 每个分层在发送时都会对所发送的数据附加一个包首部, 本层协议解读提供的必要信息, 发送的目标地址以及协议相关信息, 而从上一层收到的内容被认为是本层的数据.
 > ISO七层是理论, TCP/IP四层是实践
@@ -90,7 +90,7 @@ vpn(virtual private network)是在公用网络上建立虚拟私有网的技术.
 交换机是通过 MAC 头部中的接收方 MAC 地址来判断转发目标的, 而路由器则是根据 IP 头部中的 IP 地址来判断的.
 
 #### l2 交换机
-![二层交换原理](/images/net/l2_switch.png)
+![二层交换原理](/misc/img/net/l2_switch.png)
 交换机(二层)是**基于以太网设计的, 工作在数据链路层**, 是将以太网连接形成更大的以太网.
 
 交换机端口的 **MAC 模块不具有 MAC 地址**, 它会根据帧中的目的MAC查 CAM表(MAC与交换机端口的映射表), 后将信号发送到相应的端口.
@@ -116,10 +116,10 @@ MAC 地址是一个局域网内才有效的地址. 因而,MAC 地址只要过网
 ip是网络层使用的, mac是链路层使用的, ip包最终还是要通过物理链接进行交互的即通过mac地址.
 
 数据包传输过程中MAC地址以及IP地址的变化情况:
-![](/images/net/b6c31475059204.png)
+![](/misc/img/net/b6c31475059204.png)
 
 ### frame
-![frame](/images/net/frame.png)
+![frame](/misc/img/net/frame.png)
 每个包的前面都有报头和起始帧分界符（SFD）, 头用来测定时机, FD 用来确定帧的起始位置.
 
 > 制定以太网标准的组织 IEEE 出于历史原因使用了“帧”而不是“包”, 此在以太网术语中都是说“帧”,可以认为两者等价.
@@ -172,7 +172,7 @@ IP 头部格式见<<网络是怎样连接的>>表2.2
 
 ## ip协议
 IP 数据包结构(不包括选项字段的 IP 头部长度为 20B, 仅了解, **重点关注ipv6**):
-![](/images/net/ip_package.png)
+![](/misc/img/net/ip_package.png)
 各字段的含义：
 - 4 位版本号，指协议版本号，值为4代表 IPv4
 - 4 位首部长度，每一个计量单位是 32bit（4 byte），指的是包括选项字段在内的 IP 首部长度，由于是 4bit，所以 **IP 首部最长只能是 60 字节（15 * 4）**
@@ -274,7 +274,7 @@ Linux 首先会判断目标地址和本机是否同一网段(通过CIDR和子网
 > 续租是在租期过去 50%的时候进行.
 
 预启动执行环境(PXE, Pre-boot Execution Environment)工作过程:
-![](/images/net/1533816393401474.png)
+![](/misc/img/net/1533816393401474.png)
 
 1. 启动 PXE 客户端. 第一步是通过 DHCP 协议向 DHCP Server请求地址. DHCP Server 便租给它一个 IP 地址,同时也给它 PXE 服务器的地址、启动文件 `pxelinux.0`.
 1. PXE 客户端知道要去 PXE 服务器下载这个文件后就可以初始化机器, 下载过程通过TFTP 协议.
@@ -458,7 +458,7 @@ tcp/udp存在伪首部原因:
 
 ## udp
 UDP 数据段结构:
-![](/images/net/776043-20170901104150312-2127518303.png)
+![](/misc/img/net/776043-20170901104150312-2127518303.png)
 
 有边界理解:
 1. 发送方的UDP对应用程序交下来的报文，在添加首部后就向下交付给IP层, **既不拆分，也不合并，而是保留这些报文的边界**，因此，应用程序需要选择合适的报文大小
@@ -466,7 +466,7 @@ UDP 数据段结构:
 
 ## tcp
 TCP 数据段结构(不计算选项字段，TCP 首部的长度为 20B):
-![](/images/net/tcp_segment.png)
+![](/misc/img/net/tcp_segment.png)
 各字段的含义如下：
 - 16 位源端口与目标端口号，用于标识发送端应用程序和接收端应用程序
 - 32 位序号，无符号数，用来标识从 TCP 发送端向 TCP 接收端发送的数据字节流，为**解决乱序**问题. 它表示在这个报文段中的的第一个数据字节的顺序，简单的可理解为对发送的数据（这个数据不一定是指数据字段的数据，比如建立连接时 SYN 字段设置为 1，也会消耗一个计数）按 byte 进行循环计数. 起始序号是随着时间变化的.
@@ -485,8 +485,8 @@ TCP 数据段结构(不计算选项字段，TCP 首部的长度为 20B):
 - 选项字段，最常见的可选字段是最长报文大小，又称为 MSS (Maximum Segment Size). 每个连接方通常都在通信的**第一个报文段（为建立连接而设置 SYN 标志的那个段）中指明这个选项**. 它指明本端所能接收的最大长度的报文段.
 
 
-![tcp握手/挥手/状态](/images/net/tcp_status.jpg)
-![tcp状态转换](/images/net/tcp_status_change.jpg)
+![tcp握手/挥手/状态](/misc/img/net/tcp_status.jpg)
+![tcp状态转换](/misc/img/net/tcp_status_change.jpg)
 
 实验环境:
 ```bash
@@ -504,7 +504,7 @@ $ nc localhost 9000
 > 确认应答（ACK）: 在 TCP 中, 发送端的数据到达接收端时, 收端会返回的已收到消息的通知
 
 ### 三次握手
-![TCP连接的建立](/images/net/tcp_connect_handle.png)
+![TCP连接的建立](/misc/img/net/tcp_connect_handle.png)
 
 1. 第一次握手：建立连接. 
     client发送连接请求报文段, 将SYN位置为1, Sequence Number(随机)为x；然后, client进入SYN_SEND状态, 等待服务器的确认
@@ -522,7 +522,7 @@ $ nc localhost 9000
 由三次握手可以看出, 服务器收到 SYN 数据报文段后将为连接分配资源, 果服务器没有收到 ACK 报文段就会造成半开连接, 费服务器资源. SYN 洪水攻击就是利用 TCP 的这个缺陷, 过向服务器发送海量的 SYN 报文段而耗尽服务器资源. 详见[TCP洪水攻击（SYN Flood）的诊断和处理](https://cloud.tencent.com/developer/article/1115567)
 
 ### 四次分手
-![TCP连接的释放](/images/net/tcp_close_handle.png)
+![TCP连接的释放](/misc/img/net/tcp_close_handle.png)
 
 1. 第一次分手：主机1（假定主机1为发起方）, 设置Sequence Number和Acknowledgment Number, 向主机2发送一个FIN报文段(表示没有数据要发送)；此时, 主机1进入FIN_WAIT_1状态
 2. 第二次分手：主机2收到了主机1发送的FIN报文段, 再向主机1回一个ACK报文段, Acknowledgment Number为Sequence Number加1, 之后进入CLOSE_WAIT状态；主机1收到ACK进入FIN_WAIT_2状态(tcp_fin_timeout可处理FIN_WAIT_2超时)；主机2告诉主机1, 同意你的关闭请求
@@ -531,7 +531,7 @@ $ nc localhost 9000
 至此, TCP的四次分手就这么愉快的完成了
 
 > 上方介绍的是一方主动关闭, 一方被动关闭的情况, 际中还会出现双方同时发送FIN+ACK进行主动关闭的情况.
-> ![tcp同时关闭](/images/net/tcp_close_two.jpg)
+> ![tcp同时关闭](/misc/img/net/tcp_close_two.jpg)
 
 为什么建立连接协议是三次握手, 而关闭连接却是四次握手呢? **tcp是全双工, 双方都要相互确认终止发送数据(即tcp的半关闭特性half-close)**,主机2收到FIN时可能还需要发送一些数据给对方, 这也是主机2的FIN和其响应主机1的FIN的ACK不能同时发送的原因.
 
@@ -577,7 +577,7 @@ TCP通过检验和、序列号、确认应答、重发控制、连接管理以�
 
 选择性确认(SACK): TCP确认机制中，处理非连续TCP片段的机制.
 
-![序列号和确认应答](/images/net/sequence_ack.jpg)
+![序列号和确认应答](/misc/img/net/sequence_ack.jpg)
 
 #### 重发超时的确定即自适应重传算法(Adaptive Retransmission Algorithm)
 1. 重发超时是指在重发数据之前, 等待确认应答到来的那个特定时间间隔. 如果超过这个时间仍未收到确认应答, 发送端将进行数据重发. 最理想的是, 取到一个最小时间, 能保证"确认应答一定能在这个时间段内返回. 
@@ -596,17 +596,17 @@ TCP 以1个段为单位，每发送一个段进行一次确认应答的处理. �
 
 为解决这个问题，TCP 引入了窗口这个概念. 确认应答不再是以每个分段，而是以更大的单位进行确认，转发时间将会被大幅地缩短. 即发送端主机在发送了一个段以后不必要一直等待确认应答，而是继续发送.
 
-![窗口控制](/images/net/tcp_window.jpg)
+![窗口控制](/misc/img/net/tcp_window.jpg)
 
 > 窗口大小就是指无需等待确认应答而可以继续发送数据的最大值. 上图中窗口大小为4个段. 这个机制实现了使用大量的缓冲区，通过对多个段同时进行确认应答的功能.
 > 接收方收到不连续序号时会先缓存数据到`接收窗口`待完整后提交给应用, 即仅将`接收窗口`中有效的连续的部分提交给应用.
 
-![滑动窗口控制](/images/net/tcp_window_move.jpg)
+![滑动窗口控制](/misc/img/net/tcp_window_move.jpg)
 
 发送端窗口:
-![](/images/net/iwAsj.png)
+![](/misc/img/net/iwAsj.png)
 接收端窗口:
-![](/images/net/VYsJH.png)
+![](/misc/img/net/VYsJH.png)
 
 - 上图中的窗口内的数据即便没有收到确认应答也可以被发送出去. 不过，在整个窗口的确认应答没有到达之前，如果其中部分数据出现丢包，那么发送端仍然要负责重传. 为此，发送端主机需要设置缓存保留这些待被重传的数据，直到收到他们的确认应答.
 - 在滑动窗口以外的部分包括未发送的数据以及已经确认对端已收到的数据. 当数据发出后若如期收到确认应答就可以不用再进行重发，此时数据就可以从缓存区清除.
@@ -614,11 +614,11 @@ TCP 以1个段为单位，每发送一个段进行一次确认应答的处理. �
 
 窗口控制中的重发控制在使用窗口控制中， 出现丢包一般分为两种情况
 1. 部分确认应答丢失
-    ![部分确认应答丢失](/images/net/tcp_window_ack_lost.jpg)
+    ![部分确认应答丢失](/misc/img/net/tcp_window_ack_lost.jpg)
     因为接收端只对连续接收的数据段进行确认. 发送方收到`6001`即可认为1~6000都以接收即累计确认或者累计应答(cumulative acknowledgment), 可忽略丢失的`1001`和`3001`
 1. 某个报文段丢失的情况
 接收主机如果收到一个自己应该接收的序列号以外的数据时，会针对当前为止收到数据返回确认应答. 如下图所示，当某一报文段丢失后，发送端会一直收到序号为1001的确认应答，因此，在窗口比较大，又出现报文段丢失的情况下，同一个序列号的确认应答将会被重复不断地返回. 而发送端主机如果连续3次收到同一个确认应答，就会将其对应的数据进行重发. 这种机制比之前提到的超时管理更加高效，因此也被称为高速重发控制.
-![高速重发控制](/images/net/tcp_window_resend_fast.jpg)
+![高速重发控制](/misc/img/net/tcp_window_resend_fast.jpg)
 
 > 拥塞窗口cwnd和滑动窗口rwnd共同控制发送的速度: LastByteSent - LastByteAcked <= min {cwnd, rwnd}
 

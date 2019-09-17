@@ -8,7 +8,7 @@
 - 寄存器
 - 内存引用
 
-![操作数格式](/images/register_value_format.png)
+![操作数格式](/misc/img/register_value_format.png)
 
 `subq $8 %rsp // align stack frame`: 为了让栈顶(%rsp)16位对齐, 因为在64位Linux机器上，要求函数调用前%rsp是16位对齐的, 这是由arch的ABI(Application Bianry Interface)对齐要求决定的, 阅读时可忽略, 也可通过GNU的`-mpreferred-stack-boundary`选项调整(**不推荐**).
 
@@ -40,7 +40,7 @@ popq	%rbp  // = `movq (%rsp), %rbp`(读数据)+`addq $8, %rsp`
 ```
 
 ### 算术和逻辑操作
-![算术和逻辑操作](/images/register_integer_operate.png)
+![算术和逻辑操作](/misc/img/register_integer_operate.png)
 
 sal和shl是一样的，因为左移不会涉及符号位
 计算时会设置eflags.
@@ -51,7 +51,7 @@ leaq指令 ： leaq Src, Dst : 直接将有效地址（即：把括号内的值�
     leaq 7(%rdi, %rsi, 4), %rax // offset(base, index, width) = %rsi * 4 + %rdi + 7
 
 ### 特殊算术操作
-![特殊算术操作](/images/register_special_value.png)
+![特殊算术操作](/misc/img/register_special_value.png)
 
 mulq/imulq(乘法)要求一个参数必须在%rax中, 另一个数是源操作数, 将乘积的高64位存在%rdx中，低64位存在%rax中.
 divq/idivq(除法)会把R[%rdx]:R[%rax]作为被除数（128位），S为除数，将结果的商存在%rax中，余存在%rdx中
@@ -91,11 +91,11 @@ setbe D	setna	D <– CF | ZF	无符号<=
 ### 跳转指令
 `jmp`切换到程序的另一个位置开始执行, 常与lable联用
 
-![jump指令](/images/asm_jmp.png)
+![jump指令](/misc/img/asm_jmp.png)
 
 用条件传送实现的条件分支比用条件控制实现的高效: 现代硬件对条件传送的分支预测更准确.
 
-![条件传送](/images/asm_cmovX.png)
+![条件传送](/misc/img/asm_cmovX.png)
 
 ### 转移控制
 call + ret
