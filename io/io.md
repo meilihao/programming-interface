@@ -27,14 +27,15 @@ io的通路是总线, 目前最新标准是PCIe 5.0.
 
 ![](/misc/img/io/20190320001938378.png)
 
+> 追加写使用 buffered io有优势(os可以将写io合并成更大的io).
 
 具体分类:
 - 同步io
 
-  当前一个IO真正完成后，后一个IO才可以发出. 如posix的read, write等系统调用.
+  向os发起io请求后一直处于阻塞状态, 直到os将io结果返回. 即当前一个IO真正完成后，后一个IO才可以发出. 如posix的read, write等系统调用.
 - 异步io
 
-  每个IO请求，是否完成，都不会影响后续IO的发出. 如glibc的aio，以及linux的libaio等.
+  向os发起io请求后os立即返回一个"已接受"信号, 此时发起者还可继续执行后续代码. 即每个IO请求，是否完成，都不会影响后续IO的发出. 如glibc的aio，以及linux的libaio等.
 - 阻塞/非阻塞io
 
   阻塞: 一直等到io操作完成为止
@@ -63,6 +64,8 @@ io的通路是总线, 目前最新标准是PCIe 5.0.
 
 > IOPS=(Queue Depth）/（IO latency)
 
+- iowait : os接受io请求到完成的时间
+
 # 文件描述符
 一个非负整数,kernel用来标识一个特定进程正在使用的文件.
 
@@ -77,9 +80,13 @@ io的通路是总线, 目前最新标准是PCIe 5.0.
 - I/O Buffer 大小 8192 : unix环境高级编程v3 图3-6 linux上用不同缓存长度进行读操作的时间结果
 
 ## 磁盘IO调度算法
+io scheduler是linux下专用来对io进行优化的模块, 所有针对底层存储设备的io都要经过它的优化操作, 然后将优化后的io顺序放入底层存储控制器驱动的queue中.
+
 ```bash
 $ cat /sys/block/sda/queue/scheduler
 noop deadline [cfq] # `[]`表示选中
+$ cat /sys/block/sda/queue/nr_requests # 调度器的队列深度, 越大io优化效果越好, 但每个io延迟会随之升高
+254
 ```
 
 算法:
@@ -87,6 +94,11 @@ noop deadline [cfq] # `[]`表示选中
 - Noop 调度器（noop） ： 基于先入先出（FIFO）队列概念的 Linux 内核里最简单的 I/O 调度器. 此调度程序最适合于 SSD.
 - 截止时间调度器（deadline） ： 尝试保证请求的开始服务时间, 力求将每次请求的延迟降到最低.
 
+> 对于使用外部存储系统的机器, 使用cfq即可, 因为外部存储控制器越来越智能, 更适合优化io.
+
 参考:
 - [详解Linux 磁盘I/O优化（oracle RAC）]https://www.tuicool.com/articles/NFZZfqY
 - [如何更改 Linux I/O 调度器来调整性能 for ssd](https://linux.cn/article-8179-1.html), 修改后需更新grub: `sudo update-grub`.
+
+## 工具
+iostat
