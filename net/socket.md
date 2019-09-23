@@ -1,4 +1,5 @@
 # socket
+socket是通过标准的unix文件描述符和其他的程序进行通信的一种方法.
 
 - socket.connect() 是通信双方交换控制信息, 尝试建立一个连接
     通信操作中使用的控制信息分为两类:
@@ -18,10 +19,23 @@
 
 > 在传输层, TCP 协议是基于数据流的,所以设置为SOCK_STREAM,而 UDP 是基于数据报的,因而设置为 SOCK_DGRAM
 
+> socket.listen用两个队列实现，一个SYN队列（或半连接队列）和一个accept队列（或完整的连接队列）: 处于SYN RECEIVED状态的连接被添加到SYN队列，并且当它们的状态改变为ESTABLISHED时，即当接收到3次握手中的ACK分组时，将它们移动到accept队列. 在这种情况下，listen syscall的backlog参数表示accept队列的大小. SYN队列的长度可以使用`/proc/sys/net/ipv4/tcp_max_syn_backlog`设置.
+
 端口分类:
-- 保留端口: 0~1023
+- 保留端口: 0~1023, 可通过`/etc/services`查看
 - 动态分配端口(也叫非特权端口): > 1024
 - 注册端口: > 1024
+
+## 分类
+1. 流式socket(SOCK_STREAM) : tcp
+
+   提供可靠的, 面向连接的通信流
+1. 数据报socket(SOCK_DGRAM) : udp
+
+   无连接的通信, 数据通过相互独立的报文进行传输, 是无序的, 且保证可靠, 无差错.
+1. 原始socket
+
+   主要用于协议的开发, 可以进行比较底层的操作, 很少用到.
 
 ## 原理
 参考:
@@ -87,3 +101,25 @@ UDP 是没有连接的,所以不需要三次握手,也就不需要调用 listen 
 1. epoll 和 select 都是 I/O 多路复用的技术,都可以实现同时监听多个 I/O 事件的状态
 1. epoll 相比 select 效率更高,主要是基于其操作系统支持的 I/O事件通知机制, 而 select 是基于轮询机制
 1. epoll 支持水平触发和边沿触发两种模式
+
+### socket io
+与文件io略有不同, 分为
+- 阻塞 : 与文件io相同
+- 非阻塞 : 与文件io相同
+- io多路复用
+
+  `select()/poll()/epoll`
+- 信号驱动io(SIGIO)
+
+  内核：I/O能用了
+　进程：接收到I/O能用的消息并执行接下来的操作
+
+  cpu利用率很高
+- 异步io
+
+  内核：等待这个I/O有消息了，接收到数据
+　进程：从缓存中得到数据
+
+异步io与信号驱动io的区别:
+1. 信号驱动io下, kernel在数据到达时向应用发送SIGIO信号, 应用收到信号后将数据从kernel复制到应用.
+1. 异步io下, kernel在所有操作(包括data从kernel复制到用户缓存区)都已经被内核完成后才会通知应用程序.
