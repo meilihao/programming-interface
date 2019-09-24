@@ -79,6 +79,17 @@ longjmp不返回.
 ## dup2
 与`close`和`dup`的联动操作类似, 但保证了操作的独立性和完整性,不会被外来信号打断.
 
+## open
+打开文件, 返回文件描述符
+
+flags:
+- O_CREAT : 必要时创建文件
+- O_TRUNC : 清空文件
+- O_APPEND : 已追加方式打开文件
+- O_RDONLY : 只读打开
+- O_WRONLY : 只写打开
+- O_RDWR : 读写打开
+
 ## 限制值
 参考[unix环境高级编程 - 2.5.4 函数sysconf、 pathconf 和fpathconf]
 

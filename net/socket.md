@@ -5,7 +5,7 @@ socket是通过标准的unix文件描述符和其他的程序进行通信的一�
     通信操作中使用的控制信息分为两类:
     1. 头部(以太网头部, IP头部, TCP头部等)中记录的信息
     2. 套接字（协议栈中的内存空间）中记录的信息
-- socket.bind() : 为新建的socket绑定一个本地网络地址.
+- socket.bind() : 为新建的socket绑定ip和port.
 - socket.listen() : 为新socket分配缓存空间, 并给出队列大小
 - socket.accept() : 阻塞调用方, 直到有连接进入
     新连接进来时socket调用accept原语创建一个新socket并返回一个与其关联的文件描述符, 旧socket继续监听.
@@ -13,7 +13,7 @@ socket是通过标准的unix文件描述符和其他的程序进行通信的一�
 - socket.recv() : 从socket接收数据
 - socket.close() : 释放socket
 
-> 网络字节序是大端序
+> 网络字节序(Network Byte Order)是大端序
 
 > 在网络层, Socket 函数需要指定到底是 IPv4 还是 IPv6,分别对应设置为 AF_INET 和 AF_INET6
 
@@ -26,16 +26,58 @@ socket是通过标准的unix文件描述符和其他的程序进行通信的一�
 - 动态分配端口(也叫非特权端口): > 1024
 - 注册端口: > 1024
 
-## 分类
+## 类型
+socket类型即数据传输方式, 也是socket 传输层的协议.
+
 1. 流式socket(SOCK_STREAM) : tcp
 
-   提供可靠的, 面向连接的通信流
+   提供可靠的, 面向连接的有序通信流
 1. 数据报socket(SOCK_DGRAM) : udp
 
    无连接的通信, 数据通过相互独立的报文进行传输, 是无序的, 且保证可靠, 无差错.
 1. 原始socket
 
    主要用于协议的开发, 可以进行比较底层的操作, 很少用到.
+
+## 协议族(protocol family)
+协议族(protocol family) 即 socket ip层的通信协议, from `sys/socket.h`:
+- PF_INET : ipv4协议族
+- PF_INET6 : ipv6协议族
+- PF_LOCAL : 本地通信的UNIX协议族
+- PF_PACKET : 底层socket的协议族
+
+## socket可选项
+- IPPROTO_IP : ip相关可选项
+- IPPROTO_TCP : tcp相关可选项
+- SOL_SOCKET : socket相关可选项
+  
+  - SO_RCVBUF : 输入缓冲大小
+  - SO_SNDBUF : 输出缓冲大小
+  - SO_REUSEADDR : 与time-wait状态相关
+
+## socket io
+![几种IO模式比较](/misc/img/net/20180202171329716.png)
+
+与文件io略有不同, 分为
+- 阻塞 : 与文件io相同
+- 非阻塞 : 与文件io相同
+- io多路复用
+
+  `select()/poll()/epoll`
+- 信号驱动io(SIGIO)
+
+  内核：I/O能用了
+　进程：接收到I/O能用的消息并执行接下来的操作
+
+  cpu利用率很高
+- 异步io
+
+  内核：等待这个I/O有消息了，接收到数据
+　进程：从缓存中得到数据
+
+异步io与信号驱动io的区别:
+1. 信号驱动io下, kernel在数据到达时向应用发送SIGIO信号, 应用收到信号后将数据从kernel复制到应用.
+1. 异步io下, kernel在所有操作(包括data从kernel复制到用户缓存区)都已经被内核完成后才会通知应用程序.
 
 ## 原理
 参考:
@@ -102,24 +144,32 @@ UDP 是没有连接的,所以不需要三次握手,也就不需要调用 listen 
 1. epoll 相比 select 效率更高,主要是基于其操作系统支持的 I/O事件通知机制, 而 select 是基于轮询机制
 1. epoll 支持水平触发和边沿触发两种模式
 
-### socket io
-与文件io略有不同, 分为
-- 阻塞 : 与文件io相同
-- 非阻塞 : 与文件io相同
-- io多路复用
+### socket缓冲区已满是否会丢数据
+不会. 缓冲区满后, socket无法再接收数据, 会通知对端停止传输, 即发送端会根据接收端的状态传输数据.
 
-  `select()/poll()/epoll`
-- 信号驱动io(SIGIO)
+> 通过滑动窗口解决.
 
-  内核：I/O能用了
-　进程：接收到I/O能用的消息并执行接下来的操作
+### `socket()`的第三个参数
+第三个参数指定应用程序所使用的通信协议. 此参数可以用于**区分同一协议族中存在多种数据传输方式相同的协议**.在Internet通讯域中，此参数一般取值为0，系统会根据套接字的类型决定应使用的传输层协议.
 
-  cpu利用率很高
-- 异步io
+### INADDR_ANY
+使用相同port的所有ip地址, 用于建立监听socket.
 
-  内核：等待这个I/O有消息了，接收到数据
-　进程：从缓存中得到数据
+### udp 发送端调用`sendto()`的次数与接收端调用`recvfrom()`的次数相同
+udp有数据边界.
 
-异步io与信号驱动io的区别:
-1. 信号驱动io下, kernel在数据到达时向应用发送SIGIO信号, 应用收到信号后将数据从kernel复制到应用.
-1. 异步io下, kernel在所有操作(包括data从kernel复制到用户缓存区)都已经被内核完成后才会通知应用程序.
+### UDP调用`connect()`
+与tcp的`connect()`不同, 仅向udp socket注册了目标ip和port, 并不存在握手.
+
+### 半关闭函数`shutdown`
+`close()`是全关闭, 但某些情况下需要只关闭一部分数据流即可.
+
+参数howto:
+- SHUT_RD : 断开输入流, 此时输入缓冲即使收到数据也会忽略
+- SHUT_WR : 断开输出流, 如果输出缓冲还有未发送的数据, 则也会发送出去
+- SHUT_RDWR : 全部断开, 等同于`close()`
+
+### Nagle算法
+为避免因数据包过多而发生网络过载.
+
+部分场景不需要Nagle算法: 传输大文件数据.
