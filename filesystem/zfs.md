@@ -20,20 +20,21 @@ zfs有两个工具: zpool和zfs. zpool用于维护zfs pools, zfs负责维护zfs 
 > zfs pool使用zfs_vdev_scheduler来调度io.
 
 ## 概念
-pool : 存储设备的逻辑分组, 可将其存储空间分配给filesystem(数据集).
-dataset/filesystem : zfs的文件系统
+pool : 存储设备的逻辑分组, 可将其存储空间分配给filesystems.
+filesystem : zfs的文件系统, 又称数据集.
 mirror : 一个虚拟设备存储相同的两个或两个以上的磁盘上的数据副本，在一个磁盘失败的情况下,相同的数据是可以用其他磁盘上的镜像.
 resilvering ：在恢复设备时将数据从一个磁盘复制到另一个磁盘的过程
+snapshot : 快照, 是文件系统或卷的只读副本. 在ZFS中，快照几乎可以即时创建，而且最初不会额外占用池中的磁盘空间
 
 ### zfs虚拟设备(zfs vdevs)
 一个 VDEV 是一个meta-device，代表着一个或多个物理设备. ZFS 支持 7 中不同类型的 VDEV：
 - disk, 默认, 比如HDD, SDD, PCIe NVME等等
 - File : 预先分类的文件，为*.img的文件，可以作为一个虚拟设备载入ZFS
 - Mirror : 标准的 RAID1 mirror
-- ZFS 软件RAID : raidz=raidz1(raid5)/2(raid6)/3, 非标准的基于分布式奇偶校验的软件RAID. 速度: raid0 > raid1 > raidz1 > raidz2 > raidz3
+- ZFS 软件RAID : raidz=raidz1(raid5, >=3 disk)/2(raid6, >=4 disk)/3(>=5 disk), 非标准的基于分布式奇偶校验的软件RAID. 速度: raid0 > raid1 > raidz1 > raidz2 > raidz3
 - Hot Spare : 用于热备 ZFS 的软件 raid
 - Cache : 用于2级自适应的读缓存的设备 (ZFS L2ARC), 提供在 memory 和 disk的缓冲层, 用于改善静态数据的随机读写性能
-- Log : ZFS Intent Log(ZFS ZIL/SLOG, ZFS意图日志,一种对于 data 和 metadata 的日志机制，先写入然后再刷新为写事务), 用于崩溃恢复, 最好配置并使用快速的 SSD来存储ZIL, 以获得更佳性能.
+- Log : ZFS Intent Log(ZFS ZIL/SLOG, ZFS意图日志,一种对于 data 和 metadata 的日志机制，先写入然后再刷新为写事务), 用于崩溃恢复, 最好配置并使用快速的 SSD来存储ZIL, 以获得更佳性能. ZIL支持mirror.
 
 VDEV始终是动态条带化的. 一个 device 可以被加到 VDEV, 但是不能移除.
 
@@ -44,6 +45,7 @@ zfs支持分层组织filesystem, 每个filesystem仅有一个父级, 而且支�
 > 避免在存储池中使用磁盘分片而是应使用整块磁盘, 已避免潜在复杂性.
 > 如果pool没有配置log device, pool会自行为ZIL预留空间.
 > raid-z配置无法附加其他磁盘; 无法分离磁盘, 但将磁盘替换为备用磁盘或需要分离备用磁盘时除外; 无法移除除log device或cache device外的device
+> 创建pool时, 不能使用其他pool的组件(vdev, 文件系统或卷), 否则会造成死锁.
 
 ```sh
 $ sudo zpool create pool-test /dev/sdb /dev/sdc /dev/sdd # 创建了一个零冗余的RAID-0存储池, ZFS 会在`/`中创建一个目录,目录名是pool name 
@@ -60,16 +62,20 @@ $ sudo zpool create <pool> mirror <device-id-1> <device-id-m1> mirror <device-id
 $ sudo zpool add <pool> log mirror <device-id-1> <device-id-2> # 添加 SLOG
 $ sudo zpool add <pool> cache <device-id> # 添加L2ARC
 $ sudo zpool iostat -v <pool> N # 每隔N秒输出一次pool的io状态
+$ sudo zpool remove <pool> mirror-1 移除
+$ sudo zpool attach <pool> <existing-device> <new-device> # 将新设备追加到已有vdev
+$ sudo zpool detach  # 分离设备, 对象必须是mirror中的设备/raidz中已由其他物理设备或备用设备替换的设备
+$ sudo zpool split <pool> <new-pool> [device] # 拆分pool, 仅适用mirror设备
 ```
 
-mirror/raidz设备不能从pool中删除, 但可增删不活动的hot spares(热备), cache, top-level, log device.
+mirror/raidz设备不能从pool中删除, 但可增删不活动的hot spares(热备), cache, log device.
 
 ### zpool create
 创建pool: `zpool create -f -m <mount> <pool> [raidz（2 | 3）| mirror] <ids>`
 
 参数:
 - f : 强制创建pool, 用于解决"EFI标签"错误
-- m : 指定挂载点, 默认是`/`
+- m : 指定挂载点, 默认是`/`. 如果挂载点目录存在数据会保存
 - o : 设置kv属性, 比如ashift
 - n : 仅模拟运行, 并输出日志, 用于检查错误, 但不是100%正确, 比如在配置中使用了相同的设备做mirror.
 
@@ -87,6 +93,7 @@ $ zpool scrub -s <pool> # 取消正在运行的检修
 
 ## zfs
 ```sh
+$ sudo zfs list # 显示系统上pools/filesystems的列表
 $ sudo zfs get all <pool> # 获取pool的参数
 $ sudo zfs set atime = off <pool> # 设置pool参数
 $ sudo zfs set compression=gzip-9 mypool # 设置压缩的级别
@@ -103,9 +110,10 @@ RDBMS倾向于实现自己的缓存算法，通常类似于ZFS自己的ARC. 因�
 
 ### zfs create
 ```sh
-# zfs create <pool>/<filesystem>/... # 在pool下创建filesystem, filesystem除了快照外，还可以提高控制级别, 比如配额. 
+# zfs create <pool>/<filesystem>/... # 在pool下创建filesystem(必须使用完整路径), filesystem除了快照外，还可以提高控制级别, 比如配额.
 ```
 
+> 文件系统默认挂载在pool下, 除非指定了mountpoint属性
 > 为了能够创建和mount filesystem，zpool中不得预先存在相同名称的目录.
 
 ### zfs snapshot
@@ -127,7 +135,7 @@ $ sudo zfs snapshot -r mypool/projects@snap1
 $ sudo zfs clone mypool/projects@snap1 mypool/projects-clone
 ```
 
-### ZFS Send 和 Receive
+### ZFS send 和 receive
 ZFS send 发送文件系统的快照，然后流式传送到文件或其他机器. ZFS receive 接收该 stream 然后写到 snapshot 拷贝，作为 ZFS 文件系统. 这有利于通过拷贝或网络传送备份.
 
 ```sh

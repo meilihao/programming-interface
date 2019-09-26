@@ -56,6 +56,9 @@ socket类型即数据传输方式, 也是socket 传输层的协议.
   - SO_REUSEADDR : 与time-wait状态相关
 
 ## socket io
+参考:
+- [Redis 和 I/O 多路复用](https://draveness.me/redis-io-multiplexing)
+
 ![几种IO模式比较](/misc/img/net/20180202171329716.png)
 
 与文件io略有不同, 分为
@@ -122,9 +125,15 @@ socket内核描述:
 
     ![](/misc/img/net/zqugepbmve.png)
 
-    epoll_create 创建一个 epoll 对象,也是一个文件,也对应一个文件描述符,同样也对应着打开文件列表中的一项. 在这项里面有一个红黑树,在红黑树里,要保存这个 epoll要监听的所有 Socket.
+    - epoll_create : 创建保存epoll文件描述符的空间
 
-    当 epoll_ctl 添加一个 Socket 的时候,其实是加入这个红黑树,同时红黑树里面的节点指向一个结构, 将这个结构挂在被监听的 Socket 的事件列表中. 当一个 Socket 来了一个事件的时候,可以从这个列表中得到 epoll 对象,并调用 call back 通知它.
+      epoll_create 创建一个 epoll 对象(os所有),也是一个文件,也对应一个文件描述符,同样也对应着打开文件列表中的一项. 在这项里面有一个红黑树,在红黑树里,要保存这个 epoll要监听的所有 Socket.
+
+    - epoll_clt : 向空间注册/注销文件描述符
+
+      当 epoll_ctl 添加一个 Socket 的时候,其实是加入这个红黑树,同时红黑树里面的节点指向一个结构, 将这个结构挂在被监听的 Socket 的事件列表中. 当一个 Socket 来了一个事件的时候,可以从这个列表中得到 epoll 对象,并调用 call back 通知它.
+
+    - epoll_wait: 与`select()`类似, 等待文件描述符发生变化.
 
     这种通知方式使得监听的 Socket 数据增加的时候,效率不会大幅度降低,能够同时监听的 Socket 的数目也非常的多了, 上限就为系统定义的进程打开的最大文件描述符个数. 因而,epoll 被称为解决C10K 问题的利器
 
@@ -175,4 +184,30 @@ udp有数据边界.
 部分场景不需要Nagle算法: 传输大文件数据.
 
 ### 父进程通过fork出子进程处理conn, 为什么父进程fork后要close(已连接的socket)而子进程需要close(监听socket)
-socket并非进程所有, 而是os的, 只有socket关联的所有文件描述符终止后才会销毁, 因此调用fork后将无关的socket文件描述符关掉, 不会影响程序运行.
+socket并非进程所有, 而是os的, 只有socket关联的所有文件描述符都终止后才会销毁, 因此调用fork后将无关的socket文件描述符关掉, 不会影响程序运行.
+
+### socket编程中write、read和send、recv之间的区别
+recv和send函数提供了和read和write差不多的功能, 但它们提供了第四个参数来控制读写操作:
+
+|flag|含义|使用者|
+|  ----  | ----| --- |
+| MSG_PEEK | 查看输入缓冲是否有数据,并不从系统缓冲区移走数据 |recv|
+| MSG_DONTROUTE | 不查找路由表,即在local中寻找目的地 |send|
+| MSG_OOB | 接受或发送带外数据 |both|
+| MSG_DONTWAIT | 调用io函数不阻塞,即使用非阻塞io |both|
+| MSG_WAITALL | 等待任何数据 |recv|
+
+### epoll 条件触发(level trigger, 默认)和边缘触发(edge trigger)
+它们的区别在于发生事件的时间点.
+
+条件触发: 只要满足条件(输入缓冲有数据,包括未读完)就会发生一个io事件EPOLLIN.
+边缘触发: 每当状态变化时(输入缓冲收到数据)发生一个io事件EPOLLIN.
+
+> 边缘触发中一定要以非阻塞的read/write进行, 否则有可能引起server的长期停顿.
+> 边缘触发能够做到接收数据与处理数据的时间点分离.
+
+举例: 假定经过长时间的沉默后，现在来了100个字节，这时无论边缘触发和条件触发都会产生一个read ready notification通知应用程序可读. 应用程序读了50个字节，然后重新调用api等待io事件. 这时条件触发的api会因为还有50个字节可读会再次注册事件,从而立即返回用户一个read ready notification, 而边缘触发的api会因为可读这个状态没有发生变化而陷入长期等待. 因此在使用**边缘触发的api时，要注意每次都要读到socket返回EAGAIN为止**，否则这个socket就算废了, 而使用条件触发的api 时，如果应用程序不需要写就不要关注socket可写的事件，否则就会无限次的立即返回一个write ready notification. 长期关注socket写事件会出现CPU 100%的毛病.
+
+> redis只支持LT模式
+> nginx作为高性能的通用服务器，大网络流量下, 很容易触发EPOLLOUT，则使用ET.
+> ET理论上比LT要高效很多, 但对程序员的要求也多些, 必须小心使用: 因为工作在此种方式下时， 在接收数据时， 如果有数据只会通知一次， 假如read时未读完数据，那么不会再有EPOLLIN的通知了， 直到下次有新的数据到达时为止; 当发送数据时， 如果发送缓存未满也只有一次EPOLLOUT的通知， 除非你把发送缓存塞满了， 才会有第二次EPOLLOUT通知的机会， 所以在此方式下read和write时都要处理好.
