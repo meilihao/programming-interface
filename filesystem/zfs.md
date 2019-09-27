@@ -60,12 +60,17 @@ $ sudo zpool export oldname # 重命名已创建的zpool的过程分为2个步�
 $ sudo zpool import oldname newname
 $ sudo zpool create <pool> mirror <device-id-1> <device-id-m1> mirror <device-id-2> <device-id-m2> # 创建RAID10
 $ sudo zpool add <pool> log mirror <device-id-1> <device-id-2> # 添加 SLOG
+$ sudo zpool add <pool> spare devices # 添加热备, 大小应>=max(pool's vdev),且无法移除当前正在使用的热备. 移除用`zpool remove`
 $ sudo zpool add <pool> cache <device-id> # 添加L2ARC
 $ sudo zpool iostat -v <pool> N # 每隔N秒输出一次pool的io状态
-$ sudo zpool remove <pool> mirror-1 移除
+$ sudo zpool remove <pool> mirror-1 移除mirror
 $ sudo zpool attach <pool> <existing-device> <new-device> # 将新设备追加到已有vdev
 $ sudo zpool detach  # 分离设备, 对象必须是mirror中的设备/raidz中已由其他物理设备或备用设备替换的设备
-$ sudo zpool split <pool> <new-pool> [device] # 拆分pool, 仅适用mirror设备
+$ sudo zpool split <pool> <new-pool> [device] # 拆分pool, 仅适用mirror设备, 通过`-R`可指定新池的挂载点
+$ sudo zpool offline [option] <pool> <device> # 离线zfs设备, `-t`表示临时离线, 重启后会重新恢复到online.
+$ sudo zpool online [option] <pool> <device> # 上线zfs设备, 新设备上线后会同步. `-e`可扩展LUN(即使用更大容量设备时, 使用完整大小), 默认不扩展.
+$ sudo zpool clear <pool> [devices] # 池设备故障时清理错误, 默认清理池内的所有设备错误.
+$ sudo zpool replace <pool> replaced-device [new-device] # 替换存储池中的设备
 ```
 
 mirror/raidz设备不能从pool中删除, 但可增删不活动的hot spares(热备), cache, log device.
