@@ -49,8 +49,8 @@ zfs支持分层组织filesystem, 每个filesystem仅有一个父级, 而且支�
 
 ```sh
 $ sudo zpool create pool-test /dev/sdb /dev/sdc /dev/sdd # 创建了一个零冗余的RAID-0存储池, ZFS 会在`/`中创建一个目录,目录名是pool name 
-$ sudo zpool list # 显示系统上pools的列表
-$ sudo zpool status <pool> # 查看pool的状态
+$ sudo zpool [option] list # 显示系统上pools的列表, `-o`只显示指定列,`-H`隐藏列头
+$ sudo zpool status <pool> # 查看pool的状态,read/write列显示io错误次数, cksum列显示无法更正的校验和错误的次数. `-v`输出详细信息, `-x`仅显示有错误或因其他原因不可用的pool
 $ sudo zpool destroy <pool> # 销毁pool
 $ sudo zpool destroy <pool>/data-set # 销毁dataset
 $ sudo zpool upgrade [<pool> | -a] # 更新 ZFS 时，就需要更新指定/全部池
@@ -63,15 +63,38 @@ $ sudo zpool add <pool> log mirror <device-id-1> <device-id-2> # 添加 SLOG
 $ sudo zpool add <pool> spare devices # 添加热备, 大小应>=max(pool's vdev),且无法移除当前正在使用的热备. 移除用`zpool remove`
 $ sudo zpool add <pool> cache <device-id> # 添加L2ARC
 $ sudo zpool iostat -v <pool> N # 每隔N秒输出一次pool的io状态
-$ sudo zpool remove <pool> mirror-1 移除mirror
+$ sudo zpool remove <pool> mirror-1 # 移除mirror/不在使用的热备
 $ sudo zpool attach <pool> <existing-device> <new-device> # 将新设备追加到已有vdev
 $ sudo zpool detach  # 分离设备, 对象必须是mirror中的设备/raidz中已由其他物理设备或备用设备替换的设备
 $ sudo zpool split <pool> <new-pool> [device] # 拆分pool, 仅适用mirror设备, 通过`-R`可指定新池的挂载点
 $ sudo zpool offline [option] <pool> <device> # 离线zfs设备, `-t`表示临时离线, 重启后会重新恢复到online.
 $ sudo zpool online [option] <pool> <device> # 上线zfs设备, 新设备上线后会同步. `-e`可扩展LUN(即使用更大容量设备时, 使用完整大小), 默认不扩展.
 $ sudo zpool clear <pool> [devices] # 池设备故障时清理错误, 默认清理池内的所有设备错误.
-$ sudo zpool replace <pool> replaced-device [new-device] # 替换存储池中的设备
+$ sudo zpool replace <pool> replaced-device [new-device] # 替换存储池中的设备, 比如使用热备盘
+$ sudo zpool get all <pool> # 获取pool的所有属性
+$ sudo zpool get <property> <pool> # 获取pool的指定属性
+$ sudo zpool set <property=value> <pool> # 设置pool的指定属性
+$ sudo zpool history [pool] # 显示zfs和zpool命令的使用日志, `-l`使用长格式(追加: 用户名, 主机名执行操作的域), `-i`显示更详细的内部日志可用于诊断
+$ sudo zpool iostat # 列出pools的io统计信息, `-v`显示pool包含的vdev的io统计信息, `-l`更多信息
+$ sudo zpool export [option] <pool> # 导出pool, 该pool必须处于不活动状态, 导出后该pool在系统中不可见. `-f`强制取消已挂载的filesystem
+$ sudo zpool import [option] [pool/id-number] # 导入pool, 导入时允许重命名,允许只读导入. `-m`表示导入mirror log, 默认不导入.`-d`导入非标准路径的设备/由file构成的pool.`-D`恢复已销毁的pool, 追加`-f`即`-Df`可表示已销毁的pool中某设备不可用也可恢复.
+$ sudo zpool upgrade # 升级pool, 以使用新版的zfs功能. `-v`表示当前zfs支持的功能, `-a`表示升级到最新的zfs.
 ```
+
+pool status:
+- ONLINE : 正常
+- UNAVAIL : 池的元数据遭到破坏, 或者若干个设备不可用且没有足够的副本支持其继续运行
+- DEGRADED : 池中若干设备发生了故障, 因为冗余配置, 其数据仍然可用.
+- SUSPENDED : 池正在等待恢复设备连接, 问题解决前该pool一直处于wait状态.
+
+vdev status:
+- DEGRADED : 虚拟设备出现过故障, 但仍可用. 常见于mirror或raidz设备缺少一个或多个组成设备. 此时pool的容错能力可能已遭损害.
+- OFFLINE : 已脱机
+- ONLINE : 正常工作
+- REMOVED : 已物理移除了设备, 移除检测依赖硬件
+- UNAVAIL : 无法打开vdev. 如果顶层的vdev为UNAVAIL, 则无法访问池中的任何设备.
+
+pool的status是由其所有顶层vdev的status决定的. 如果pool处于UNAVAIL/SUSPENDED则完全无法访问该pool. pool处于DEGRADED时, 于正常情况比可能无法实现相同的数据冗余或吞吐量.
 
 mirror/raidz设备不能从pool中删除, 但可增删不活动的hot spares(热备), cache, log device.
 
@@ -95,6 +118,7 @@ $ zpool scrub -s <pool> # 取消正在运行的检修
 ```
 
 > 建议是每周/月检修一次.
+> 替换磁盘而同步数据很耗时, 替换间执行`zpool scrub`有利于替换设备运行正常且数据写入正确.
 
 ## zfs
 ```sh
