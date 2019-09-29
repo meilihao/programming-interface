@@ -14,8 +14,8 @@
 ## 文件类型
 - 普通文件(regular file)
 - 目录文件(directory file)
-- 块特殊文件(block special file) : 提供对设备(比如磁盘)带缓冲的访问, 每次访问以固定长度为单位进行.
-- 字符特殊文件(character special file) :
+- 块特殊文件(block special file)
+- 字符特殊文件(character special file)
 - FIFO : 管道, 用于进程间通信. 与socket类似, 以由socket取代. 
 - 套接字(socket) : 用于进程间的网络通信
 - 符号链接(symbolic link) : 指向另一个文件

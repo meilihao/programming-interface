@@ -16,13 +16,26 @@ $ps -eo pid,comm,args
 
 也可使用`pstree`命令来展示当前的进程树.
 
+POSIX进程分为三段:
+- 正文段(比如程序代码)
+- 数据段(heap, 比如变量, 通过`brk()`增长)
+- 堆栈段(stack)
+
+> 数据段向上增长, 堆栈向下增长.
+> `brk()`不属于POSIX.
+
 ## 进程控制
 有三个用于进程控制的主要函数： fork, exec和waitpid, 其中exec函数有7种变体，但经常统称它们为exec函数.
 
-### fork
-Linux kernel 并**不提供直接创建新进程的系统调用**,剩下的所有进程都是 init 进程通过**fork**机制建立的.新的进程要通过老的进程复制自身得到，这就是`fork`.
+### 状态
+- 运行中(实际占用cpu)
+- 就绪(可运行, 但还未分配到cpu)
+- 阻塞中(需要某种条件, 无法运行)
 
-在c语言中, 父进程调用`fork()`产生(spawn)子进程并得到子进程pid后, 子进程会复制父进程的一切, 并同样从`fork()`处开始执行, 且子进程调用`fork()`时返回`0`.
+![](/misc/img/os/961dcc4764f2e60c09fa5255a02ba71f.png)
+
+Linux进程状态:
+![](/misc/img/os/linux_process_state.png)
 
 ## 进程和线程
 尽管在UNIX中，进程与线程是有联系但不同的两个东西，但**在Linux中，线程只是一种特殊的进程**,多个线程之间可以共享内存空间和IO接口.所以，进程是Linux程序的唯一的实现方式.
@@ -31,14 +44,19 @@ Linux kernel 并**不提供直接创建新进程的系统调用**,剩下的所�
 
 一个进程内的所有线程会共享同一地址空间, 文件描述符, 栈以及与进程相关的属性, 因此访问共享数据时需要同步措施来避免不一致性. 与进程相同, 线程也有ID, 但其仅在所属进程内有效.
 
+### 进程实现
+os维护一个数组(process table). 每个进程占用一项(进程控制块, PCB), 它包含了进程的全部数据.
+
 ## 进程组(process group)
-一个或多个**进程**的集合.进程组会有一个进程组领导进程 (process group leader),有的地方也叫组长进程，领导进程的PID则成为进程组的ID (process group ID, PGID)，以识别进程组.
+一个或多个**进程**(进程+子进程+后裔进程)的集合.进程组会有一个进程组领导进程 (process group leader)，领导进程的PID则成为进程组的ID (process group ID, PGID)，以识别进程组.
 PGID不会因领导进程退出而受到影响，且fork调用也不会改变PGID.
 
+> `pstree -pg`可查看进程的pid和pgid, 也可通过`ps`查看.
 > linux和unix的新进程由fork而来, 因此原远程的pid就是当前进程的ppid.
+> 当用户从键盘发出一个信号时, 该信号会被送给当前与键盘相关的进程组中的所有成员.
 
 ```sh
-➜  ~ ps -o pid,pgid,ppid,args| cat
+➜  ~ ps -ax -o pid,pgid,ppid,args| cat # `-ax`=`-A`
   PID  PGID  PPID COMMAND
 15967 15967  4325 /usr/bin/zsh
 16547 16547 15967 ps -o pid,pgid,ppid,args
@@ -55,7 +73,7 @@ PGID不会因领导进程退出而受到影响，且fork调用也不会改变PGI
 - 后台进程组 : 该进程组中的进程只能向终端设备进行写操作.
 
 ```sh
-➜  ~ ps -o pid,pgid,ppid,sid,args,tty,tpgid
+➜  ~ ps -A -o pid,pgid,ppid,sid,args,tty,tpgid
   PID  PGID  PPID   SID COMMAND                     TT       TPGID
  4326  4326  4321  4326 /usr/bin/zsh                pts/0     9125
  9119  9119  4326  4326 ping localhost -c 10        pts/0     9125

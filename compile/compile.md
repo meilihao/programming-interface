@@ -1,6 +1,7 @@
 # compile
 参考:
 - [GCC编译过程详解](http://chengqian90.com/C%E8%AF%AD%E8%A8%80/GCC%E7%BC%96%E8%AF%91%E8%BF%87%E7%A8%8B%E8%AF%A6%E8%A7%A3.html)
+- [GCC编译链接过程](https://www.cnblogs.com/muahao/p/10346724.html)
 
 编译是指将使用高级语言编写的源代码转换成机器语言的过程, 其中用于转换的工具被称为编译器(compiler).
 > 函数调用会转换成`call`指令, 函数结束的处理则会转换成`return`指令

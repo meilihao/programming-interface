@@ -122,15 +122,19 @@ $ zpool scrub -s <pool> # 取消正在运行的检修
 
 ## zfs
 ```sh
-$ sudo zfs list # 显示系统上pools/filesystems的列表
-$ sudo zfs get all <pool> # 获取pool的参数
+$ sudo zfs list # 显示系统上pools/filesystems的列表, `-r`递归显示fs及其子fs, `-o`指定要显示的属性; `-t`指定显示的类型, 比如filesystem, volume, share, snapshot.
+$ sudo zfs get all <pool> # 获取pool的参数. `-s`指定要显示的source类型; `-H`输出信息去掉标题, 并用tab代替空格来分隔
 $ sudo zfs set atime = off <pool> # 设置pool参数
 $ sudo zfs set compression=gzip-9 mypool # 设置压缩的级别
-$ sudo zfs inherit -rS atime  <pool> # 重置参数到default值
+$ sudo zfs inherit -rS atime  <pool> # 重置参数到default值. `-r`以递归的方式应用inherit子命令
 $ sudo zfs get keylocation <pool>/<filesystem> # 获取filesystem属性
 $ sudo zfs set acltype = posixacl <pool> / <filesystem> # 使用ACL
 $ sudo zfs set sharenfs=on <pool> # 通过nfs共享pool
 $ sudo zfs set sharenfs=on <pool>/<filesystem> # 通过nfs共享filesystem
+$ sudo zfs destroy <pool>/.../<filesystem> # 销毁文件系统, 此时fs必须是不活动的
+$ sudo zfs rename <old-path> <new-path> # 重命名fs
+$ sudo mount -o <pool>/.../<filesystem> # 挂载fs
+$ sudo unmount <pool>/.../<filesystem> # 取消挂载fs, 此时fs必须是不活动的. `-f`强制取消挂载
 ```
 
 与大多数其他文件系统不同，ZFS具有可变的记录大小，或者通常称为块大小, 默认情况下，ZFS上的记录大小为128KiB，这意味着它将根据要写入的文件大小动态分配从512B到128KiB任意大小的块.
@@ -141,6 +145,13 @@ RDBMS倾向于实现自己的缓存算法，通常类似于ZFS自己的ARC. 因�
 ```sh
 # zfs create <pool>/<filesystem>/... # 在pool下创建filesystem(必须使用完整路径), filesystem除了快照外，还可以提高控制级别, 比如配额.
 ```
+
+参数:
+- -o : 设置fs的属性
+- -f : 销毁时取消挂载, 取消共享
+- -r : 递归销毁
+- -R : 递归销毁, 包括依赖其的clones
+- -m : 设置挂载点
 
 > 文件系统默认挂载在pool下, 除非指定了mountpoint属性
 > 为了能够创建和mount filesystem，zpool中不得预先存在相同名称的目录.

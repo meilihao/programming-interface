@@ -3,8 +3,13 @@ io = in + output.
 
 io的通路是总线, 目前最新标准是PCIe 5.0.
 
-> PCIE的地址总线和数据总线是分时复用的.
 > **windows的句柄 = linux的文件描述符, 但windows区分文件句柄和socket句柄**.
+
+
+实现io的三种方式:
+1. 发起syscall再循环检测io是否完成
+1. 中断通知
+1. DMA(direct memory access)
 
 ### 分类
 1. 读/写io : 读写一段**连续的**内容.
