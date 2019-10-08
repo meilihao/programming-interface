@@ -12,6 +12,8 @@
 **路径名(pathname)**是由`/`分隔的若干文件名序列. 以`/`开头的路径名称为绝对路径(absolute pathname); 否则称为相对路径(relative pathname), 它是指向相对于某个文件的文件. **根目录是特殊的绝对路径, 它不包含文件名**.
 
 ## 文件类型
+定义在[`#include <sys/stat.h>`](https://en.wikibooks.org/wiki/C_Programming/POSIX_Reference/sys/stat.h)里, 可通过`os.FileMode`进行位操作来判断.
+
 - 普通文件(regular file)
 - 目录文件(directory file)
 - 块特殊文件(block special file)
