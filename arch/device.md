@@ -27,7 +27,3 @@
 可通过`losetup -a`查看.
 
 snapd的`loopN`可通过`sudo apt autoremove --purge snapd`解决.
-
-# 块特殊文件(block special file) / 字符特殊文件(character special file)
-- 块特殊文件(block special file) : 提供对设备(比如磁盘)带缓冲的访问, 每次访问以固定长度(块)为单位进行.
-- 字符特殊文件(character special file) : 接收或输出字符流的设备, 需**按顺序操作, 不支持随机操作**, 用于键盘, 串口, 打印机, 调制解调器等.
