@@ -9,6 +9,8 @@
 1. pthread_join : 阻塞直至线程销毁
 1. pthreadA_detach : 不会阻塞
 
+> pthread是api标准, NPTL是具体实现,已集成到glibc中, 其他两种实现LinuxThreads和NGPT已被放弃.
+
 ## 线程同步
 1. mutex(互斥量)
 1. semaphore(信号量)

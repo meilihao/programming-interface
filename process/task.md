@@ -81,7 +81,7 @@ state:
 
 ![state 流转](/misc/img/task_state_change.png)
 
-TASK_RUNNING并不是说进程正在运行,而是表示进程在时刻准备运行的状态. 当处于这个状态的进程获得时间片的时候,就是在运行中;如果没有获得时间片,就说明它被其他进程抢占了,在等待再次分配时间片.
+TASK_RUNNING并不是说进程正在运行,而是表示进程在时刻准备运行的状态, 而是`运行中+在(运行)队列中`. 当处于这个状态的进程获得时间片的时候,就是在运行中;如果没有获得时间片,就说明它被其他进程抢占了,在等待再次分配时间片.
 
 在运行中的进程,一旦要进行一些I/O操作,需要等待I/O完毕,这个时候会释放CPU,进入睡眠状态.
 
@@ -93,15 +93,15 @@ TASK_RUNNING并不是说进程正在运行,而是表示进程在时刻准备运�
 
 于是就有了一种新的进程睡眠状态,TASK_KILLABLE,可以终止的新睡眠状态. 进程处于这种状态中,它的运行原理类似TASK_UNINTERRUPTIBLE,只不过可以响应致命信号.从定义可以看出,TASK_WAKEKILL用于在接收到致命信号时唤醒进程,而TASK_KILLABLE相当于这两位都设置了.
 
-TASK_STOPPED是在进程接收到SIGSTOP、SIGTTIN、SIGTSTP或者SIGTTOU信号之后进入该状态.
+TASK_STOPPED是在进程接收到SIGSTOP、SIGTTIN、SIGTSTP或者SIGTTOU信号之后进入该状态. 进程在等待一个恢复信息比如SIGCONT.
 
 TASK_TRACED表示进程被debugger等进程监视,进程执行被调试程序所停止. 当一个进程被另外的进程所监视,每一个信号都会让进程进入该状态.
 
-一旦一个进程要结束,先进入的是EXIT_ZOMBIE状态,但是这个时候它的父进程还没有使用wait()等系统调用来获知它的终止信息,此时进程就成了僵尸进程.
+**一旦一个进程要结束,先进入的是EXIT_ZOMBIE状态**,但是这个时候它的父进程还没有使用wait()等系统调用来获知它的终止信息及释放它的所有数据结构,此时进程就成了僵尸进程.
 
 EXIT_DEAD是进程的最终状态.
 
-EXIT_ZOMBIE和EXIT_DEAD也可以用于exit_state
+EXIT_ZOMBIE和EXIT_DEAD也可以用于exit_state.
 
 state是和进程的运行、调度有关系, 还有其他的一些状态称为标志, 放在flags字段中,这些字段都被定义称为宏 ,以PF开头:
 ```c
