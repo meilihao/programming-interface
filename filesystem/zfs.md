@@ -181,7 +181,7 @@ zfs snapshot（快照）是 zfs 文件系统或卷的**只读**拷贝(即无法�
 $ sudo zfs snapshot -r mypool/projects@snap1 # 创建 mypool/projects 文件系统的快照. `-r`表示递归创建(即为所有后代文件系统创建快照)
 $ sudo zfs list -t snapshot # 查看所有的snapshots列表
 $ sudo zfs rollback mypool/projects@snap1 # 回滚快照
-$ sudo zfs destroy mypool/projects@snap1 # 移除snapshot, `-r`表示递归销毁, `-d`销毁带保持标志的快照
+$ sudo zfs destroy mypool/projects@snap1 # 移除snapshot, `-r`表示递归销毁, `-R`表示递归销毁这些快照及其clone, `-d`销毁带保持标志的快照
 $ sudo zfs destroy mypool/projects@% # %表示限定范围, 其两边为空默认表示最早~最晚
 $ sudo zfs hold keep mypool/home@today # 保持快照, `-r`表示递归
 $ sudo zfs holds mypool/home # 显示保持的快照的列表
