@@ -142,7 +142,7 @@ $ sudo zfs get keylocation <pool>/<filesystem> # 获取filesystem属性
 $ sudo zfs set acltype = posixacl <pool> / <filesystem> # 使用ACL
 $ sudo zfs set sharenfs=on <pool> # 通过nfs共享pool
 $ sudo zfs set sharenfs=on <pool>/<filesystem> # 通过nfs共享filesystem
-$ sudo zfs destroy <pool>/.../<filesystem> # 销毁文件系统, 此时fs必须是不活动的
+$ sudo zfs destroy <pool>/.../<filesystem> # 销毁文件系统, 此时fs必须是不活动的. `-r`表示递归销毁, `-R`表示递归销毁这些快照及其clone, `-d`销毁带保持标志的快照
 $ sudo zfs rename <old-path> <new-path> # 重命名fs
 $ sudo mount -o <pool>/.../<filesystem> # 挂载fs
 $ sudo unmount <pool>/.../<filesystem> # 取消挂载fs, 此时fs必须是不活动的. `-f`强制取消挂载
@@ -181,7 +181,7 @@ zfs snapshot（快照）是 zfs 文件系统或卷的**只读**拷贝(即无法�
 $ sudo zfs snapshot -r mypool/projects@snap1 # 创建 mypool/projects 文件系统的快照. `-r`表示递归创建(即为所有后代文件系统创建快照)
 $ sudo zfs list -t snapshot # 查看所有的snapshots列表
 $ sudo zfs rollback mypool/projects@snap1 # 回滚快照
-$ sudo zfs destroy mypool/projects@snap1 # 移除snapshot, `-r`表示递归销毁, `-R`表示递归销毁这些快照及其clone, `-d`销毁带保持标志的快照
+$ sudo zfs destroy mypool/projects@snap1 # 移除snapshot
 $ sudo zfs destroy mypool/projects@% # %表示限定范围, 其两边为空默认表示最早~最晚
 $ sudo zfs hold keep mypool/home@today # 保持快照, `-r`表示递归
 $ sudo zfs holds mypool/home # 显示保持的快照的列表
@@ -215,7 +215,7 @@ zfs send 将文件系统的快照写入stdout，然后流式传送到文件或�
 ```sh
 # 创建 snapshot 然后 save 到文件
 $ sudo zfs snapshot -r mypool/projects@snap2
-$ sudo zfs send mypool/projects@snap2 > ~/projects-snap.zfs  # `-c`使用压缩(如果mypool/projects是活动的则必须使用)
+$ sudo zfs send mypool/projects@snap2 > ~/projects-snap.zfs  # `-c`使用压缩(如果mypool/projects是活动的则必须使用), `-n`表示模拟send, 实际不产生数据流, `-P`表示生成流的信息, 比如全量/增量, 数据流大小.
 $ sudo zfs receive -F mypool/projects-copy < ~/projects-snap.zfs # 恢复, `-F`表示忽略目标fs的改动(mypool/projects-copy), 直接应用快照流
 $ sudo zfs send -i snap1  ool/dana@snap2 # `-i`增量发送,`-I`将一组增量快照合并为一个快照,`-R`表示复制 zfs 文件系统和其后代.
 ```
