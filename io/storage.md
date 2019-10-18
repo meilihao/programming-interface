@@ -252,4 +252,17 @@ cdp可提供的备份级别
 精髓: metadata(链表,B树和位图等结构)和对这些metadata的管理方式.
 
 fs一定是先写文件实体数据, 再将元数据从缓存中flush到磁盘.
-  
+
+## 配置项
+- read_ahead_kb
+
+  增大`/sys/block/${disk}/queue/read_ahead_kb`可提升连续读的性能. 不过大多数服务器工作负载主要是随机io, 则提升有限. 
+
+  > ionice允许在进程级别设置优先级, 限制其对磁盘子系统的使用率.
+
+- noatime : 禁止更新文件的access time, 减少不必要的io
+
+  ```
+  // /etc/fstab
+  UUID=948d792c-2d5a-4f81-97b4-811b34749d8f /home/jr/git ext4 defaults,nodelalloc,noatime,nodiratime        0  0
+  ```

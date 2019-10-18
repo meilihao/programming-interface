@@ -36,8 +36,6 @@ AVX 512指令集强化的向量和浮点计算
 ## 网络
 网卡offload, 比如checksum offload.
 
-> boding技术: 两块网卡共享ip, 作为一张网卡使用.
-
 ### RDMA Vs DPDK
 DPDK思路:
 - 网络层：硬件中断->放弃中断流程
