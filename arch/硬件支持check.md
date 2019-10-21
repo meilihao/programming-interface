@@ -7,3 +7,9 @@
 ```
 $ cat /proc/cpuinfo | grep flags // 获得CPU所有指令集
 ```
+
+### net
+```
+$ sudo ethtool enp3s0 # 查看网卡的工作模式(Duplex项), 比如全双工, 半双工
+$ sudo ethtool -k eth0 # 查看offload配置
+```

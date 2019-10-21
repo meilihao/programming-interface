@@ -602,7 +602,7 @@ TCP 以1个段为单位，每发送一个段进行一次确认应答的处理. �
 
 ![窗口控制](/misc/img/net/tcp_window.jpg)
 
-> 窗口大小就是指无需等待确认应答而可以继续发送数据的最大值. 上图中窗口大小为4个段. 这个机制实现了使用大量的缓冲区，通过对多个段同时进行确认应答的功能.
+> 窗口大小就是指无需等待确认应答而可以继续发送数据的最大值, 即**还未被确认的数据**. 上图中窗口大小为4个段. 这个机制实现了使用大量的缓冲区，通过对多个段同时进行确认应答的功能.
 > 接收方收到不连续序号时会先缓存数据到`接收窗口`待完整后提交给应用, 即仅将`接收窗口`中有效的连续的部分提交给应用.
 
 ![滑动窗口控制](/misc/img/net/tcp_window_move.jpg)
@@ -645,6 +645,36 @@ tcp中最复杂的功能, 通过tcp连接双方商定的协议来减少数据的
 使用某种方式使得目标无法继续提供服务. 通过僵尸网络对服务器发起的攻击称为DDoS(Distributed Denial of Service)攻击.
 
 ## 内核配置项
+参考:
+- [Linux TCP队列相关参数的总结](https://www.cnblogs.com/276815076/p/5587097.html)
+- [Linux TCP/IP 协议栈调优](https://colobu.com/2014/09/18/linux-tcpip-tuning/)
+- [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
+
+```
+// buffer
+net.ipv4.tcp_mem : 确定TCP栈应该如何使用内存, 单位都是page. 第一个值是内存使用的下限；第二个值是内存压力模式开始对缓冲区使用应用压力的上限；第三个值是内存使用的上限, 在这个层次上可以将报文丢弃，从而减少对内存的使用. 对于较大的BDP可以增大这些值.
+net.ipv4.tcp_wmem : 为自动调优定义每个 socket 使用的内存。第一个值是为 socket 的发送缓冲区分配的最少字节数。第二个值是默认值（该值会被 wmem_default 覆盖），缓冲区在系统负载不重的情况下可以增长到这个值。第三个值是发送缓冲区空间的最大字节数（该值会被 wmem_max 覆盖）
+net.ipv4.tcp_rmem : 与 tcp_wmem 类似，不过它表示的是为自动调优所使用的接收缓冲区的值
+et.core.rmem_default ：内核socket接收缓存区的默认的大小, 对于更大的 BDP 来说，这个大小也应该更大
+net.core.wmem_default ：内核socket发送缓存区的默认的大小, 对于更大的 BDP 来说，这个大小也应该更大
+net.core.rmem_max ：内核socket接收缓存区的最大的大小, 对于更大的 BDP 来说，这个大小也应该更大
+net.core.wmem_max ：内核socket发送缓存区的最大的大小, 对于更大的 BDP 来说，这个大小也应该更大
+net.core.optmem_max : 每个套接字所允许的最大缓冲区的大小
+
+// BDP(bandwidth delay product, 带宽延迟乘积), 表示在传输过程中驻留在链路上的数据总量. 它提供了一种简单的方法来计算理论上最优的 TCP socket 缓冲区大小(即>=bdp)
+// BDP = Bandwith(bytes/sec, 带宽) * Delay (sec, 延迟, 通过ping获得)
+// socket 缓冲区的大小确定了通告 TCP 窗口的大小，但是 TCP 还在通告窗口内维护了一个拥塞窗口. 因此，由于这个拥塞窗口的存在，给定的 socket 可能永远都不会利用最大的通告窗口
+net.ipv4.tcp_window_scaling : 启用RFC 1323定义的window scaling，要支持超过64KB(默认)的TCP窗口，必须启用该值（1表示启用），TCP窗口最大至1GB，TCP连接双方都启用时才生效
+
+net.core.netdev_max_backlog ：当网卡接收数据包的速度大于内核处理的速度时，会有一个队列保存这些数据包，这个参数表示该队列的最大值
+
+net.ipv4.tcp_fin_timeout : TCP保持在FIN_WAIT2状态的时间，超时后直接处于CLOSED，所以降低tcp_fin_timeout有助于减少TIME_WAIT数量. 注意：虽然shutdown(SHUD_WR)也会处于FIN_WAIT2状态，但超时并不起作用
+net.ipv4.tcp_keepalive_time : TCP发送keepalive探测消息的间隔时间（秒），用于确认TCP连接是否有效
+net.ipv4.tcp_max_syn_backlog : 对于还未获得对方确认的连接请求，可保存在队列中的最大数目.
+net.ipv4.tcp_timestamps : TCP时间戳（会在TCP包头增加12个字节），以一种比重发超时更精确的方法（参考RFC 1323）来启用对RTT 的计算，为实现更好的性能应该启用这个选项
+net.ipv4.tcp_sack : 启用有选择的应答（1表示启用），通过有选择地应答乱序接收到的报文来提高性能，让发送者只发送丢失的报文段，（对于广域网通信来说）这个选项应该启用，但是会增加对CPU的占用
+net.ipv4.tcp_fack : 启用转发应答（Forward Acknowledgment），这可以进行有选择应答（SACK）从而减少拥塞情况的发生；这个选项也应该启用
+```
 
 
 ## 扩展阅读
