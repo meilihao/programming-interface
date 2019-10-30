@@ -34,9 +34,15 @@
 AVX 512指令集强化的向量和浮点计算
 
 ## 网络
-网卡offload, 比如checksum offload.
+- 网卡offload, 比如checksum offload.
+- HPCC (High Precision Congestion Control- 高精度拥塞控制)
+- QSFP-DD 400G已成熟，QSFP-DD800G正在进行.
 
 ### RDMA Vs DPDK
+参考:
+- [RDMA](https://yq.aliyun.com/articles/394912)
+- [借助RDMA功能的互连实现您企业软件定义的数据中心基础设施的效率最大化](https://yq.aliyun.com/articles/137416)
+
 DPDK思路:
 - 网络层：硬件中断->放弃中断流程
 - 用户层通过设备映射取包->进入用户层协议栈->逻辑层->业务层
