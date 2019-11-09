@@ -15,7 +15,7 @@
   一种自动的将I/O 的负载均衡到多个物理磁盘上的技术, 避免多进程同时访问磁盘导致冲突, 而且在需要对这种数据进行顺序访问的时候可以获得最大程度上的 I/O 并行能力，从而获得非常好的性能
 
   条带（strip）是把连续的数据分割成相同大小的数据块，把每段数据分别写入到阵列中的不同磁盘上的方法
-- LUN(Logical Unit Number)
+- [LUN(Logical Unit Number)](https://support.huawei.com/enterprise/zh/doc/EDOC1100096895)
 
   逻辑单元号，是SCSI中的概念. 它扩充了Target ID(因为SCSI总线上可挂接的设备数量是有限的). 每个Target下都可以有多个LUN Device.
 
@@ -24,6 +24,13 @@
   操作系统识别的最小存储对象级别就是LUN Device, os会认为它就是物理磁盘. 我们通常简称LUN Device为LUN. 主机的RAID卡/HBA卡识别存储资源就是靠 target + lun. 许多厂商的存储设备只支持一个RAID组作为一个LUN. 
 
   LUN是对存储设备而言的，volume是对主机而言的. 在LUN上可创建VOLUME. 此时VOLUME相对于主机是一个逻辑设备.
+- NL-SAS
+  
+  NL-SAS硬盘就是SATA的盘体与SAS连接器的组合体, NL-SAS硬盘的转速只有7200转，因此性能比SAS硬盘差. 由于使用了SAS接口，所以在寻址与速度上有了提升.
+  NL-SAS硬盘拥有了SATA的硬盘容量，SAS硬盘的可靠性，而价格却与SATA硬盘很接近.
+- SAS/SATA
+
+  SAS是Serial Attach SCSI（串行SCSI）, SATA是串行ATA.
 
 ## 硬盘
 低级格式化: 划分磁道和扇区的过程, 通常由厂商完成.
