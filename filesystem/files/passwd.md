@@ -3,7 +3,7 @@
 
 格式(7个以冒号分隔的字段):
 
-`登录名:加密后的登录密码(在/etc/shadow里):UID:GID:注释:用户home目录:用户登录shell`
+`登录名:加密后的登录密码(在[/etc/shadow](shadow.md)里):UID:GID:注释:用户home目录:用户登录shell`
 
 比如:
 ```

@@ -6,10 +6,15 @@ OS向程序提供的内核服务接口.
 参考:
  - [linux x86_64的系统调用](linux-5.2/arch/x86/entry/syscalls/syscall_64.tbl): 格式: `系统调用号:?:系统调用的名字:系统调用在内核的实现函数(以 sys_ 开头)`
 
+> 系统调用的组成是固定的,每个系统调用都由一个唯一的数字来标识.
+> 调用系统调用的优选方式是使用VDSO，VDSO是映射在每个进程地址空间中的存储器的一部分，其允许更有效地使用系统调用. int 0x80是一种调用系统调用的传统方法，应该避免.
+> 在 Linux 上,系统调用syscall遵循的惯例是调用成功则返回非负值. 发生错误时,例程会对相应 errno 常量取反,返回一负值.
+
 glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提供丰富的API, 除了例如字符串处理、数学运算等用户态服务之外, 最重要的是封装了系统调用以便于使用(每个api至少封装了一个syscall). 通常使用strace命令来跟踪进程执行时系统调用和所接收的信号.
 
 > syscall的函数声明在`include/linux/syscalls.h`里
 > [linux x86的系统调用](linux-5.2/arch/x86/entry/syscalls/syscall_32.tbl)
+> 查看glic版本: `$ /lib/x86_64-linux-gnu/libc-2.23.so`
 
 ## fork
 ![](/misc/img/5uugf8fxqg.png)
@@ -96,7 +101,15 @@ setjmp会保存程序的当前位置(通过保存堆栈环境来实行), 到时�
 longjmp不返回.
 
 ## dup2
+复制一个打开的文件描述符 oldfd,并返回一个新描述符,二者都指向同一打开的文件句柄.
+
 与`close`和`dup`的联动操作类似, 但保证了操作的独立性和完整性,不会被外来信号打断.
+
+dup2()系统调用会为 oldfd 参数所指定的文件描述符创建副本,其编号由 newfd 参数指定. 如果由 newfd 参数所指定编号的文件描述符之前已经打开, 那么 dup2()会首先将其关闭.
+dup2()调用会默然忽略 newfd 关闭期间出现的任何错误故此, 编码时更为安全的做法是:在调用dup2()之前,若 newfd 已经打开,则应显式调用 close()将其关闭.
+
+> dup3()系统调用完成的工作与 dup2()相同,只是新增了一个附加参数 flag, 该flag仅支持O_CLOEXEC(让内核为新文件描述符设置 close-on-exec标志(FD_CLOEXEC).
+> fcntl(oldfd, F_DUPFD, startfd)与dup()和 dup2()功能类似.
 
 ## open
 打开文件, 返回文件描述符
@@ -108,9 +121,51 @@ flags:
 - O_RDONLY : 只读打开
 - O_WRONLY : 只写打开
 - O_RDWR : 读写打开
+- O_NONBLOCK : 非阻塞打开
+	
+	若 open()调用未能立即打开文件,则返回错误,而非陷入阻塞. 有一种情况属于例外,调用 open()操作 FIFO 可能会陷入阻塞.
+	调用 open()成功后,后续的 I/O 操作也是非阻塞的. 若 I/O 系统调用未能立即完成,则可能会只传输部分数据,或者系统调用失败,并返回 EAGAIN 或 EWOULDBLOCK 错误.
+	管道、 FIFO、套接字、设备(比如终端、伪终端)都支持非阻塞模式.(因为无法通过 open()来获取管道和套接字的文件描述符,所以要启用非阻塞标志,就必须fcntl()的F_SETFL)
+	由于内核缓冲区保证了普通文件 I/O 不会陷入阻塞,故而打开普通文件时一般会忽略 O_NONBLOCK 标志. 然而,当使用强制文件锁时, O_NONBLOCK标志对普通文件也是起作用的.
 
 ## sigaction
 用于处理信号, 替代`signal()`, 更稳定.
+
+## fcntl
+对一个打开的文件描述符执行一系列控制操作.
+
+fcntl()的 F_SETFL 命令来修改打开文件的某些状态标志, 允许更改的标志有
+O_APPEND、O_NONBLOCK、O_NOATIME、O_ASYNC 和 O_DIRECT. 系统将忽略对其他
+标志的修改操作. 但有些其他的 UNIX 实现允许 fcntl()修改其他标志,如 O_SYNC.
+
+## pread()和 pwrite()
+完成与 read()和 write()相类似的工作,只是前两者会在 offset 参数所指定的位置进行文件 I/O 操作,而非始于文件的当前偏移量处,且它们不会改变文件的当前偏移量.
+
+对 pread()和 pwrite()而言,fd 所指代的文件必须是可定位的(即允许对文件描述符执行lseek()调用).
+
+它们对多线程应用有为有用.
+
+## preadv()和 pwritev()
+
+所执行的任务与 readv()和 writev()相同,但执行 I/O 的位置将由 offset 参数指定(类似于 pread()和 pwrite()系统调用).
+
+## truncate()和 ftruncate()
+若文件当前长度大于参数 length,调用将丢弃超出部分,若小于参数 length,在linux上调用将在文件尾部添加一系列空字节.
+
+ftruncate()不会修改文件偏移量.
+
+## mkstemp()和 tmpfile()
+mkstemp()函数基于模板(模板参数采用路径名形式,其中最后 6 个字符必须为 XXXXXX, 这 6 个字符将被替换, 以保证文件名的唯一性,且修改后的字符串将通过 template 参数传回)生成一个唯一文件名并打开该文件,返回一个可用于 I/O 调用的文件描述符.
+
+文件拥有者对 mkstemp()函数建立的文件拥有读写权限(其他用户则没有任何操作权限),且打开文件时使用了 O_EXCL 标志,以保证调用者以独占方式访问文件.
+
+通常,打开临时文件不久,程序就会使用 unlink 系统调用将其删除.
+
+tmpfile()函数会创建一个名称唯一的临时文件,并以读写方式将其打开(打开该文件时使用了 O_EXCL 标志,以防一个可能性极小的冲突).
+tmpfile()函数执行成功,将返回一个文件流供 stdio 库函数使用。文件流关闭后将自动删除临时文件.
+
+## gettimeofday()
+获取当前时间.
 
 ## 限制值
 参考[unix环境高级编程 - 2.5.4 函数sysconf、 pathconf 和fpathconf]
