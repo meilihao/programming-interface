@@ -116,17 +116,51 @@ dup2()调用会默然忽略 newfd 关闭期间出现的任何错误故此, 编�
 
 flags:
 - O_CREAT : 必要时创建文件
+- O_DIRECT : 使用Direct I/O
 - O_TRUNC : 清空文件
 - O_APPEND : 已追加方式打开文件
 - O_RDONLY : 只读打开
 - O_WRONLY : 只写打开
 - O_RDWR : 读写打开
+- O_RSYNC : 与 O_SYNC 标志或 O_DSYNC 标志配合一起使用的,将这些标志对写操作的作用结合到读操作中(在读操作前完成写操作).
+- O_DSYNC : 要求写操作按照 synchronized I/O data integrity completion 来执行(类似于fdatasync())
+- O_SYNC : 同步打开, 遵从 synchronized I/O file integrity completion(类似于 fsync()函数), 但对性能的影响极大.
 - O_NONBLOCK : 非阻塞打开
 	
 	若 open()调用未能立即打开文件,则返回错误,而非陷入阻塞. 有一种情况属于例外,调用 open()操作 FIFO 可能会陷入阻塞.
 	调用 open()成功后,后续的 I/O 操作也是非阻塞的. 若 I/O 系统调用未能立即完成,则可能会只传输部分数据,或者系统调用失败,并返回 EAGAIN 或 EWOULDBLOCK 错误.
 	管道、 FIFO、套接字、设备(比如终端、伪终端)都支持非阻塞模式.(因为无法通过 open()来获取管道和套接字的文件描述符,所以要启用非阻塞标志,就必须fcntl()的F_SETFL)
 	由于内核缓冲区保证了普通文件 I/O 不会陷入阻塞,故而打开普通文件时一般会忽略 O_NONBLOCK 标志. 然而,当使用强制文件锁时, O_NONBLOCK标志对普通文件也是起作用的.
+
+## sync()
+使包含更新文件信息的所有内核缓冲区(即数据块、指针块、元数据等)刷新到磁盘上. 在 Linux 实现中,sync()调用仅在所有数据已传递到磁盘上(或者至少高速缓存)时返回.
+
+## fsync()
+将使缓冲数据和与打开文件描述符 fd 相关的所有元数据都刷新到磁盘上. 调用 fsync()会强制使文件处于 [Synchronized I/O file integrity completion](/io/io.md) 状态.
+
+## fdatasync()
+类似于fsync(), 只是强制文件处于 synchronized I/O dataintegrity completion 的状态.
+
+## posix_fadvise()
+调用允许进程就自身访问文件数据时可能采取的模式通知内核:
+- POSIX_FADV_NORMAL
+
+	无特别建议(默认行为). 在 Linux 中,该操作将文件预读窗口大小置为默认值(128KB).
+- POSIX_FADV_SEQUENTIAL
+
+	进程预计会从低偏移量到高偏移量顺序读取数据. 在 Linux 中,该操作将文件预读窗口大小置为默认值的两倍.
+- POSIX_FADV_RANDOM
+
+	进程预计以随机顺序访问数据. 在 Linux 中,该选项会禁用文件预读.
+- POSIX_FADV_WILLNEED
+
+	进程预计会在不久的将来访问指定的文件区域. 内核将由 offset 和 len 指定区域的文件数据预先填充到缓冲区高速缓存中. 后续对该文件的 read()调用将不会阻塞磁盘 I/O,只需从缓冲区高速缓存中抓取数据即可.
+- POSIX_FADV_DONTNEED
+
+	进程预计在不久的将来将不会访问指定的文件区域, 这一操作给内核的建议是释放相关的高速缓存页面(如果存在的话). 在 Linux 中会先尝试保存变更的页面, 成功后kernel才尝试释放, 因此	变通的方法之一是在 POSIX_FADV_DONTNEED 操作之前对指定的参数 fd 调用 sync()或 fdatasync().
+- POSIX_FADV_NOREUSE
+
+	进程预计会一次性地访问指定文件区域,不再复用. 这等于提示内核对指定区域访问一次后即可释放页面. 在 Linux 中,该操作目前不起作用.
 
 ## sigaction
 用于处理信号, 替代`signal()`, 更稳定.
@@ -166,6 +200,20 @@ tmpfile()函数执行成功,将返回一个文件流供 stdio 库函数使用。
 
 ## gettimeofday()
 获取当前时间.
+
+## pathconf()和 fpathconf()
+pathconf()和 fpathconf()之间唯一的区别在于对文件或目录的指定方式. pathconf()采用路
+径名方式来指定,而 fpathconf()则使用(之前已经打开的)文件描述符.
+
+## stat()、lstat()以及 fstat()
+获取与文件有关的信息.
+
+lstat()所返回的信息针对的是符号链接自身(而非符号链接所指向的文件).
+
+系统调用stat()和lstat()无需对其所操作的文件本身拥有任何权限,但针对指定pathname 的父目录要有执行(搜索)权限.
+
+## utimensat()系统调用 和 futimens()库函数
+纳秒级精度设置时间戳.
 
 ## 限制值
 参考[unix环境高级编程 - 2.5.4 函数sysconf、 pathconf 和fpathconf]
