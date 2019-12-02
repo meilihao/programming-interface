@@ -11,6 +11,7 @@ ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二
 ![可执行程序的ELF](/misc/img/process/v2-85a5b44f20d53e6e992269dccc20ac6b_1200x500.jpg)
 
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
+> ELF 规格也允许定义一个解释器(ELF 程序头部的 PT_INTERP 元素)来运行程序. 如果定义了解释器,内核则基于指定解释器可执行文件的各段来构建进程映像,转而由解释器负责加载和执行程序.
 
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型

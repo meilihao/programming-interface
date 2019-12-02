@@ -70,6 +70,10 @@ raid卡写模式:
 
 RAID 2.0（独立磁盘冗余数组2.0, Redundant Array of Independent Disks Version 2.0），为增强型RAID技术，有效解决了机械硬盘容量越来越大，重构一块机械硬盘所需时间越来越长，传统RAID组重构窗口越来越大而导致重构期间又故障一块硬盘而彻底丢失数据风险的问题.
 
+> 华为有[raid 2.0+](http://www.learnfuture.com/article/1272)
+> [华为存储虚拟化解决方案](https://kkutysllb.cn/2019/05/29/2019-05-29-%E5%8D%8E%E4%B8%BA%E5%AD%98%E5%82%A8%E8%99%9A%E6%8B%9F%E5%8C%96%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88/)
+> [Linux原生的存储虚拟化软RAID和LVM](https://kkutysllb.cn/2019/06/09/2019-06-09-Linux%E5%8E%9F%E7%94%9F%E7%9A%84%E5%AD%98%E5%82%A8%E8%99%9A%E6%8B%9F%E5%8C%96%E8%BD%AFRAID%E5%92%8CLVM/)
+
 ### RAID 0
 ![](/misc/img/io/20160712135137243.png)
 RAID 0的特点：
@@ -137,7 +141,7 @@ DAS(Direct-Attached Storage), 是某台独立服务器中的一部分，将外�
 
 NAS是前端用网络文件系统提供服务, 后端用任何方式的存储空间, 即通过网络文件系统提供服务的存储设备.
 
-NAS 和 SAN 存储系统的区别是 NAS 有自己的文件系统.
+NAS 和 SAN 存储系统的区别是 NAS 有自己的文件系统, 即**NAS提供文件系统, SAN提供LUN(磁盘)**.
 NAS 是将目光集中在应用、用户和文件以及它们共享的数据上. SAN 是将目光集中在磁盘、磁带以及联
 接它们的可靠的基础结构. 将来从桌面系统到数据集中管理到存储设备的全面解决方案将是`NAS + SAN`.
 

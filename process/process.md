@@ -246,7 +246,7 @@ SUSv3 规定使用 ARG_MAX 常量(定义于`<limits.h>`)或者调用`sysconf (_S
 
 > unix提供了一种机制可以让父进程知道子进程结束时的状态信息. 这种机制就是: 在每个进程退出的时候,内核释放该进程所有的资源,包括打开的文件,占用的内存等, 但是仍然为其保留一定的信息(包括进程号the process ID,退出状态the termination status of the process,运行时间the amount of CPU time taken by the process等, 要直到父进程通过wait / waitpid来取时才释放.
 
-> kill无法杀死僵尸进程, 因为它已死亡, 可通过杀死父进程的方法解决; 如果父进程是init, 则需要重启系统.
+> kill无法杀死僵尸进程, 因为它已死亡(确保了父进程总是可以执行 wait()方法), 可通过杀死父进程的方法解决; 如果父进程是init, 则需要重启系统.
 
 ## 守护进程(daemon)
 一个在后台运行并且不受任何终端控制的进程.
