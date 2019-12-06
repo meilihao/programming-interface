@@ -30,3 +30,81 @@ root可使用 mknod 命令创建设备文件.
 可通过`losetup -a`查看.
 
 snapd的`loopN`可通过`sudo apt autoremove --purge snapd`解决.
+
+## [块设备持久化命名和多路径](https://www.zybuluo.com/tony-yin/note/1214135)
+持久化命名，顾名思义区别于一次性或者是短暂的命名，它是一种长久的并且稳定靠谱的命名方案. 与之形成鲜明对比的就是/dev/sda这种非持久化命名，这两种命名方案各有各的用处，持久化命名方案有四种：by-label、by-uuid、by-id和by-path. 对于那些使用GUID分区表（GPT）的磁盘，还有额外的两种方案：by-partlabel和by-partuuid.
+
+by-label和by-uuid都和文件系统相关，by-label是通过读取设备中的内容获取，by-uuid则是随着每次文件系统的创建而创建，所以by-uuid的持久化程度更高一些；持久化程度最高的要属by-path和by-id了，因为它们都是根据物理设备的位置或者信息而和链接做对应的，by-path会因为路径的变化而变化；而by-id则不会因为路径或者系统的改变而改变，它只会在多路径的情况下发生改变. 这两个在通过虚拟设备名称寻找物理设备的场景下都十分有用.
+
+多路径设备则帮助我们在SAN等场景下提高了数据传输的可用性，目前由于网络带宽的发展，它在iscsi场景下也频繁亮相.
+
+### by-label
+label表示标签的意思，几乎每一个文件系统都有一个标签. 所有有标签的分区都在/dev/disk/by-label目录中列出.
+
+label是通过从设备中的内容（即数据）获取，所以如果将该内容拷贝至另一个设备中，我们也可以通过blkid来获取磁盘的label.
+
+### by-uuid
+UUID是给每个文件系统唯一标识的一种机制，这个标识是在**分区格式化时通过文件系统工具生成**，比如mkfs，这个唯一标识可以起到解决冲突的作用. 所有GNU/Linux文件系统（包括swap和原始加密设备的LUKS头）都支持UUID. FAT和NTFS文件系统并不支持UUID，但是在/dev/disk/by-uuid目录下还是存在着一个更为简单的UID（唯一标识）.
+
+    $ ls -l /dev/disk/by-uuid/
+    total 0
+    lrwxrwxrwx 1 root root 10 May 27 23:31 0a3407de-014b-458b-b5c1-848e92a327a3 -> ../../sda2
+    lrwxrwxrwx 1 root root 10 May 27 23:31 b411dc99-f0a0-4c87-9e05-184977be8539 -> ../../sda3
+    lrwxrwxrwx 1 root root 10 May 27 23:31 CBB6-24F2 -> ../../sda1
+    lrwxrwxrwx 1 root root 10 May 27 23:31 f9fe0b69-a280-415d-a03a-a32752370dee -> ../../sda4
+
+使用UUID方法的优点是，名称冲突发生的可能性大大低于使用Label的方式. 更深层次地讲，它是在创建文件系统时自动生成的. 例如，即使设备插入到另一个系统(可能有一个标签相同的设备)，它仍然是唯一的.
+
+缺点是uuid使得许多配置文件(例如fstab或crypttab)中的长代码行难以读取和破坏格式. 此外，每当一个分区被调整大小或重新格式化时，都会生成一个新的UUID，并且必须(手动)调整配置.
+
+### by-path
+该目录中的条目提供一个符号名称，该符号名称通过用于访问设备的硬件路径引用存储设备，首先引用PCI hierachy中的存储控制器，并包括SCSI host、channel、target和LUN号，以及可选的分区号. 虽然这些名字比使用major和minor号或sd名字更容易，但必须使用谨慎以确保target号不改变在光纤通道SAN环境中(例如，通过使用持久绑定)，如果一个主机适配器切换到到一个不同的PCI插槽的话这个路径也会随之改变. 此外，如果HBA无法探测，或者如果驱动程序以不同的顺序加载，或者系统上安装了新的HBA，那么SCSI主机号都有可能会发生变化.
+
+上面说了很多种情况都会导致by-path的值可能发生变化，但是在同一时间来说，by-path的值是和物理设备是唯一对应的，也就是说不管怎么说by-path是对应物理机器上面的某个位置的，根据by-path可以获取对应物理位置的设备（此前megaraid通过逻辑磁盘获取物理磁盘位置就是根据这个原理）
+
+对于iSCSI设备，路径/名称映射从目标名称和门户信息映射到sd名称.
+应用程序通常不适合使用这些基于路径的名称. 这是因为这些路径引用可能会更改存储设备，从而可能导致将不正确的数据写入设备. 基于路径的名称也不适用于多路径设备，因为基于路径的名称可能被误认为是单独的存储设备，导致不协调的访问和数据的意外修改.
+
+此外，基于路径的名称是特定于系统的. 当设备被多个系统访问时，例如在集群中，这会导致意外的数据更改.
+
+### by-id
+
+此目录中的条目提供一个符号名称，该符号名称通过唯一标识符(与所有其他存储设备不同)引用存储设备. 标识符是设备的属性，但不存储在设备的内容(即数据)中.
+
+该id从设备的全局ID（WWID）或设备序列号中获取. /dev/disk/by-id条目也可能包含一个分区号.
+
+World Wide Identifier（WWID）可用于可靠的识别设备, SCSI标准要求所有SCSI设备提供一个持久的、系统无关的ID. WWID标识符保证对每个存储设备都是唯一的，并且独立于用于访问设备的路径.
+
+这个标识符可以通过发出SCSI查询来获取设备标识重要厂商数据(第0x83页)或单位序列号(第0x80页). 从这些wwid到当前/dev/sd名称的映射可以在/dev/disk/by-id/目录中维护的符号链接中看到.
+例如，具有页0x83标识符的设备将具有:
+
+    scsi-3600508b400105e210000900000490000 -> ../../sda
+
+或者，具有页0x80标识符的设备将具有:
+
+    scsi-SSEAGATE_ST373453LW_3HW1RHM6 -> ../../sda
+
+Red Hat Enterprise Linux 5自动维护从基于wwid的设备名称到系统上当前/dev/sd名称的正确映射. 应用程序可以使用/dev/disk/by-id/的链接引用磁盘上的数据，即使设备的路径改变，甚至当从不同系统访问该设备时都是如此.
+
+但是当设备被插入到硬件控制器的端口时，而这个端口又受另一个子系统控制（即多路径），by-id的值也会改变.
+
+### by-partlabel && by-partuuid
+这两个和上面提到的by-label和by-uuid类似，只不过是在GPT磁盘上.
+
+### 多路径设备
+多路径设备指的是从一个系统到一个设备存在多个路径，这种现象主要出现在光纤网络的SAN下，主要是做数据链路冗余以达到高可用的效果，即对应底层一个物理设备，可能存在多个路径表示它.
+
+如果从一个系统到一个设备有多个路径，那么device-mapper-multipath使用WWID来检测它, 然后在/dev/mapper/wwid中显示一个“伪设备”，例如/dev/ mapper/3600508b400105df70000000ac0000.
+
+Device-mapper-multipath显示映射到非持久标识符：`Host:Channel:Target:LUN`， `/dev/sd名称`，以及`major:minor`号.
+
+    3600508b400105df70000e00000ac0000 dm-2 vendor,product 
+    [size=20G][features=1 queue_if_no_path][hwhandler=0][rw] 
+    \_ round-robin 0 [prio=0][active] 
+     \_ 5:0:1:1 sdc 8:32  [active][undef] 
+     \_ 6:0:1:1 sdg 8:96  [active][undef]
+    \_ round-robin 0 [prio=0][enabled] 
+     \_ 5:0:0:1 sdb 8:16  [active][undef] 
+     \_ 6:0:0:1 sdf 8:80  [active][undef]
+
+Device-mapper-multipath在系统上自动维护每个基于wwid的设备名称和其对应的/dev/sd名称的正确映射. 这些名称即使是在路径发生改变时也是持久的，并且当从不同的系统访问设备时它们仍然是一致的.
