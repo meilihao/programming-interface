@@ -41,6 +41,7 @@ AVX 512指令集强化的向量和浮点计算
 ### RDMA Vs DPDK
 参考:
 - [RDMA](https://yq.aliyun.com/articles/394912)
+- [RDMA学习路线总结](https://my.oschina.net/SysuHuyh5LoveHqq/blog/842767)
 - [借助RDMA功能的互连实现您企业软件定义的数据中心基础设施的效率最大化](https://yq.aliyun.com/articles/137416)
 
 DPDK思路:
