@@ -106,7 +106,7 @@ TLB是特别的cpu缓存, 通过缓存进程最近使用的分页映射来加速
 swap_tendency = mappend_ratio/2 + distree + vm_swappiness
 ```
 
-在linux里面，swappiness的值的大小对如何使用swap分区是有着很大的联系的.两个极端: swappiness=0的时候表示最大限度使用物理内存，然后才是 swap空间, 会增加文件系统开销 ;swappiness＝100的时候表示积极的使用swap分区，并且把内存上的数据及时的搬运到swap空间里面. 对于ubuntu的默认设置，这个值等于60，建议修改为10. 具体这样做：
+在linux里面，swappiness的值的大小对如何使用swap分区是有着很大的联系的.两个极端: swappiness=0的时候表示最大限度使用物理内存，然后才是 swap空间, 会增加文件系统开销 ;swappiness＝100的时候表示积极的使用swap分区，并且把内存上的数据及时的搬运到swap空间里面. 简单的理解就是内存在使用到100-vm.swappiness时, 就开始出现有交换分区的使用. 对于ubuntu的默认设置，这个值等于60，建议修改为10. 具体这样做：
 
 1. 查看你的系统里面的swappiness
 
