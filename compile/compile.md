@@ -92,3 +92,6 @@ multstore:
 1. gcc编译选项
     - `-fPIC` : 位置无关码
     - `-shared` : 生成so
+
+1. debugging symbols
+符号是为了定位调试出错的代码行数
