@@ -217,6 +217,29 @@ bio结构是在文件系统层和块层之间的一个接口.
 	- dev : 特定设备的信息
 	- fs : 特定的文件系统
 	- kernel : 可控制一系列的内核参数
+			- printk : 调整内核printk的打印级别
+
+			```bash
+			# Avoid kernel message corrupt the dialog screen(openvt)
+			# turn off printk to avoid "kernel tainted" message display on setup screen
+			old_printk=`cat /proc/sys/kernel/printk`
+			echo "0 0 0 0" > /proc/sys/kernel/printk
+			```
+
+			```c
+			# printk有8个loglevel,定义在include/linux/kernel.h
+			# /kernel/printk.c:
+			#define DEFAULT_MESSAGE_LOGLEVEL 4
+			#define MINIMUM_CONSOLE_LOGLEVEL 1
+			#define DEFAULT_CONSOLE_LOGLEVEL 7
+
+			int console_printk[4] = {
+				DEFAULT_CONSOLE_LOGLEVEL,  # 终端级别, 小于该优先级的消息才会被输出到控制台
+				DEFAULT_MESSAGE_LOGLEVEL,  # 默认级别
+				MINIMUM_CONSOLE_LOGLEVEL,  # 让用户使用的最小级别
+				DEFAULT_CONSOLE_LOGLEVEL,  # 默认终端级别
+			};
+			```
 	- net : 网络和套接字的设置
 	- vm : 内存管理设置, 包括buffer和cache管理
 - tty : 各个虚拟终端和与它连接的物理设备信息.
