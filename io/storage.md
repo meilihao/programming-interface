@@ -33,6 +33,9 @@
   SAS是Serial Attach SCSI（串行SCSI）, SATA是串行ATA.
 
 ## 硬盘
+参考:
+- [存储基础：ATA、SATA、SCSI、SAS、FC](https://blog.csdn.net/solaraceboy/article/details/79122090)
+
 低级格式化: 划分磁道和扇区的过程, 通常由厂商完成.
 高级格式化: 对磁盘上所存储的数据进行文件系统的标记.
 柱面: 所有盘面上的同一磁道, 在竖直方向上构成一个柱面. 数据的读写按柱面进行, 从上往下在同一柱面的不同盘面进行操作, 只有该柱面的所有操作完成后磁头才会移动到下一个柱面.
@@ -47,13 +50,48 @@
 1. 接口速度
 1. 单碟容量
 
+硬盘类型:
+- HDD
+- SSD
+- 非易失性存储, 比如Intel Optane
+
 磁盘接口技术:
-- ATA : SATA
+- ATA (AT Attachment)接口标准是IDE(Integrated DriveElectronics)硬盘的特定接口标准, 读写速度在100MB/s左右, 已淘汰
+- SATA(Serial ATA) : 当前最新是SATA 3.0, 理论带宽6Gbps, 读写速度不超过600MB/s.
+
+  SATA的热拔插功能形同虚设: 虽然可以热插拔, 但不能象SCSI、FC和SAS那样，具有SAF-TE机制用指示灯显示具体的坏盘位置, 导致可能取下好盘.
+
+  - mSATA, 性能与SATA一样, 但硬盘更小巧, 通常用于轻薄笔记本上.
+- M.2 :  用于取代mSATA的接口, 其在传输带宽, 磁盘容量, 小巧轻薄上都更有优势.
+
+  M.2接口的SSD又分为:
+  1. AHCI标准, AHCI每条命令需要读取4次寄存器, 一共消耗8000次cpu循环, 从而造成2.5μs的延迟.
+  1. NVMe标准, 使用PCIE通道直连CPU, 有效降低数据延迟, 并精简了调用方式. NVMe指令不用读取寄存器, PCIE 3.0*4理论带宽是32Gbps.
 - SCSI
+
+  参考:
+  - [Linux SCSI 子系统剖析](https://www.ibm.com/developerworks/cn/linux/l-scsi-subsystem/)
+
+  小型计算机系统接口（英语：Small Computer System Interface; 简写：SCSI），一种用于计算机和智能设备之间（硬盘、软驱、光驱、打印机、扫描仪等）系统级接口的独立处理器标准.
+  它是一种智能的通用接口标准，它具备与多种类型的外设进行通信的功能. SCSI采用ASPI（高级SCSI编程接口）的标准软件接口使驱动器和计算机内部安装的SCSI适配器进行通信.
+  SCSI并不是专门为硬盘设计的接口, 而是一种广泛应用于小型机上的高速数据传输技术. SCSI接口具有应用范围广、多任务、带宽大、CPU占用率低(因为有独立的数据处理芯片)，以及热插拔等优点. 但较高的价格使得它很难如SATA硬盘般普及，因此SCSI硬盘主要应用于中、高端服务器和高档工作站中.
+
+  SAS(serial attached SCSI)是串行连接的SCSI,是新一代的SCSI技术，和现在流行的Serial ATA(SATA)硬盘相同，都是采用串行技术以获得更高的传输速度，并通过缩短连结线改善内部空间等.
+  此接口的设计是为了改善存储系统的效能、可用性和扩充性，提供与SATA硬盘的兼容性(可将SATA看做是SAS的子协议).
+
+  SCSI 命令是在 Command Descriptor Block (CDB) 中定义的.
+
+  在 ${kernel}/drivers/scsi 可以找到 SCSI 子系统（SCSI 较高层、中间层和各种驱动器）的源代码. SCSI 数据结构则位于 SCSI 源目录，在 ${kernel}/include/scsi 也可以找到.
 - NVMe : 全称Non-Volatile Memory Express，非易失性存储器标准，是使用PCI-E通道的SSD一种规范，相比与现在的AHCI标准，NVMe标准可以带来多方面的性能提升
 
 > NVMe标准定义了SSD的访问命令及操作方式，并且定义了逻辑设备接口标准；和SATA体系类比，NVMe标准替代了SATA体系中的AHCI逻辑接口以及ATA/SCSI命令规范.
 > NVMe over Fabric，有两种类型的传输方式: 使用远程直接内存访问(RDMA)和使用光纤通道(FC-NVMe), 用以取代iSCSI和走光纤通道的SCSI.
+- FC（Fiber Channel）
+
+  FC即为光纤通道技术，最早应用于SAN (存储局域网络). FC接口是光纤对接的一种接口标准形式.
+
+## SES(SCSI Enclosure Services)
+SES是SCSI协议中用于查询设备状态(温度/风扇/电源/指示灯)的一项服务. 这里的设备可以是移动硬盘盒/磁盘阵列柜/硬盘托架等.SES可以让主机端透过SCSI命令去控制外接SCSI设备的电源/风扇以及其他与数据传输无关的东西.要使用这项技术,外置设备和主机上的SCSI/ATA控制芯片都需要支持SES技术才OK. 事实上,目前大多数外置移动硬盘和所有磁盘阵列柜都支持SES规范.
 
 ## RAID
 Redundant Array of Indepent Disks (独立磁盘冗余阵列) 
@@ -185,14 +223,6 @@ IP存储的优势：
 3. IP网络技术成熟, IP存储减少了配置、维护、管理的复杂度.
 
 > aliyun已使用25Gb/s网络
-
-## SCSI
-小型计算机系统接口（英语：Small Computer System Interface; 简写：SCSI），一种用于计算机和智能设备之间（硬盘、软驱、光驱、打印机、扫描仪等）系统级接口的独立处理器标准.
-它是一种智能的通用接口标准，它具备与多种类型的外设进行通信的功能. SCSI采用ASPI（高级SCSI编程接口）的标准软件接口使驱动器和计算机内部安装的SCSI适配器进行通信.
-SCSI接口广泛应用于小型机上的高速数据传输技术。SCSI接口具有应用范围广、多任务、带宽大、CPU占用率低，以及热插拔等优点.
-
-> SAS(serial attached SCSI)是串行连接的SCSI,是新一代的SCSI技术，和现在流行的Serial ATA(SATA)硬盘相同，都是采用串行技术以获得更高的传输速度，并通过缩短连结线改善内部空间等.
-> 此接口的设计是为了改善存储系统的效能、可用性和扩充性，提供与串行ATA (Serial ATA，缩写为SATA)硬盘的兼容性.
 
 ### iSCSI
 参考:
