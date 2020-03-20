@@ -22,3 +22,6 @@ ifb驱动模拟一块虚拟网卡，它可以被看作是一个**只有TC过滤�
 `interN`是vmware的虚拟网卡, 通过`/sys/class/net/inter0/device/vendor`和[`#define 	PCI_VENDOR_ID_VMWARE   0x15AD`](https://doc.dpdk.org/api-1.6/rte__pci__dev__ids_8h.html)得知.
 
 结合服务器型号[SuperStorage 2028R-DE2CR24L](https://www.supermicro.org.cn/en/products/system/2U/2028/SSG-2028R-DE2CR24L.cfm)和`ethtool inter0`的`Speed:  100Mb/s`, 推测是其中的`100Mb private ethernet between controller nodes`, 即双控内连互通网卡.
+
+### 光纤网卡
+光纤网卡的网络接口命名与普通网卡相同, 但`ethtool xxx`的`Supported ports`是`FIBRE`.
