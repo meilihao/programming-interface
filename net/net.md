@@ -705,3 +705,13 @@ ipv4的配置在`/proc/sys/net/ipv4`里, 永久性修改时应保持到`/etc/sys
     2. 如果不存在的话会通过该网卡广播询问目的IP的mac地址,得到后就开始发包了,同时mac地址也会被arp缓存起来.
 - 不在同一网段内, 由网关处理
     通过获取路由器的mac(获取过程与同一网段的情况一样), 再将数据包交给网关路由.
+
+### arp缓存时间
+参考:
+- [Linux实现的ARP缓存老化时间原理解析](https://blog.csdn.net/dog250/article/details/7251689)
+
+/proc/sys/net/ipv4/neigh/ethX目录下的base_reachable_time是ARP缓存的老化时间.  其它兄弟文件都只是优化行为的措施, 比如gc_stale_time是`ARP缓存表项的缓存`的存活时间.
+
+在Linux上想设置ARP缓存老化时间，执行`sysctl -w net.ipv4.neigh.ethX=Y`即可，如果设置别的，只是影响了性能，在Linux中，ARP缓存老化以其变为stale状态为准，而不是以其表项被删除为准，stale状态只是对缓存又进行了缓存.
+
+![ Linux协议栈实现下ARP缓存的状态机](/misc/img/net/0_13289689352Ss2.gif.png)
