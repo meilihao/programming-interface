@@ -144,6 +144,59 @@ socket内核描述:
 
 UDP 是没有连接的,所以不需要三次握手,也就不需要调用 listen 和 connect,但是,UDP 的的交互仍然需要 IP 和端口号,因而也需要 bind. 同样因为UDP 是没有维护连接状态的,因而不需要每对连接建立一组 Socket,而是只要有一个 Socket就能够和多个客户端通信.
 
+## 源码
+### socket调用链(socket()库函数到系统调用，再到内核)
+参考:
+- [Socket与系统调用深度分析*](https://www.cnblogs.com/myguaiguai/p/12041354.html)
+- [代码解析Linux系统调用](https://www.colabug.com/2017/0618/128580/)
+- [一次LINUX网络协议栈的探根之旅](https://www.zybuluo.com/yiltoncent/note/208936)
+- [Tracing Muffins: Part 1 Sending**](https://dev.goodwu.net/post/2018-03-20-linux-kernel-4.0-tracing-muffins/)
+
+1. socket()->__socket():
+```c
+// from glibc(2.31) : socket/socket.c
+/* Create a new socket of type TYPE in domain DOMAIN, using
+   protocol PROTOCOL.  If PROTOCOL is zero, one is chosen automatically.
+   Returns a file descriptor for the new socket, or -1 for errors.  */
+int
+__socket (int domain, int type, int protocol)
+{
+  __set_errno (ENOSYS);
+  return -1;
+}
+
+
+libc_hidden_def (__socket)
+weak_alias (__socket, socket)
+stub_warning (socket)
+```
+
+1. 在__socket()的内部调用了SOCKETCALL或INLINE_SYSCALL，结合`glibc:sysdeps/unix/sysv/linux/socketcall.h`发现最终它们都会转换为`glibc:sysdeps/unix/sysv/linux/x86_64/sysdep.h`的INLINE_SYSCALL, 在进入`INTERNAL_SYSCALL`, 最终走到`internal_syscall3 (SYS_ify (socket), err, args)`
+
+> 网上资料: 从4.3版本内核开始，__ASSUME_SOCKET_SYSCALL 为1???(具体在哪定义), 所以__socket()直接走INLINE_SYSCALL
+> SYS_ify ("socket") -> __NR_socket. `SYS_ify`也在`glibc:sysdeps/unix/sysv/linux/x86_64/sysdep.h`
+> __NR_socket定义在`kernel:arch/x86/entry/syscalls/syscall_64.tbl`, 会由`kernel:arch/x86/entry/syscalls/syscallhdr.sh`生成并放入`arch/x86/include/generated/uapi/asm/unistd_64.h`最后install到`/usr/include/x86_64-linux-gnu/asm/unistd_64.h`
+
+```c
+// from glibc: sysdeps/unix/sysv/linux/socket.c
+int
+__socket (int fd, int type, int domain)
+{
+#ifdef __ASSUME_SOCKET_SYSCALL
+  return INLINE_SYSCALL (socket, 3, fd, type, domain);
+#else
+  return SOCKETCALL (socket, fd, type, domain);
+#endif
+}
+libc_hidden_def (__socket) // 对libc之外屏蔽__socket()函数访问
+weak_alias (__socket, socket) // 如果没有定义socket()函数，那么对socket()的调用将会转到调用__socket()
+```
+1. syscall进入内核, 入口是`kernel(5.6):arch/x86/entry/entry_64.S`的`SYM_CODE_START(entry_SYSCALL_64)`->`kernel:arch/x86/entry/common.c`的do_syscall_64() -> `sys_call_table[__NR_socket]`->`	__x64_sys_socket`(by syscall_64.tbl, 未找到__x64_sys_socket与SYSCALL_DEFINE3的管理, 网上是靠下断点来获知)即`kernel:net/socket.c`的`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`.
+
+> [Change all ENTRY+END to SYM_CODE_*](https://patchwork.kernel.org/patch/11185323/)
+> `kernel:include/linux/syscalls.h`定义了SYSCALL_DEFINE3:`#define SYSCALL_DEFINE3(name, ...) SYSCALL_DEFINEx(3, _##name, __VA_ARGS__)`, 将宏一步步展开即可找到`__x64_sys_socket`和`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`的关联.
+
+
 ## FAQ
 ### socket 阻塞与非阻塞的区别(面试)
 阻塞: 在socket中调用recv函数，如果缓冲区中没有数据，这个函数就会一直等待，直到有数据才返回.

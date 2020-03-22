@@ -1,6 +1,7 @@
 # quic
 - [quic status](https://datatracker.ietf.org/wg/quic/about/)
 - [QUICHE, Google的QUIC和相关协议的实现](https://quiche.googlesource.com/quiche/)
+- [HTTP/3 详解](https://http3-explained.haxx.se/zh)
 
 HTTP 2.0 是基于 TCP 协议的, 而TCP 协议在处理包时是有严格顺序的. 虽然 HTTP 2.0 通
 过多个 stream使得逻辑上一个 TCP 连接可并行传输内容, 然而没有关联的数据到了tcp层, 一前一后进行传输时, stream x 的帧没有收到, 但其他 stream 的帧也会因此阻塞.

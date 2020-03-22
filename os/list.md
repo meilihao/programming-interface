@@ -1,4 +1,9 @@
 # list
+## kernel
+入门:
+1. 深入理解Linux内核
+1. Linux内核源代码情景分析
+
 ## lib
 - [+深度剖析 Linux 共享库的“位置无关”实现原理](https://tinylab.org/shlib-pic/)
 
