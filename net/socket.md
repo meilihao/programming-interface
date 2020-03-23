@@ -173,7 +173,7 @@ stub_warning (socket)
 
 1. 在__socket()的内部调用了SOCKETCALL或INLINE_SYSCALL，结合`glibc:sysdeps/unix/sysv/linux/socketcall.h`发现最终它们都会转换为`glibc:sysdeps/unix/sysv/linux/x86_64/sysdep.h`的INLINE_SYSCALL, 在进入`INTERNAL_SYSCALL`, 最终走到`internal_syscall3 (SYS_ify (socket), err, args)`
 
-> 网上资料: 从4.3版本内核开始，__ASSUME_SOCKET_SYSCALL 为1???(具体在哪定义), 所以__socket()直接走INLINE_SYSCALL
+> 网上资料: 从4.3版本内核开始，__ASSUME_SOCKET_SYSCALL 为1???(找了glibc x86_64编译出的header, 未发现), 所以__socket()直接走INLINE_SYSCALL
 > SYS_ify ("socket") -> __NR_socket. `SYS_ify`也在`glibc:sysdeps/unix/sysv/linux/x86_64/sysdep.h`
 > __NR_socket定义在`kernel:arch/x86/entry/syscalls/syscall_64.tbl`, 会由`kernel:arch/x86/entry/syscalls/syscallhdr.sh`生成并放入`arch/x86/include/generated/uapi/asm/unistd_64.h`最后install到`/usr/include/x86_64-linux-gnu/asm/unistd_64.h`
 
@@ -191,7 +191,7 @@ __socket (int fd, int type, int domain)
 libc_hidden_def (__socket) // 对libc之外屏蔽__socket()函数访问
 weak_alias (__socket, socket) // 如果没有定义socket()函数，那么对socket()的调用将会转到调用__socket()
 ```
-1. syscall进入内核, 入口是`kernel(5.6):arch/x86/entry/entry_64.S`的`SYM_CODE_START(entry_SYSCALL_64)`->`kernel:arch/x86/entry/common.c`的do_syscall_64() -> `sys_call_table[__NR_socket]`->`	__x64_sys_socket`(by syscall_64.tbl, 未找到__x64_sys_socket与SYSCALL_DEFINE3的管理, 网上是靠下断点来获知)即`kernel:net/socket.c`的`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`.
+1. syscall进入内核, 入口是`kernel(5.6):arch/x86/entry/entry_64.S`的`SYM_CODE_START(entry_SYSCALL_64)`->`kernel:arch/x86/entry/common.c`的do_syscall_64() -> `sys_call_table[__NR_socket]`->`	__x64_sys_socket`(by syscall_64.tbl,, 网上是靠下断点来获知)即`kernel:net/socket.c`的`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`.
 
 > [Change all ENTRY+END to SYM_CODE_*](https://patchwork.kernel.org/patch/11185323/)
 > `kernel:include/linux/syscalls.h`定义了SYSCALL_DEFINE3:`#define SYSCALL_DEFINE3(name, ...) SYSCALL_DEFINEx(3, _##name, __VA_ARGS__)`, 将宏一步步展开即可找到`__x64_sys_socket`和`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`的关联.

@@ -21,3 +21,7 @@
     1. 深入理解 LINUX 内核
 1. 阅读 Linux 内核代码(核心逻辑和场景)
     1. LINUX 内核源代码情景分析
+
+## other
+### 源码
+文中引用的kernel/glibc repo来自[清华大学开源软件镜像站](https://mirror.tuna.tsinghua.edu.cn/help/linux-stable.git/)

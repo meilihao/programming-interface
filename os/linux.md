@@ -14,6 +14,19 @@
 # sudo reboot
 ```
 
+## header
+参考:
+- [ Cross-Compiled Linux From Scratch - 5.3. Linux-3.14.21 Headers](http://www.clfs.org/view/CLFS-3.0.0-SYSTEMD/x86_64-64/cross-tools/linux-headers.html)
+
+构建kernel header:
+```sh
+$ git clone -b v5.6-rc7 --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/linux-stable.git
+$ cd linux-stable
+$ make mrproper
+$ make ARCH=x86_64 headers_check # ARCH默认是当前系统的arch
+$ make ARCH=x86_64 INSTALL_HDR_PATH=../kernel_header headers_install
+```
+
 ## glibc
 glibc是gnu发布的libc库，也即c运行库. glibc是linux系统中最底层的api（应用程序开发接口），几乎其它任何的运行库都会倚赖于glibc. glibc除了封装linux操作系统所提供的系统服务外，它本身也提供了许多其它一些必要功能服务的实现，主要的如下：
 （1）string，字符串处理
@@ -61,6 +74,47 @@ $ /lib/x86_64-linux-gnu/libc.so.6
 $ ldd --version
 ```
 
-## arch
+### 编译glibc
+```sh
+$ git clone -b glibc-2.31 --depth=1  https://mirrors.tuna.tsinghua.edu.cn/git/glibc.git
+$ mkdir -v /glibc
+$ cd glibc
+$ mkdir build # glibc要求不能在其源码的root目录上编译
+$ cd build
+$ cat ../INSTALL # 查看编译要求
+$ ../configure -h # 查看编译选项
+$ ../configure --prefix=/glibc --with-headers=../../kernel_header/include
+$ make
+$ sudo make install
+```
+
+## kernel
 参考:
-- [Linux内核arch目录，各个处理器的介绍](https://blog.csdn.net/u014379540/article/details/52263342)
+- [linux 内核裁剪与编译](https://www.jianshu.com/p/3e5f9bc0aa54)
+
+各目录说明
+- arch：包含和硬件体系结构相关的代码，每种平台占一个相应的目录，如 i386、arm、arm64、powerpc、mips 等. Linux 内核目前已经支持30种左右的体系结构.
+
+    在 arch 目录下，存放的是各个平台以及各个平台的芯片对 Linux 内核进程调度、内存管理、中断等的支持，以及每个具体的 SoC 和电路板的板级支持代码.
+    
+    > [各个处理器的介绍](https://blog.csdn.net/u014379540/article/details/52263342)
+- block：块设备驱动程序 I/O 调度
+- certs : 
+- crypto：常用加密和散列算法（如AES、SHA等)，还有一些压缩和 CRC 校验算法
+- Documentation：内核各部分的通用解释和注释
+- drivers：设备驱动程序每个不同的驱动占用一个子目录，如 char、block、net、mtd、 i2c 等
+- fs：所支持的各种文件系统，如EXT、FAT、NTFS、JFFS2等
+- include：内核 API 级別头文件，与系统相关的头文件放置在 include/linux 子目录下
+- init：内核初始化代码著名的 stait_kemel() 就位于 init/main.c 文件中
+- ipc：进程间通信的代码
+- kernel：内核最核心的部分，包括进程调度、定时器等，而和平台相关的一部分代码放在 arch/*/kemel 目录下
+- lib：库文件代码
+- mm：内存管理代码，和平台相关的一部分代码放在arch/*/mm目录下
+- net：网络相关代码，实现各种常见的网络协议
+- samples :
+- scripts：用于配置内核的脚本文件
+- security：主要是一个 SELinux 的模块
+- sound：ALSA、OSS 音频设备的驱动核心代码和常用设备驱动
+- tools :
+- usr：实现用于打包和压缩的 cpio 等
+- virt : 
