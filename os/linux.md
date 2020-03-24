@@ -27,6 +27,53 @@ $ make ARCH=x86_64 headers_check # ARCH默认是当前系统的arch
 $ make ARCH=x86_64 INSTALL_HDR_PATH=../kernel_header headers_install
 ```
 
+### syscall
+```sh
+$ grep -r __NR_socket kernel_header/include |grep -v "socketcall" |grep -v "socketpair"
+asm/unistd_32.h:#define __NR_socket 359 # unistd_32.h是x86的syscall
+asm/unistd_64.h:#define __NR_socket 41 # unistd_64.h是x86_64的syscall
+asm/unistd_x32.h:#define __NR_socket (__X32_SYSCALL_BIT + 41) # unistd_x32.h是x32的syscall
+asm-generic/unistd.h:#define __NR_socket 198 # asm-generic/unistd.h 是 统一预设的syscall, 用于没有特殊指定syscall的arch syscall, 比如arm64
+asm-generic/unistd.h:__SYSCALL(__NR_socket, sys_socket)
+```
+
+> [所有arch的syscall number](https://fedora.juszkiewicz.com.pl/syscalls.html)
+
+```sh
+# include合并了linux 5.6和glic 2.31的headers, 因此该目录等价于/usr/include
+# 从时间上分析, unistd.h大致分两种, 结合kernel包含的`asm-generic/unistd.h`, 因此断定`Mar 23 18:26`的是glibc, 而`Mar 23 17:59`为kernel的.
+$ mkdir include && cd include
+$ cp -rpd ../kernel_header/include/* .
+$ cp -rpd ../glibc_install/include/* .
+$ ls -alt `find . |grep "unistd"`
+-rw-r--r-- 1 chen chen  1613 Mar 23 18:26 ./bits/unistd_ext.h
+-rw-r--r-- 1 chen chen 13316 Mar 23 18:26 ./bits/unistd.h
+-rw-r--r-- 1 chen chen    20 Mar 23 18:26 ./sys/unistd.h
+-rw-r--r-- 1 chen chen 42804 Mar 23 18:26 ./unistd.h
+-rw-r--r-- 1 chen chen   220 Mar 23 17:59 ./linux/unistd.h
+-rw-r--r-- 1 chen chen 30514 Mar 23 17:59 ./asm-generic/unistd.h
+-rw-r--r-- 1 chen chen 11529 Mar 23 17:59 ./asm/unistd_32.h
+-rw-r--r-- 1 chen chen  9340 Mar 23 17:59 ./asm/unistd_64.h
+-rw-r--r-- 1 chen chen   361 Mar 23 17:59 ./asm/unistd.h
+-rw-r--r-- 1 chen chen 16465 Mar 23 17:59 ./asm/unistd_x32.h
+$ cat ./linux/unistd.h |grep "include"
+#include <asm/unistd.h>
+$ cat ./asm/unistd.h |grep "include"
+#  include <asm/unistd_32.h>
+#  include <asm/unistd_x32.h>
+#  include <asm/unistd_64.h>
+$ cat ./sys/unistd.h |grep "include"
+#include <unistd.h>
+$ cat ./unistd.h |grep "include"
+...
+# include <bits/unistd.h>
+#include <bits/unistd_ext.h>
+```
+
+各unistd.h区别???
+
+> 系统标准头文件位置： /usr/include下，以及安装库的头文件位置：/usr/local/include/.
+
 ## glibc
 glibc是gnu发布的libc库，也即c运行库. glibc是linux系统中最底层的api（应用程序开发接口），几乎其它任何的运行库都会倚赖于glibc. glibc除了封装linux操作系统所提供的系统服务外，它本身也提供了许多其它一些必要功能服务的实现，主要的如下：
 （1）string，字符串处理

@@ -3,6 +3,7 @@
 入门:
 1. 深入理解Linux内核
 1. Linux内核源代码情景分析
+1. [操作系统真象还原](https://yifengyou.gitbooks.io/os-elephant/content/)
 
 ## lib
 - [+深度剖析 Linux 共享库的“位置无关”实现原理](https://tinylab.org/shlib-pic/)

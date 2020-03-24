@@ -1,5 +1,8 @@
 # gcc
+查看扩展后的header:`printf "#include <sys/syscall.h>\nSYS_read" | gcc -E -`; 查看其架构对应32位的扩展结果:`printf "#include <sys/syscall.h>\nSYS_read" | gcc -m32 -E -`.
+
 ## 扩展
+
 ### weak alias
 指定函数的weak属性. 编译glibc时将"函数别名"属性保存在weak symbol中, 这种用法可以在其他地方定义真实的函数. 编译器会自动识别出哪个是真实的定义.
 
