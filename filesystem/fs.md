@@ -4,6 +4,26 @@
 [linux有FHS(Filesystem Hierarchy Standard,文件系统层次结构)标准](http://refspecs.linuxfoundation.org/fhs.shtml):
 ![](/misc/img/fs/052049040017593.png)
 
+Linux 系统中常见的目录名称以及相应内容:
+- /boot 开机所需文件—内核、开机菜单以及所需配置文件等
+- /dev 以文件形式存放任何设备与接口
+- /etc 配置文件
+- /home 用户家目录
+- /bin 存放单用户模式下还可以操作的命令
+- /lib 开机时用到的函数库，以及/bin 与/sbin 下面的命令要调用的函数
+- /sbin 开机过程中需要的命令
+- /media 用于挂载设备文件的目录
+- /opt 放置第三方的软件
+- /root 系统管理员的家目录
+- /srv 一些网络服务的数据文件目录
+- /tmp 任何人均可使用的“共享”临时目录
+- /proc 虚拟文件系统，例如系统内核、进程、外部设备及网络状态等
+- /usr/local 用户自行安装的软件
+- /usr/sbin Linux 系统开机时不会使用到的软件/命令/脚本
+- /usr/share 帮助与说明文件，也可放置共享文件
+- /var 主要存放经常变化的文件，如日志
+- /lost+found 当文件系统发生错误时，将一些丢失的文件片段存放在这里
+
 **目录(directory)**是一种逻辑上包含若干文件的文件. 每个文件都会包含一个文件名(filename)和若干文件属性(文件类型, 大小, 所有者, 权限, 最后访问时间/修改时间等).
 
 创建新目录时会自动创建两个文件名： `.`和`..`, 分别表示当前目
@@ -14,13 +34,13 @@
 ## 文件类型
 定义在[`#include <sys/stat.h>`](https://en.wikibooks.org/wiki/C_Programming/POSIX_Reference/sys/stat.h)里, 可通过`os.FileMode`进行位操作来判断.
 
-- 普通文件(regular file)
-- 目录文件(directory file)
-- 块特殊文件(block special file)
-- 字符特殊文件(character special file)
-- FIFO : 管道, 用于进程间通信. 与socket类似, 以由socket取代. 
+- - :普通文件(regular file)
+- d : 目录文件(directory file)
+- b : 块特殊文件(block special file)
+- c : 字符特殊文件(character special file)
+- p : 管道(FIFO), 用于进程间通信. 与socket类似, 以由socket取代. 
 - 套接字(socket) : 用于进程间的网络通信
-- 符号链接(symbolic link) : 指向另一个文件
+-l : 符号链接(symbolic link) : 指向另一个文件
 
 可通过`ls -ld xxx`查看.
 
@@ -280,7 +300,12 @@ bio结构是在文件系统层和块层之间的一个接口.
 > /dev/fd 实际上是一个符号链接,链接到 Linux 所专有的/proc/self/fd 目录.
 > `ls | diff /dev/fd/0 oldlist`取代`ls | diff - oldlist`, 以避免部分命令未实现`-`(表示stdin/stdout)或部分命令使用`-`作为命令行选项结束的分隔符.
 
+## xfs
+XFS是一种高性能的日志文件系统，而且是 RHEL 7 中默认的文件管理系统. 它的优势在发生意外宕机后尤其明显，即可以快速地恢复可能被破坏的文件，而且强大的日志功能只用花费极低的计算和存储性能, 并且它最大可支持的存储容量为 18EB.
+
 ## ext4
+它支持的存储容量高达 1EB（1EB=1,073,741,824GB），且能够有无限多的子目录. 另外，Ext4 文件系统能够批量分配 block 块，从而极大地提高了读写效率. 它是最常见的fs.
+
 文件系统由以下几部分组成:
 - 引导块 : 总是作为文件系统的首块. 引导块不为文件系统所用,只是包含用来引导操作系统的信息. 操作系统虽然只需一个引导块,但所有文件系统都设有引导块(其中的绝大多数都未使用).
 - 超级块:紧随引导块之后的一个独立块,包含与文件系统有关的参数信息,其中包括:
