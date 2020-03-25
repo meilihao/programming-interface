@@ -135,7 +135,7 @@ $ make
 $ sudo make install
 ```
 
-## kernel
+## kernel 5.6
 参考:
 - [linux 内核裁剪与编译](https://www.jianshu.com/p/3e5f9bc0aa54)
 
@@ -145,12 +145,150 @@ $ sudo make install
     在 arch 目录下，存放的是各个平台以及各个平台的芯片对 Linux 内核进程调度、内存管理、中断等的支持，以及每个具体的 SoC 和电路板的板级支持代码.
     
     > [各个处理器的介绍](https://blog.csdn.net/u014379540/article/details/52263342)
-- block：块设备驱动程序 I/O 调度
-- certs : 
+- block：块设备I/O层(驱动程序,I/O调度等)
+- certs : 认证相关
 - crypto：常用加密和散列算法（如AES、SHA等)，还有一些压缩和 CRC 校验算法
 - Documentation：内核各部分的通用解释和注释
 - drivers：设备驱动程序每个不同的驱动占用一个子目录，如 char、block、net、mtd、 i2c 等
-- fs：所支持的各种文件系统，如EXT、FAT、NTFS、JFFS2等
+
+    - accessibility – 可访问设备，目前里面包括盲人设备
+    - acpi – 高级配置和电源管理接口
+    - amba – ARM研发的AMBA片上总线相关
+    - android – Android平台支持的设备
+    - ata – 硬盘接口技术Advanced Technology Attachment相关驱动
+    - atm – 异步传输模式设备驱动
+    - auxdisplay – 辅助显示设备驱动
+    - base
+    - bcma – Broadcom基于amba总线驱动上开发的
+    - block – 块设备驱动
+    - bluetooth – 蓝牙设备驱动
+    - bus –
+    - cdrom – CDROM设备驱动
+    - char – 字符设备驱动
+    - clk – 时钟驱动框架，与平台相关
+    - clocksource – 时钟源设备驱动
+    - connector – 内核空间和用户空间通信的新机制连接器
+    - cpufreq – cpu动态变频
+    - cpuidle –
+    - crypto – 加解密设备驱动
+    - dax – 直接访问，后面的X只是为了看起来酷，对于新兴的NVDIMM设备，可直接访问此设备上的文件系统
+    - dca – 直接缓存访问??
+    - devfreq – 设备相关的频率调节
+    - dio – dio设备驱动
+    - dma – dma设备驱动
+    - dma-buf – 提供DMA缓存的设备驱动
+    - edac – 错误检测和纠正设备驱动
+    - eisa –
+    - extcon – 外部连接器
+    - firewire – IEEE1394 firewire设备驱动
+    - firmware –
+    - fpga – FPGA框架驱动
+    - fsi –
+    - gnss -
+    - gpio – GPIO驱动，与处理器相关
+    - gpu – 包括DRM图形渲染架构，访问图形界面的DMA引擎，IMX的IPU图像处理单元等
+    - greybus -
+    - hid – 人机交互设备驱动
+    - hsi – 高速同步串口接口
+    - hv – 微软的虚拟化技术驱动
+    - hwmon – 硬件监控芯片驱动，监控类传感器的芯片驱动
+    - hwspinlock – 硬件自旋锁框架接口
+    - hwtracing – 硬件跟踪调试驱动
+    - i2c – i2c子系统总线驱动
+    - i3c -
+    - ide – 管理ATA/IDE和ATAPI单元，主要还是硬盘驱动IDE和CD-ROM驱动ATAPI
+    - idle – Intel处理器的idle处理驱动
+    - iio – 工业I/O子系统，包括各种使用不同物理接口(i2c, spi, etc)传感器的驱动
+    - infiniband – 支持多并发链接的”转换线缆”技术的硬件设备驱动
+    - input – input设备子系统，包括各种输入设备的驱动，键盘、混合设备、鼠标、触摸屏、游戏接口、游戏操作杆、触控rmi4、触摸面板、串口IO输入设备
+    - interconnect
+    - iommu
+    - ipack
+    - irqchip
+    - isdn
+    - Kconfig
+    - leds
+    - lightnvm
+    - macintosh
+    - mailbox
+    - Makefile
+    - mcb
+    - md
+    - media
+    - memory
+    - memstick
+    - message
+    - mfd
+    - misc
+    - mmc
+    - mtd
+    - mux
+    - net
+    - nfc
+    - ntb
+    - nubus
+    - nvdimm
+    - nvme
+    - nvmem
+    - of
+    - opp
+    - oprofile
+    - parisc
+    - parport
+    - pci
+    - pcmcia
+    - perf
+    - phy
+    - pinctrl
+    - platform
+    - pnp
+    - power
+    - powercap
+    - pps
+    - ps3
+    - ptp
+    - pwm
+    - rapidio
+    - ras
+    - regulator
+    - remoteproc
+    - reset
+    - rpmsg
+    - rtc
+    - s390
+    - sbus
+    - scsi
+    - sfi
+    - sh
+    - siox
+    - slimbus
+    - soc
+    - soundwire
+    - spi
+    - spmi
+    - ssb
+    - staging
+    - target
+    - tc
+    - tee
+    - thermal
+    - thunderbolt
+    - tty
+    - uio
+    - usb
+    - vfio
+    - vhost
+    - video
+    - virt
+    - virtio
+    - visorbus
+    - vlynq
+    - vme
+    - w1
+    - watchdog
+    - xen
+    - zorro
+- fs：vfs和所支持的各种文件系统，如EXT、FAT、NTFS、JFFS2等
 - include：内核 API 级別头文件，与系统相关的头文件放置在 include/linux 子目录下
 - init：内核初始化代码著名的 stait_kemel() 就位于 init/main.c 文件中
 - ipc：进程间通信的代码
@@ -158,10 +296,36 @@ $ sudo make install
 - lib：库文件代码
 - mm：内存管理代码，和平台相关的一部分代码放在arch/*/mm目录下
 - net：网络相关代码，实现各种常见的网络协议
-- samples :
-- scripts：用于配置内核的脚本文件
-- security：主要是一个 SELinux 的模块
+- samples : 示例代码
+- scripts：用于配置和编译内核的脚本文件
+- security：linux安全模块,主要是一个 SELinux 的模块
 - sound：ALSA、OSS 音频设备的驱动核心代码和常用设备驱动
-- tools :
+- tools : 在linux开发中有用的工具
 - usr：实现用于打包和压缩的 cpio 等
-- virt : 
+- virt : 虚拟化基础结构
+
+### 配置kernel
+各种选项以CONFIG_FEATRUE形式表示, 前缀是CONFIG.
+
+部分选项支持多选, 比如PREEMPT(内核抢占):
+- no : 不支持
+- yes: 支持, 会编入kernel image
+- module : 编译这部分代码时已模块(一种可以动态安装的独立代码段)方式编译
+
+通常驱动程序都会提供三选一的配置项.
+
+配置工具:
+- `make config` : 字符界面. 要求手动设定所有的选项，即使之前曾设定过
+- `make oldconfig` : 所有选择都基于已有的.config文件，只对新特性和新设定提出询问
+- `make menuconfig` : 基于ncurse库编制的图形界面工具, **推荐**
+- `make gconfig` : 基于gtk+的图形工具
+- `make defconfig` : 基于默认的配置为本机的体现结构创建一个配置
+
+生成的配置会保存在kernel root的`.config`中.
+
+> 可将make menuconfig 当做make oldconfig的图形版本. 在将新的设定更新到.config中去的同时，将原来的.config文件保存为.config.old
+> 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
+
+使用`make -j${N}`编译完kernel后可用`make modules_install`安装已编译的模块到`/lib/modules`.
+
+> distcc和ccache可加速编译kernel.
