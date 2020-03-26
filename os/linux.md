@@ -27,6 +27,11 @@ $ make ARCH=x86_64 headers_check # ARCH默认是当前系统的arch
 $ make ARCH=x86_64 INSTALL_HDR_PATH=../kernel_header headers_install
 ```
 
+基本的头文件在`include`下, 比如`<linux/inotify.h>`对应`include/linux/inotify.h`
+arch相关的头文件在`arch/<arch>/include/asm`下, 比如x86_64的`<asm/ioctl.h>`在`arch/x86/include/generated/uapi/asm/ioctl.h`(ioctl.h需要构建出来, uapi参考下面连接)
+
+> [Linux kernel uapi header file（用户态头文件, from 3.7）](https://lwn.net/Articles/507794/):为了解决include recursive（循环包含头文件）的问题及减少与简化kernel-only header的size.
+
 ### syscall
 ```sh
 $ grep -r __NR_socket kernel_header/include |grep -v "socketcall" |grep -v "socketpair"
@@ -329,3 +334,19 @@ $ sudo make install
 使用`make -j${N}`编译完kernel后可用`make modules_install`安装已编译的模块到`/lib/modules`.
 
 > distcc和ccache可加速编译kernel.
+
+## FAQ
+### kernel开发与用户空间程序开发的差异
+1. kernel开发既不能访问C库也不能访问标准的C头文件
+
+    先有鸡还是先有蛋的悖论.
+
+1. kernel开发必须使用gnu c
+1. kernel开发缺乏像用户空间那样的内存保护机制
+1. kernel开发时难以执行浮点运算???
+1. kernel给每个进程只有一个很小的定长堆栈
+1. kernel支持异步中断,抢占和SMP, 因此必须时刻注意同步和并发
+1. 要考虑可移植的重要性
+
+### kernel调试
+- printk : 支持设置优先级
