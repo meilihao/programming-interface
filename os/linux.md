@@ -24,13 +24,15 @@ $ git clone -b v5.6-rc7 --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/linux
 $ cd linux-stable
 $ make mrproper
 $ make ARCH=x86_64 headers_check # ARCH默认是当前系统的arch
-$ make ARCH=x86_64 INSTALL_HDR_PATH=../kernel_header headers_install
+$ make ARCH=x86_64 INSTALL_HDR_PATH=../kernel_header headers_install # headers_install将适用于用户空间的内核headers(即linux发行版上的linux-headers软件包)导出, 因此没有内核task_struct的定义
 ```
 
 基本的头文件在`include`下, 比如`<linux/inotify.h>`对应`include/linux/inotify.h`
 arch相关的头文件在`arch/<arch>/include/asm`下, 比如x86_64的`<asm/ioctl.h>`在`arch/x86/include/generated/uapi/asm/ioctl.h`(ioctl.h需要构建出来, uapi参考下面连接)
 
 > [Linux kernel uapi header file（用户态头文件, from 3.7）](https://lwn.net/Articles/507794/):为了解决include recursive（循环包含头文件）的问题及减少与简化kernel-only header的size.
+
+注意: `kernel:arch/xxx/include/asm/...`下的头文件是对应`kernel:include/asm-generic/...`下的平台相关实现，若arch目录下没有相同的头文件，则使用asm-generic目录下的，arch目录下的头文件可能直接include asm-generic目录下的相关头文件.
 
 ### syscall
 ```sh
@@ -343,10 +345,33 @@ $ sudo make install
 
 1. kernel开发必须使用gnu c
 1. kernel开发缺乏像用户空间那样的内存保护机制
-1. kernel开发时难以执行浮点运算???
+
+    用户空间程序进行非法内存访问, kernel会发送SIGSEGV信号并终止它.
+    kernel发生内存错误会导致oops(错误信息).
+
+    kernel的内存不分页.
+1. kernel开发时难以执行浮点运算
+
+    浮点的编码跟整数编码是不一样的，计算时需要专门的寄存器和浮点计算单元来处理，一个浮点运算指令使用的CPU周期也更长，因此对于内核来说就会想尽量回避浮点数运算，譬如说浮点数经过定点整数转换(`-msoft-float`)后进行运算，效率会高很多，即使CPU带有浮点数运算部件(fpu)，一般内核还是要避免直接进行浮点数运算，因为这些部件有可能被用户进程占用了，内核要判断这些浮点数部件是否被占用，保护现场，然后用浮点运算部件计算结果，恢复现场，开销会很大。如果CPU不支持浮点数运算，也就只能软件实现浮点数运算.
 1. kernel给每个进程只有一个很小的定长堆栈
+
+    在x86体系上栈的大小在编译时配置, 32位是8k, 64位是16k.
+    > PAGE_SIZE为4KB(32位和64位相同)
 1. kernel支持异步中断,抢占和SMP, 因此必须时刻注意同步和并发
+
+    常用的解决竞争的方法是自旋锁和信号量.
 1. 要考虑可移植的重要性
 
 ### kernel调试
 - printk : 支持设置优先级
+- kdump
+
+    解析内核dump，首先需要符号表，也就是未经过压缩的内核镜像，通常我们也叫它vmlinux. 通常系统默认并没有自带vmlinux，但可以通过安装系统版本对应的debug包来获取它.
+
+    redhat下要安装kernel-debug以及kernel-debug-info，而在ubuntu下，对应的包名是dbgsym.
+
+    kernel dump调试工具主要有Trace32和crash两个，trace32是商业软件，图形化界面，功能强大，但是收费. 而crash则是开源工具，且基于命令行模式，但是功能并不逊于Trace32.
+
+    crash工具启动时如果不给它传递kdump文件，那么它默认就是调试当前内存中的内核. `su root`然后直接在命令行输入`crash vmlinux-4.4.0-87-generic`即可.
+
+    在ubuntu系统中，通过安装linux-crashdump工具，我们可以捕捉kdump. Kdump是一个Linux内核崩溃转储机制，这个机制的原理是在内存中保留一块区域，这块区域用来存放capture kernel，当前的内核发生crash后，通过kexec把保留区域的capture kernel运行起来，由capture kernel负责把crash kernel的完整信息--包括CPU寄存器、堆栈数据等--转储到文件中，文件的存放位置可以是本地磁盘，也可以是网络.
