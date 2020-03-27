@@ -148,6 +148,25 @@ linux使用slab分配task_struct, 便于对象复用和缓存着色(cache colori
 
 内核引入thread_info的一大原因是方便通过它直接找到进(线)程的task_struct指针，x86 平台的thread_info结构体定义在`<asm/thread_info.h>`. 但Linux内核引入percpu变量之后，逐渐通过percpu变量来实现current宏，并且从Linux 4.1开始，x86移除了kernel_stack，并逐渐开始简化thread_info结构体，直到Linux 4.9彻底不再通过thread_info获取task_struct指针，而是直接通过current_struct percpu变量存放task_struct的指针.
 
+task_struct包含一个指向父进程的parent指针和一个指向子进程的children 链表.
+
+init进程的进程描述符是作为init_task静态分配的.
+
+查找init: `for (task = current; task != &init_task; task=task->parent)`
+对于给定进程, 获取task list中的下一个进程`list_entry(task->task.next, struct task_struct, tasks)`(by next_task(task)宏);获取上一个进程`list_entry(task->task.prev, struct task_struct, tasks)`(by prev_task(task)宏)
+遍历task list: `for_each_process(task)`, 开销较大.
+
+### 线程实现
+linux将线程当做进程来实现.
+
+线程仅是在call clone时传递一些参数标志来指明需要共享的资源: `clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND, 0)`
+
+> windows和sum solaris等提供专门的线程机制(也叫轻量级进程, lightweight process).
+> [clone()参数标志](Linux内核设计与实现v3-3.4.1 创建线程), 它定义在`<linux/sched.h>`
+
+内核线程和普通进程的区别是它没有独立的地址空间(即指向地址空间的mm属性被设为NULL), 它只运行在内核空间, 可被调度和抢占.
+内核线程只能由其他内核线程创建, 并从kthreadd内核进程中衍生出来, 创建接口定义在`<linux/kthread.h>`中. 新创建的线程处于不可运行状态, 需要wake_up_process()唤醒.
+
 ## 进程组(process group)
 一个或多个**进程**(进程+子进程+后裔进程)的集合.进程组会有一个进程组领导进程 (process group leader)，领导进程的PID则成为进程组的ID (process group ID, PGID)，以识别进程组.
 PGID不会因领导进程退出而受到影响，且fork调用也不会改变PGID.

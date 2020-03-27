@@ -81,21 +81,23 @@ state:
 
 ![state 流转](/misc/img/task_state_change.png)
 
-TASK_RUNNING并不是说进程正在运行,而是表示进程在时刻准备运行的状态, 而是`运行中+在(运行)队列中`. 当处于这个状态的进程获得时间片的时候,就是在运行中;如果没有获得时间片,就说明它被其他进程抢占了,在等待再次分配时间片.
+TASK_RUNNING并不是说进程正在运行, 而是`运行中+在运行队列中等待执行`. 当处于这个状态的进程获得时间片的时候,就是在运行中;如果没有获得时间片,就说明它被其他进程抢占了,在等待再次分配时间片. 
 
 在运行中的进程,一旦要进行一些I/O操作,需要等待I/O完毕,这个时候会释放CPU,进入睡眠状态.
 
 在Linux中,有两种睡眠状态:
 - TASK_INTERRUPTIBLE ,可中断的睡眠状态
-    这是一种浅睡眠的状态,虽然在睡眠,等待I/O完成,但是这个时候一个信号来的时候,进程还是要被唤醒. 只不过唤醒后,不是继续刚才的操作,而是进行信号处理. 当然也可以根据自己的意愿,来写信号处理函数,例如收到某些信号,就放弃等待这个I/O操作完成,直接退出,也可收到某些信息,继续等待
+	进程在睡眠(即被阻塞), 等待某些条件达成. 一旦这些条件达成, kernel就会把进程状态设置为TASK_RUNNING. 处于此状态的进程会被信号唤醒而随时准备投入运行.
+
+    **这是一种浅睡眠的状态,虽然在睡眠,等待I/O完成, 进程被信号唤醒后,不是继续刚才的操作,而是进行信号处理**. 当然也可以根据自己的意愿,来写信号处理函数,例如收到某些信号,就放弃等待这个I/O操作完成,直接退出,也可收到某些信息,继续等待
 - TASK_UNINTERRUPTIBLE ,不可中断的睡眠状态
-    这是一种深度睡眠状态,不可被信号唤醒,只能死等I/O操作完成. 一旦I/O操作因为特殊原因不能完成,这个时候,谁也叫不醒这个进程了(kill本身也是一个信号,既然这个状态不可被信号唤醒,kill信号也被忽略了).除非重启电脑,没有其他办法. 因此,这其实是一个比较危险的事情,除非极其有把握,不然还是不要设置成该状态.
+    这是一种深度睡眠状态,**不可被信号唤醒**,只能死等I/O操作完成. 一旦I/O操作因为特殊原因不能完成,这个时候,谁也叫不醒这个进程了(kill本身也是一个信号,既然这个状态不可被信号唤醒,kill信号也被忽略了).除非重启电脑,没有其他办法. 因此,这其实是一个比较危险的事情,除非极其有把握,不然还是不要设置成该状态.
 
 于是就有了一种新的进程睡眠状态,TASK_KILLABLE,可以终止的新睡眠状态. 进程处于这种状态中,它的运行原理类似TASK_UNINTERRUPTIBLE,只不过可以响应致命信号.从定义可以看出,TASK_WAKEKILL用于在接收到致命信号时唤醒进程,而TASK_KILLABLE相当于这两位都设置了.
 
-TASK_STOPPED是在进程接收到SIGSTOP、SIGTTIN、SIGTSTP或者SIGTTOU信号之后进入该状态. 进程在等待一个恢复信息比如SIGCONT.
+TASK_STOPPED是在进程接收到SIGSTOP、SIGTTIN、SIGTSTP或者SIGTTOU信号之后进入该状态, 同时在调试期间接收到任何信号也会进入该状态. 进程在等待一个恢复信息比如SIGCONT.
 
-TASK_TRACED表示进程被debugger等进程监视,进程执行被调试程序所停止. 当一个进程被另外的进程所监视,每一个信号都会让进程进入该状态.
+TASK_TRACED表示进程被debugger(比如ptrace)等进程监视,进程执行被调试程序所停止. 当一个进程被另外的进程所监视,每一个信号都会让进程进入该状态.
 
 **一旦一个进程要结束,先进入的是EXIT_ZOMBIE状态**,但是这个时候它的父进程还没有使用wait()等系统调用来获知它的终止信息及释放它的所有数据结构,此时进程就成了僵尸进程.
 
@@ -139,6 +141,34 @@ state是和进程的运行、调度有关系, 还有其他的一些状态称为�
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
 ```
+
+设置state: `set_current_state`, 除非必要(在SMP系统上), 它会设置内存屏障来强制其他cpu做重新排序, 否则等价于`task->state=state`
+
+### do_exit
+定义于`kernel/exit.c`, 工作内容:
+1. 将task_struct中的flags设为PF_EXITING
+1. call del_timer_sync() 删除内核定时器
+1. BSD进程记账功能开启时, call acct_update_integrals()来输出记账信息
+1. call exit_mm()释放进程占用的mm_struct, 如果mm_struct没有被共享的话, 就彻底释放它
+1. call sem__exit(), 如果进程在排队等待IPC信号, 则取消排队
+1. call exit_files()和exit_fs(), 递减文件描述符和文件系统数据的引用计数. 如果某个引用计数将为0, 则释放它.
+1. 把存放在task_struct的exit_code中的任务退出码置位exit()提供的退出码(供父进程随时检索), 或着去完成其他由内核机制规定的退出动作.
+1. call exit_notify()向父进程发送信号, 将task_struct的exit_state设为EXIT_ZOMBIE.
+1. call schedule()切换到新的进程. 因为处于EXIT_ZOMBIE状态的进程不再被调度.
+
+> exit_notify()会call forget_original_parent()-> find_new_reaper()来寻找父进程.
+
+> 处于EXIT_ZOMBIE状态的进程所占用的所有内存就是内核栈, thread_info和task_struct, 此时进程存在的唯一作用是向它的父进程提供信息. 父进程获取信息或通知内核那是无用信息后, 进程持有的所有剩余内存被释放.
+
+wait()->wait4(), 工作内容:
+1. 挂起调用它的进程, 直到其中一个子进程退出, 此时得到返回的该子进程的pid, 即它设置的退出码.
+1. call release_task()
+1. call __exit_signal()->_unhash_process()->detach_pid()从pidhash上删除该进程, 同时也在task list上删除该进程.
+1. __exit_signal()释放所有剩余的资源, 并进行最终统计和记录
+1. 如果这个进程是线程组的最后一个进程, 并且领头进程已死, 那么release_task()会通知僵死的领头进程的父进程.
+1. call put_task_struct()释放进程内核栈和thread_info, 并释放task_struct所占用的slab高速缓存.
+
+孤儿进程处理: 为子进程在当前线程组内找一个线程作为父亲, 如果不行就让init来作为父进程.
 
 ### 调度
 ```c

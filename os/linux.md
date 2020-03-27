@@ -81,6 +81,8 @@ $ cat ./unistd.h |grep "include"
 
 > 系统标准头文件位置： /usr/include下，以及安装库的头文件位置：/usr/local/include/.
 
+系统调用和异常处理程序是kernel明确定义的接口. 进程只有通过这些接口才能陷入内核执行即对内核的所有访问都必须通过这些接口.
+
 ## glibc
 glibc是gnu发布的libc库，也即c运行库. glibc是linux系统中最底层的api（应用程序开发接口），几乎其它任何的运行库都会倚赖于glibc. glibc除了封装linux操作系统所提供的系统服务外，它本身也提供了许多其它一些必要功能服务的实现，主要的如下：
 （1）string，字符串处理

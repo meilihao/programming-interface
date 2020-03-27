@@ -19,6 +19,23 @@ glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提�
 ## fork
 ![](/misc/img/5uugf8fxqg.png)
 
+fork使用了copy-on-write. 它的实际开销是复制父进程的页表以及给子进程创建进程描述符.
+linux通过clone()系统调用来实现fork(). 其可通过一系列参数标志来指明父子进程需要共享的资源. fork(), vfork(), __clone()都是根据自身需要的参数来调用clone(), clone()->调用`do_fork()`(定义在`kernel/fork.c`中)->调用copy_process()
+
+copy_process()执行内容:
+1. 调用dup_task_struct()为新进程创建一个内核栈, thread_info, task_struct, 此时父子进程的描述符完全相同.
+1. 检查并确保创建的子进程没有超出当前用户的进程数量限制
+1. 子进程开始区分自己和父进程, 即重置进程描述符.
+1. 设置TASK_UNINTERRUPTIBLE, 保证不会运行
+1. call copy_flags(), 更新 task_struct的flags成员. 表明进程是否拥有超级用户权限的PF_SUPERPRIV标志被清0, 表明进程未call exec()的PF_FORKNOEXEC()标志被设置
+1. call alloc_pid()分配pid
+1. 根据传递给clone的参数标志, copy_process()拷贝或共享打开的文件, 文件系统信息, 信号处理函数, 进程地址空间和命名空间. 在一般情况下, 这些资源会被给定进程的所有线程共享(因为创建的是线程???); 否则, 这些资源对每个进程是不同的, 因此会被拷贝到这里.
+1. 扫尾并返回一个指向子进程的指针
+
+最后, 新成功创建的子进程会被优先执行, 因为一般子进程会立即call exec(), 以避免写时拷贝的额外开销. 因为父进程先执行, 有可能会向地址空间写入.
+
+除了不拷贝父进程的页表项外，vfork()与fork()相同.
+
 ### fork
 是POSIX中创建进程的唯一方法.
 
