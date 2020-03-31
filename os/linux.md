@@ -339,6 +339,11 @@ $ sudo make install
 
 > distcc和ccache可加速编译kernel.
 
+### 编译kernel
+```
+# apt install libssl-dev libelf-dev bc
+```
+
 ## FAQ
 ### kernel开发与用户空间程序开发的差异
 1. kernel开发既不能访问C库也不能访问标准的C头文件
