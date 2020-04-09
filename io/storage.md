@@ -3,6 +3,7 @@
 - [阿里云分布式存储系统的研究与分享](https://blog.7street.top/2018/04/13/pangu/)
 - [浅谈分布式存储系统Pangu2.0——它让双11运维变得智能起来](https://segmentfault.com/a/1190000012526855)
 - [阿里云携ESSD高性能云盘亮相2019全球闪存峰会，领跑微秒存储时代](https://www.csdn.net/article/a/2019-08-23/15979950)
+- [NAS、OSS和EBS的区别](https://help.aliyun.com/document_detail/140812.html?spm=5176.cnnas.0.0.78d06689n3cMGJ)
 
 ## 概念
 - 带内(In Band) : 控制信令和数据走同一条路线.
@@ -401,3 +402,18 @@ fs一定是先写文件实体数据, 再将元数据从缓存中flush到磁盘.
   // /etc/fstab
   UUID=948d792c-2d5a-4f81-97b4-811b34749d8f /home/jr/git ext4 defaults,nodelalloc,noatime,nodiratime        0  0
   ```
+
+## FAQ
+### iscsi和nas区别
+参考:
+- [iSCSI vs NAS: Full Comparison](https://www.msp360.com/resources/blog/iscsi-nas-comparison/)
+
+
+![](/misc/img/io/NAS-iSCSI-Scheme.png)
+
+iSCSI和NAS系统之间的主要区别在于它们的存储访问体系结构. **iSCSI是SAN系统的流行实现**，而NAS是将存储设备连接到用户网络的常用方法.
+换句话说，我们不应该直接比较NAS和iSCSI，因此我们选择一种NAS实施方案-SMB上的NAS存储.
+
+SAN系统是部署为高性能**块级**存储模型, 面向单一用户(即系统)，可在最低数据级别上显示存储设备. NAS是一种**对象级**存储，面向多用户即共享, 可向客户端OS提供即用型文件和文件夹树.
+
+SAN无法共享给多人, 否则会数据错乱. 而NAS由上层软件处理冲突, 可避免这个问题.
