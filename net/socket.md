@@ -236,6 +236,27 @@ udp有数据边界.
 ### 客户端 用不用 bind 的区别
 client bind时会使用指定的ip去连接sever(需要考虑这个端口是否被其他的程序占用), 没有bind时则是由内核分配空闲的ip.
 
+使用指定的ip:
+```c
+// from https://stackoverflow.com/questions/15673846/how-to-give-to-a-client-specific-ip-address-in-c
+// Error checking omitted for expository purposes
+int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+// Bind to a specific network interface (and optionally a specific local port)
+struct sockaddr_in localaddr;
+localaddr.sin_family = AF_INET;
+localaddr.sin_addr.s_addr = inet_addr("192.168.1.100");
+localaddr.sin_port = 0;  // Any local port will do
+bind(sockfd, (struct sockaddr *)&localaddr, sizeof(localaddr));
+
+// Connect to the remote server
+struct sockaddr_in remoteaddr;
+remoteaddr.sin_family = AF_INET;
+remoteaddr.sin_addr.s_addr = inet_addr(server_ip);
+remoteaddr.sin_port = htons(server_port);
+connect(sockfd, (struct sockaddr *)&remoteaddr, sizeof(remoteaddr));
+```
+
 ### Nagle算法
 为避免因数据包过多而发生网络过载.
 
