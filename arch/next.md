@@ -30,6 +30,8 @@
 
   ![](/misc/img/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
 
+  `X-Dragon架构`性能未损失原因: 将原先跑在cpu上的Hypervisior offload到了`X-Dragon架构`上. cpu是vm共享还是独享未知, 有可能都支持???
+
 ### 指令集
 AVX 512指令集强化的向量和浮点计算
 
