@@ -13,3 +13,6 @@
 
 ## 硬件
 - [Risc-V 发展迅猛，正是关注好时机](https://tinylab.org/riscv-overview/)
+
+## 进阶
+- [good paper](https://people.freebsd.org/~lstewart/articles/)
