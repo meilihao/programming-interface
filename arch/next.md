@@ -23,6 +23,8 @@
   - Nitro安全芯片：硬件层的安全验证能力, 包括记录服务器上各种控制器firmware的IO操作，同时还能升级管理这些firmware
 
 - Aliyun的`X-Dragon架构`
+  参考:
+  - [从 VMWare 到阿里神龙，虚拟化技术 40 年演进史](https://blog.csdn.net/csdnnews/article/details/105548972)
 
   ![](/misc/img/arch/25c7936befd17a4230afacb6bae45164fcc35ef2.png)
 
