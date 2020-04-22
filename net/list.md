@@ -1,6 +1,6 @@
 # list
 ## next
-- [阿里云如何构建高性能云原生容器网络](https://www.sohu.com/a/389892922_198222)
+- [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
 
 
 # 概念
