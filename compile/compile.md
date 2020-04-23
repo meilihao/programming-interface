@@ -59,13 +59,6 @@ multstore:
 ```
 `.xxx`是指导汇编器和链接器工作的伪指令, 通常可以忽略.
 
-> gcc, objdump默认使用ATT格式的汇编；microsoft工具和intel的文档使用intel格式的汇编, [两者区别](http://timothyqiu.com/archives/difference-between-att-and-intel-asm-syntax/):
-    1. 寄存器命名: 在 AT&T 汇编格式中要加上 '%' 作为前缀；Intel则不加
-    1. 源/目的操作数顺序: AT&T 语法先写源操作数，再写目标操作数；Intel则相反
-    1. 内存取址方式: AT&T 语法总体上是offset(base, index, width)的格式; Intel 语法总体上是[INDEX * WIDTH + BASE + OFFSET]的格式
-    1. 操作数长度标识: AT&T 语法将操作数的大小表示在指令的后缀中（b、w、l）；Intel 语法将操作数的大小表示在操作数的前缀中（BYTE PTR、WORD PTR、DWORD PTR）
-    1. 常数: AT&T 语法要在常数前加 `$`; Intel则不加
-
 反汇编是指将机器代码转换为汇编代码，这在调试程序时常常用到. 比如使用`objdump -S file.o`查看`.o`文件的反汇编, 其内容描述如下:
 1. 左侧第1列是地址偏移量
 1. 左侧第2列是指令, x86_64指令是1~15字节. 常用指令/操作数较少的指令所需字节较少, 否则就较多
