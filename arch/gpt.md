@@ -47,7 +47,7 @@ deepin上esp的mount point是`/boot/efi`.
 
 ### gpt备份
 ```
-# dd if=/dev/sda of=gpt-mbr bs=512 count=1 # 备份Protective MBR, 因为mbr是512个字节([正常mbr](https://zh.wikipedia.org/wiki/%E4%B8%BB%E5%BC%95%E5%AF%BC%E8%AE%B0%E5%BD%95): 前446是程序代码,后64字节包含分区表信息,最后2字节是MBR的有效标志: 0x55AA)
+# dd if=/dev/sda of=gpt-mbr bs=512 count=1 # 备份Protective MBR, 因为mbr是512个字节([正常mbr](https://zh.wikipedia.org/wiki/%E4%B8%BB%E5%BC%95%E5%AF%BC%E8%AE%B0%E5%BD%95): 前446是程序代码,后64字节包含分区表信息,最后2字节是MBR的有效标志: 0x55aa)
 # dd if=/dev/sda of=gpt-partition bs=512 skip=1 count=33 # 仅备份GPT头和GPT分区
 # dd if=/dev/sda of=gpt-partition bs=512 count=34 备份完整的GPT分区表(含Protective MBR, GPT头，以及分区表)
 # dd if=gpt--partition of=/dev/sda bs=512 count=34 # 恢复完整的GPT分区表信息
