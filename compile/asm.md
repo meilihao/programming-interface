@@ -235,9 +235,9 @@ $ objdump -d -M intel a.out # 以Intel输出
     112d:   55                      push   rbp ; 保存当前栈的栈底
     112e:   48 89 e5                mov    rbp,rsp ; 栈底, 栈顶是同一个位置
     1131:   c7 45 fc 00 00 00 00    mov    DWORD PTR [rbp-0x4],0x0 ; 一个WORD是2B, 因此DWORD是4B, 这里是分配一个4B的空间保存i的值, 即`int i = 0`
-    1138:   c7 45 fc 03 00 00 00    mov    DWORD PTR [rbp-0x4],0x3 ; i =  1 + 2
+    1138:   c7 45 fc 03 00 00 00    mov    DWORD PTR [rbp-0x4],0x3 ; i = 3 = 1 + 2
     113f:   8b 45 fc                mov    eax,DWORD PTR [rbp-0x4] ; eax保存返回值3
-    1142:   5d                      pop    rbp ; `pop rbp` = `mov rbp, QWORD PTR [rsp]` + `add rsp,0x8`
+    1142:   5d                      pop    rbp ; `pop rbp` = `mov rbp, QWORD PTR [rsp]` + `add rsp,0x8`. 因为rsp没有变化因此不用重置.
     1143:   c3                      ret    ; ret =  pop rip = `mov rip, QWORD PTR [rsp]` + `add rsp,0x8`
 
 0000000000001144 <main>: ; `0000000000001144`的长度是64 bit, 在x86_64下面，其实虚拟地址只使用了48位, 对应了256TB的地址空间, 通常已够用.
