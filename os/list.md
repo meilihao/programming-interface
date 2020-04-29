@@ -1,9 +1,11 @@
 # list
 ## kernel
 入门:
+1. [《linux-0.12 内核完全剖析》读书笔记及linux-0.12注释源码](https://github.com/yifengyou/linux-0.12)
 1. 深入理解Linux内核
 1. Linux内核源代码情景分析
-1. [操作系统真象还原](https://yifengyou.gitbooks.io/os-elephant/content/)
+1. [yifengyou/learn-linux](https://github.com/yifengyou/learn-linux)
+1. [os-elephant源码及学习笔记](https://github.com/yifengyou/os-elephant)
 
 ## lib
 - [+深度剖析 Linux 共享库的“位置无关”实现原理](https://tinylab.org/shlib-pic/)
