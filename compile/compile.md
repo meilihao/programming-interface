@@ -88,19 +88,3 @@ multstore:
 
 1. debugging symbols
 符号是为了定位调试出错的代码行数
-
-### 如何使用readelf和objdump解析elf
-参考:
-- [使用readelf和objdump解析目标文件](https://www.jianshu.com/p/863b279c941e)
-
-在Linux下，使用gcc -c xxxx.c仅编译生成.o文件时, 便于解析.
-
-目标文件只是ELF文件的可重定位文件(Relocatable file)，ELF文件一共有4种类型：Relocatable file、Executable file、Shared object file和Core Dump file.
-
-> ELF文件结构信息定义在/usr/include/elf.h.
-
-解析elf header: `readelf -h xxx` // Elf64_Ehdr, elf文件的信息
-解析efl section: `readelf -S -W b.o`/`objdump -h xxx` // Elf64_Shdr, Section部分主要存放的是机器指令代码和数据
-解析`.text`/`.data`/`.rodata`段: `objdump -s -d xxx`
-解析`.bss`段: `objdump -x -s -d xxx` // 打印出目标文件的符号表，通过符号表我们可以知道各个变量的存放位置
-

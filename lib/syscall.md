@@ -1,4 +1,7 @@
 # syscall
+参考:
+- [Linux 系统调用权威指南(2016)](http://arthurchiao.art/blog/system-call-definitive-guide-zh/) 翻译自[The Definitive Guide to Linux System Calls](https://blog.packagecloud.io/eng/2016/04/05/the-definitive-guide-to-linux-system-calls/)
+
 OS向程序提供的内核服务接口.
 
 最大目的: 屏蔽硬件层, 比如open()不需要知道文件具体在磁盘的哪个扇区.

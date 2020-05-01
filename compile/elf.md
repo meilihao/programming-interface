@@ -1,4 +1,4 @@
-# ELF
+# elf
 参考:
 - [ELF Format](http://www.skyfree.org/linux/references/ELF_Format.pdf)
 - [Linux内核之ELF格式解析](https://mudongliang.github.io/2015/10/31/linuxelf.html)
@@ -6,9 +6,18 @@
 
 ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
 
+[GNU Binutils(GNU Binary Utilities)](https://www.gnu.org/software/binutils/binutils.html)软件包里包含了一系列生成、解析和处理ELF文件的命令行工具.
+
 ![程序编译过程](/misc/img/compile/1671100-20190512202937314-1323961004.jpg)
 
 ![可执行程序的ELF](/misc/img/process/v2-85a5b44f20d53e6e992269dccc20ac6b_1200x500.jpg)
+
+![一个简单的程序被编译成目标文件后的结构](/misc/img/compile/cpp_segment_example.jpg)
+
+![目标文件各个段在文件中的布局](/misc/img/compile/cpp_segment_layout.png)
+
+![一个ELF格式的简单示意图](/misc/img/compile/3-1.png)
+左边是链接器的视角，ELF文件由若干个节(section)组成。右边是加载器的视角，这些节被习惯性称之为段(segment).
 
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 > ELF 规格也允许定义一个解释器(ELF 程序头部的 PT_INTERP 元素)来运行程序. 如果定义了解释器,内核则基于指定解释器可执行文件的各段来构建进程映像,转而由解释器负责加载和执行程序.
@@ -21,21 +30,37 @@ ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中�
 节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 struct elf64_shdr`
 
 文件的各section:
+- .init : 程序初始化入口代码，在main()之前运行
 - .text(代码段):放编译好的部分二进制可执行代码,比如各种函数, 进程代码段不仅包括`.text`, 还有`.init`, `.fini`等.
-- .data(数据段):已经初始化好的全局变量
-- .bss:未初始化的全局变量,运行时会分配空间并置零, 因此比`.data`节省空间
+
+    这部分区域的大小在程序运行前就已经确定，并且内存区域通常属于只读，某些架构也允许代码段为可写，即允许修改程序.
+- .data(数据段): 存储了已初始化的全局变量，但初始化为0的全局变量出于编译优化的策略还是被保存在`.bss`中, 属于静态内存分配.
+- .bss(Block Started by Symbol): 存储了**未初始化的全局变量或者是默认初始化为0的全局变量**, 且不占空间, 属于静态内存分配, 因此比`.data`节省空间
     `.bss`的size仅表示程序加载器在加载程序时候, 需要为该段分配的空间大小
-- .rodata:只读数据,例如字符串常量、const 的变量
+
+    可通过`objdump -h *.o`查看
+- .rodata: 该段也叫常量区(只读)，用于存放常量数据, 比如字符串常量, 全局const变量和#define定义的常量.
+
+    特殊:
+    1. 部分立即数会直接存放在`.text`中
+    1. 对于字符串常量，编译器会去掉重复的常量，让程序的每个字符串常量只有一份
+    1. `.rodata`是在多个进程间是共享的，这可以提高空间利用率
 - .symtab:符号表,保存了符号信息, 可通过`readelf -s xxx`查看
-- .strtab:字符串表、保存的是被`.symtab`引用的符号名称
-- .shstrtab: 用于保存section header中用到的字符串
+- .strtab:存储变量名，函数名, 是被`.symtab`引用的符号名称
+
+    例如, `char* szPath="/root"`, `void func()`的变量名szPath和函数名func就存储在`.strtab`段.
+- .shstrtab: 用于保存section header中用到的字符串. bss,text,data等段名存储在这里
 - .comment :注释信息段
 - .node.GUN-stack :堆栈提示段
 - .debug: 一个调试符号表
 - .eh_frame: 记录调试和异常处理时用到的信息
 - 以`.rec`开头的 sections 里面装载了需要重定位的符号
 
+    - .rel.text : 针对`.text`段的重定位表，还有rel.data(针对data段的重定位表).
+
 > .data与.bss没有本质区别, 都是用于存放静态变量, 只是.data是已初始化过的静态数据, 而.bss程序是运行时会分配空间并置零的静态数据.
+
+> static 声明的变量，无论它是全局变量还是在函数之中，只要是没有赋初值都存放在.bss段，如果赋了初值，则把它放在.data段.
 
 ![.o文件的ELF](/misc/img/compile/1671100-20190512203047832-334199166.jpg)
 
@@ -56,6 +81,14 @@ ELF 的第二种格式
 
 GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的入口函数,这个函数会找到加载到内存中的 xxx.so 里面的 具体 函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
 
+一个ELF文件被加载后，代码段、数据段以及堆栈便在虚拟地址空间的分配:
+![](/misc/img/compile/3-3.png)
+
+再细节一点就是下面这个图:
+![](/misc/img/compile/3-3.png)
+
+查看程序的虚拟地址空间: `cat /proc/self/maps | sort -n`. 更细节可参考: 《Linker && Loader》和《程序员的自我修养——链接、装载与库》.
+
 ### 静/动态链接(Shared Object File)
 静态链接库一旦链接进去,代码和变量的 section 都合并了,因而程序运行的时候,就不依赖于这个库是否存在. 但是这样有一个缺点,就是相同的代码段,如果被多个程序使用的话,在内存里面就有多份,而且一旦静态链接库更新了,如果二进制执行文件不重新编译,也不随着更新.
 
@@ -66,29 +99,31 @@ GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT
 > 当运行有动态链接的程序时, 首先寻找动态链接库,然后加载它. 默认情况下,系统在 /lib 和/usr/lib 文件夹下寻找动态链接库. 如果找不到就会报错,我们也可以设定 LD_LIBRARY_PATH 环境
 变量,程序运行时会在此环境变量指定的文件夹下寻找动态链接库.
 
-### 可执行文件转进程
-sys_execve -> do_execve -> load_elf_binary -> 具体程序
+### VMA和LMA
+- VMA(virtual memory address): 程序区段在执行时期的地址
+- LMA(load memory address): 某程序区段加载时的地址. 因为我们知道程序运行前要经过：编译、链接、装载、运行等过程, 那装载到哪里呢？ 实际上就是LMA对应的地址里.
 
-> PID 1 的进程是init 进程 systemd,PID 2 的进程是内核线程 kthreadd, 其中用户态的不带中括号,内核态的带中括号. `ps -ef`的tty列是`?`表示不是前台启动的,一般都是后台的服
-务
-> 用户态的进程,祖先都是 1 号进程; 所有带中括号的内核态的进程,祖先都是 2 号进程
+一般情况下，LMA和VMA都是相等的，不等的情况主要发生在一些嵌入式系统上.
 
-### 线程
+![](/misc/img/compile/cpp_lma_vma.jpg)
+
+### DWARF(Debugging With Attributed Record Formats)
+DWARF(Debugging With Attributed Record Formats, 最新版是实验性的v5, 常用是v4)是面向ELF文件的一种较新的调试信息格式，调试信息存储在对象文件的各个部分中，是可执行程序与源代码之间关系的简单表示.
+
+`objdump -g code.o`可以查看调试信息的细节.
+
+## FAQ
+### 如何使用readelf和objdump解析elf
 参考:
-- [programming with posix threads]
+- [使用readelf和objdump解析目标文件](https://www.jianshu.com/p/863b279c941e)
 
-对于任何一个进程来讲,即便我们没有主动去创建线程,进程也是默认有一个主线程的.
+在Linux下，使用gcc -c xxxx.c仅编译生成.o文件时, 便于解析.
 
-使用进程实现并行执行的问题:
-1. 创建进程占用资源太多
-2. 进程之间的通信需要数据在不同的内存空间传来传去, 共享起来复杂
+目标文件只是ELF文件的可重定位文件(Relocatable file)，ELF文件一共有4种类型：Relocatable file、Executable file、Shared object file和Core Dump file.
 
-线程的数据:
-1. 线程栈上的本地数据 : 栈的大小可以通过命令 ulimit -a 查看,默认情况下线程栈大小为 8192(8MB); 也可通过`pthread_attr_setstacksize()`修改
-    主线程在内存中有一个栈空间,其他线程栈也拥有独立的栈空间. 为了避免线程之间的栈空间踩踏,线程栈之间还会有小块区域,用来隔离保护各自的栈空间. 一旦另一个线程踏入到这个隔离区,就会引发**段错误**
-1. 在整个进程里共享的全局数据
-    需要Mutex解决并发操作
-1. 线程私有数据 (Thread Specific Data), 可通过`pthread_key_create()`创建
+> ELF文件结构信息定义在/usr/include/elf.h.
 
-> pthread_mutex_lock()会阻塞
-> pthread_mutex_trylock()不阻塞, 而是等待通知, 当它接到了通知,来操作共享资源的时候,还是需要抢互斥锁,因为可能很多人都受到了通知,都来访问了,所以**条件变量和互斥锁是配合使用**的
+解析elf header: `readelf -h xxx` // Elf64_Ehdr, elf文件的信息
+解析efl section: `readelf -S -W b.o`/`objdump -h xxx` // Elf64_Shdr, Section部分主要存放的是机器指令代码和数据
+解析`.text`/`.data`/`.rodata`段: `objdump -s -d xxx`
+解析`.bss`段: `objdump -x -s -d xxx` // 打印出目标文件的符号表，通过符号表我们可以知道各个变量的存放位置
