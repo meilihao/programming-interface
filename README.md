@@ -25,3 +25,6 @@
 ## other
 ### 源码
 文中引用的kernel/glibc repo来自[清华大学开源软件镜像站](https://mirror.tuna.tsinghua.edu.cn/help/linux-stable.git/)
+
+## 其他书单
+- `<<深入理解程序设计使用Linux汇编语言>>的Chapter13`

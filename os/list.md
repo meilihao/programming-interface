@@ -18,3 +18,4 @@
 
 ## 进阶
 - [good paper](https://people.freebsd.org/~lstewart/articles/)
+- [内存分页、寻址方式那些事](https://www.jianshu.com/p/b29dedb246d1)
