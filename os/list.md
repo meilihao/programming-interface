@@ -19,3 +19,8 @@
 ## 进阶
 - [good paper](https://people.freebsd.org/~lstewart/articles/)
 - [内存分页、寻址方式那些事](https://www.jianshu.com/p/b29dedb246d1)
+
+## os
+- 操作系统: 三大简易元素(Operating Systems: Tree Easy Pieces)
+- 操作系统概论(Operating Systems Comcepts)
+- 操作系统: 精髓与设计原理(Operating Systems: Internals and Design Principles)
