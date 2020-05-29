@@ -175,3 +175,14 @@ $ objdump -d -M intel m.out
 1. 便于共享
 
 运行时动态链接(runtime dynamic linking): 把某些外部模块的链接推迟到运行时执行.
+
+### 链接过程
+链接的过程是由一个链接脚本（Linker Script）控制的，链接脚本决定了给每个段分配什么地址，如何对齐，哪个段在前，哪个段在后，哪些段合并到同一个Segment，另外链接脚本还要插入一些符号到最终生成的文件中，例如__bss_start、_edata、_end等. 如果用ld做链接时没有用-T选项指定链接脚本，则使用ld的默认链接脚本，默认链接脚本可以用`ld --verbose`命令查看.
+
+ENTRY(_start)说明_start是整个程序的入口点，因此_start是入口点并不是规定死的，是可以改用其它函数做入口点的。
+
+PROVIDE (__executable_start = 0x08048000); . = 0x08048000 + SIZEOF_HEADERS;是Text Segment的起始地址，这个Segment包含后面列出的那些段，.plt、.text、.rodata等等。每个段的描述格式都是“段名 : { 组成 }”，例如.plt : { *(.plt) }，左边表示最终生成的文件的.plt段，右边表示所有目标文件的.plt段，意思是最终生成的文件的.plt段由各目标文件的.plt段组成。
+
+. = ALIGN (CONSTANT (MAXPAGESIZE)) - ((CONSTANT (MAXPAGESIZE) - .) & (CONSTANT (MAXPAGESIZE) - 1)); . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE));是Data Segment的起始地址，要做一系列的对齐操作，这个Segment包含后面列出的那些段，.got、.data、.bss等等。
+
+Data Segment的后面还有其它一些Segment，主要是调试信息.
