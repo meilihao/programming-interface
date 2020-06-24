@@ -16,6 +16,8 @@ Netlink 相对于系统调用，ioctl 以及 /proc文件系统而言具有以下
 4. netlink **支持多播**，内核模块或应用可以把消息多播给一个netlink组，属于该neilink 组的任何内核模块或应用都能接收到该消息，内核事件向用户态的通知机制就使用了这一特性
 5. 内核可以使用 netlink 首先发起会话
 
+> [Netlink 消息格式](https://tools.ietf.org/html/rfc3549#section-2.3.2)
+
 ## netlink常用数据结构及函数
 用户态应用使用标准的 socket API有`sendto()，recvfrom()； sendmsg(), recvmsg()`
 

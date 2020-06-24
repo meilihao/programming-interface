@@ -414,3 +414,10 @@ inotify 监控机制为**非递归**. 若应用程序有意监控整个目录子
 - max_user_watches
 
 	对由每个真实用户 ID 创建的监控项数量的限制值
+
+
+## FAQ
+### 关闭文件系统日志功能
+执行`tune2fs -O "^has_journal" /dev/mapper/VolGroup-lv_home`
+
+> dumpe2fs 获取文件系统属性信息, tune2fs 调整文件系统属性, 之后e2fsck 检查文件系统(**几乎大部分都不推荐这样做, 因为可能会丢失数据**)

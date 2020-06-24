@@ -186,3 +186,10 @@ PROVIDE (__executable_start = 0x08048000); . = 0x08048000 + SIZEOF_HEADERS;是Te
 . = ALIGN (CONSTANT (MAXPAGESIZE)) - ((CONSTANT (MAXPAGESIZE) - .) & (CONSTANT (MAXPAGESIZE) - 1)); . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE));是Data Segment的起始地址，要做一系列的对齐操作，这个Segment包含后面列出的那些段，.got、.data、.bss等等。
 
 Data Segment的后面还有其它一些Segment，主要是调试信息.
+
+## FAQ
+### Inconsistency detected by ld.so: ../sysdeps/x86_64/dl-machine.h: 519: elf_machine_rela_relative: Assertion `ELFW(R_TYPE) (reloc->r_info) == R_X86_64_RELATIVE' failed!
+
+通过设置`env LD_DEBUG=all`并执行程序, 会输出ld log, 可定位到具体so文件, 再通过原文件或`/var/lib/dpkg/info/${package}.md5sums`中的校验值比对, 检查文件是否被改动. 此时使用`readelf -a bad.so`可能会得到错误信息, 比如`bad symbol index: ${addr} in relocreadelf`.
+
+> `env LD_DEBUG=help`会输出LD_DEBUG支持的选项.
