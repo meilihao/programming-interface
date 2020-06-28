@@ -7,7 +7,7 @@ OS向程序提供的内核服务接口.
 最大目的: 屏蔽硬件层, 比如open()不需要知道文件具体在磁盘的哪个扇区.
 
 参考:
- - [linux x86_64的系统调用](linux-5.2/arch/x86/entry/syscalls/syscall_64.tbl): 格式: `系统调用号:?:系统调用的名字:系统调用在内核的实现函数(以 sys_ 开头)`
+ - [linux x86_64的系统调用](linux-5.8/arch/x86/entry/syscalls/syscall_64.tbl): 格式: `系统调用号:?:系统调用的名字:系统调用在内核的实现函数(以 sys_ 开头)`
 
 > 系统调用的组成是固定的,每个系统调用都由一个唯一的数字来标识.
 > 调用系统调用的优选方式是使用VDSO，VDSO是映射在每个进程地址空间中的存储器的一部分，其允许更有效地使用系统调用. int 0x80是一种调用系统调用的传统方法，应该避免.
@@ -16,7 +16,7 @@ OS向程序提供的内核服务接口.
 glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提供丰富的API, 除了例如字符串处理、数学运算等用户态服务之外, 最重要的是封装了系统调用以便于使用(每个api至少封装了一个syscall). 通常使用strace命令来跟踪进程执行时系统调用和所接收的信号.
 
 > syscall的函数声明在`include/linux/syscalls.h`里
-> [linux x86的系统调用](linux-5.2/arch/x86/entry/syscalls/syscall_32.tbl)
+> [linux x86的系统调用](linux-5.8/arch/x86/entry/syscalls/syscall_32.tbl)
 > 查看glic版本: `$ /lib/x86_64-linux-gnu/libc-2.23.so`
 
 ## fork
@@ -305,3 +305,10 @@ SUSv3 规定将常量 SIGSTKSZ作为划分备选栈大小的典型值,而将 MIN
 
 ### 扩展
 - [使用posix_spawn : 是时候淘汰对操作系统的 fork() 调用了](https://www.infoq.cn/article/BYGiWI-fxHTNvSohEUNW)
+
+## 堆内存分配
+### brk
+需求大小较小
+
+### mmap
+需求大小较大
