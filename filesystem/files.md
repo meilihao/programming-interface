@@ -3,6 +3,7 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 
 ## index
 - /boot : 启动linux所需的文件
+	- initrd.img-5.4.0-39-generic : initramfs
 - /bin : /usr/bin的软连接
 - /dev : 包含系统所有的设备文件
 - /dev/audio* : 声卡
@@ -55,6 +56,19 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 - /var/account : 存放格式化的man页
 - /var/run : 包含到下次系统启动前的系统信息
 - /sbin : /usr/sbin的软连接
+
+# boot
+## initrd.img-$(uname -r)
+基于内存的文件系统, 因为内存访问是不需要驱动的.
+
+linux 发行版必须适应各种不同的硬件架构，将所有的驱动编译进内核是不现实的, 因此它们在内核中只编译基本的硬件驱动, 其他各种不同的硬件驱动放在initramfs中, 是一种即可行又灵活的解决方案.
+
+在 boot loader 配置了 initrd 的情况下，内核启动被分成了两个阶段，第一阶段先执行 initrd 文件系统中的某个文件，完成加载驱动模块等任务，第二阶段才会执行真正的根文件系统中的 /sbin/init 进程.
+
+Initrd 的主要用途：
+1. linux 发行版和livecd的必备部件, 用于加载驱动.
+1. 定制化启动过程, 比如 bootsplash.
+1. 任何kernel不能做的，但在用户态可以做的 (比如执行某些命令)
 
 # etc
 

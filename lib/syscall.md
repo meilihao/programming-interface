@@ -2,12 +2,9 @@
 参考:
 - [Linux 系统调用权威指南(2016)](http://arthurchiao.art/blog/system-call-definitive-guide-zh/) 翻译自[The Definitive Guide to Linux System Calls](https://blog.packagecloud.io/eng/2016/04/05/the-definitive-guide-to-linux-system-calls/)
 
-OS向程序提供的内核服务接口.
+OS向程序提供的内核服务接口, 调用过程: 用户态 - 系统调用 - 保存寄存器 - 内核态执行系统调用 - 恢复寄存器 - 返回用户态，然后接着运行.
 
 最大目的: 屏蔽硬件层, 比如open()不需要知道文件具体在磁盘的哪个扇区.
-
-参考:
- - [linux x86_64的系统调用](linux-5.8/arch/x86/entry/syscalls/syscall_64.tbl): 格式: `系统调用号:?:系统调用的名字:系统调用在内核的实现函数(以 sys_ 开头)`
 
 > 系统调用的组成是固定的,每个系统调用都由一个唯一的数字来标识.
 > 调用系统调用的优选方式是使用VDSO，VDSO是映射在每个进程地址空间中的存储器的一部分，其允许更有效地使用系统调用. int 0x80是一种调用系统调用的传统方法，应该避免.
@@ -15,9 +12,43 @@ OS向程序提供的内核服务接口.
 
 glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提供丰富的API, 除了例如字符串处理、数学运算等用户态服务之外, 最重要的是封装了系统调用以便于使用(每个api至少封装了一个syscall). 通常使用strace命令来跟踪进程执行时系统调用和所接收的信号.
 
-> syscall的函数声明在`include/linux/syscalls.h`里
-> [linux x86的系统调用](linux-5.8/arch/x86/entry/syscalls/syscall_32.tbl)
+系统调用在内核中的实现函数要有一个声明, 在[`include/linux/syscalls.h`](https://elixir.bootlin.com/linux/latest/source/include/linux/syscalls.h)里. 真正的实现这个系统调用，一般在一个.c 文件里面，例如 sys_open 的实现在 [fs/open.c](https://elixir.bootlin.com/linux/latest/source/fs/open.c#L1168) 里面.
+
 > 查看glic版本: `$ /lib/x86_64-linux-gnu/libc-2.23.so`
+
+### 32 bit syscall
+参考:
+- [趣谈Linux操作系统.09.32 位系统调用过程](https://time.geekbang.org/column/article/90394)
+
+传参要求: glibc/sysdeps/unix/sysv/linux/i386/sysdep.h
+
+![](/misc/img/lib/566299fe7411161bae25b62e7fe20506.jpg)
+
+> [linux x86的系统调用](https://elixir.bootlin.com/linux/latest/source/arch/x86/entry/syscalls/syscall_32.tbl)
+
+### 64 bit syscall
+
+传参要求: glibc/sysdeps/unix/sysv/linux/x86_64/sysdep.h
+
+在64 bit上, 用syscall指令取代了`int $0x80`. syscall 指令还使用了一种特殊的寄存器，叫特殊模块寄存器（Model Specific Registers，简称 MSR）. 这种寄存器是 CPU 为了完成某些特殊控制功能为目的的寄存器，其中就包括系统调用.
+
+在系统初始化的时候，trap_init() 除了初始化中断模式，还会调用 cpu_init->syscall_init来初始化syscall所需的MSR.
+
+当 syscall 指令调用的时候，会从MSR寄存器里面拿出函数地址来调用，也就是调用entry_SYSCALL_64即`arch/x86/entry/entry_64.S`的`SYM_CODE_START(entry_SYSCALL_64)`->[do_syscall_64](https://elixir.bootlin.com/linux/latest/source/arch/x86/entry/common.c#L283).
+
+
+在 do_syscall_64 里面，从 rax 里面拿出系统调用号，然后根据系统调用号，在系统调用表 sys_call_table 中找到相应的函数进行调用，并将寄存器中保存的参数取出来，作为函数参数.
+
+> 无论是 32 位，还是 64 位，都会到系统调用表 sys_call_table 这里来.
+
+64 位的系统调用返回的时候，执行的是 [USERGS_SYSRET64](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/irqflags.h#L147), 即返回用户态的指令变成了 sysretq.
+
+![](/misc/img/lib/1fc62ab8406c218de6e0b8c7e01fdbd7.jpg)
+
+> [linux x86_64的系统调用](https://elixir.bootlin.com/linux/latest/source/arch/x86/entry/syscalls/syscall_64.tbl): 格式: `系统调用号:?:系统调用的名字:系统调用在内核的实现函数(以 sys_ 开头)`
+
+### 关联syscall及其实现
+在编译的过程中，需要根据 syscall_32.tbl 和 syscall_64.tbl 生成自己的 unistd_32.h 和 unistd_64.h, 生成方式在 arch/x86/entry/syscalls/Makefile 中. 该过程会使用两个脚本，其中 arch/x86/entry/syscalls/syscallhdr.sh，会在文件中生成 #define __NR_open；而arch/x86/entry/syscalls/syscalltbl.sh，会在文件中生成 __SYSCALL(__NR_open, sys_open). 这样，unistd_32.h 和 unistd_64.h 是对应的系统调用号和系统调用实现函数之间的对应关系. 在文件 `arch/x86/entry/syscall_32.c|arch/x86/entry/syscall_64.c`，定义了这样一个表，里面 include 了这个头文件，从而所有的 sys_ 系统调用都在这个表里面了.
 
 ## fork
 ![](/misc/img/5uugf8fxqg.png)
