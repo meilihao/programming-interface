@@ -341,6 +341,8 @@ $ sudo make install
 
 > distcc和ccache可加速编译kernel.
 
+> 获取最新kernel的config: 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
+
 ### 编译kernel
 ```
 # apt install libssl-dev libelf-dev bc
