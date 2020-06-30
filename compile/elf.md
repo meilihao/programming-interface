@@ -22,16 +22,30 @@ ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 > ELF 规格也允许定义一个解释器(ELF 程序头部的 PT_INTERP 元素)来运行程序. 如果定义了解释器,内核则基于指定解释器可执行文件的各段来构建进程映像,转而由解释器负责加载和执行程序.
 
-elf字段:
-- Type : elf文件的类型
-- Entry point address : _start符号的地址
+ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中有定义,分别为 `[struct elf32_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L244) 和 [struct elf64_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L221)`:
+```c
+typedef struct elf64_hdr {
+  unsigned char	e_ident[EI_NIDENT];	/* ELF "magic number" */
+  Elf64_Half e_type; // elf文件的类型
+  Elf64_Half e_machine;
+  Elf64_Word e_version;
+  Elf64_Addr e_entry;		/* Entry point virtual address */ 虚拟地址,是这个程序运行的入口即_start符号的地址
+  Elf64_Off e_phoff;		/* Program header table file offset */
+  Elf64_Off e_shoff;		/* Section header table file offset */
+  Elf64_Word e_flags;
+  Elf64_Half e_ehsize;
+  Elf64_Half e_phentsize;
+  Elf64_Half e_phnum;
+  Elf64_Half e_shentsize;
+  Elf64_Half e_shnum;
+  Elf64_Half e_shstrndx;
+} Elf64_Ehdr;
+```
 
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
 
-ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中有定义,分别为 `struct elf32_hdr 和 struct elf64_hdr`.
-
-节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 struct elf64_shdr`
+节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 [struct elf64_shdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L316)`
 
 文件的各section:
 - .init : 程序初始化入口代码，在main()之前运行
@@ -73,18 +87,20 @@ ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中�
 ELF 的第二种格式
 
 这个格式和.o 文件大致相似,还是分成一个个的 section,并且被节头表描述. 只不过这些section 是多个.o 文件合并过的. 但是这个文件已经是可以加载到内存里面执行的文件了,因而这些 section 被分成了需要加载到内存里面的代码段、数据段和不需要加载到内存里面的部分,**将小的 section 合成了大的段 segment**,并且在最前面加一个段头表
-(Segment Header Table). 在代码里面的定义为 `struct elf32_phdr 和 struct elf64_phdr`,这里面除了有对于段的描述之外,最重要的是 p_vaddr,这个是这个段加载到内存的虚拟地址. 在 ELF 头里面有一项 e_entry,也是个虚拟地址,是这个程序运行的入口.
+(Segment Header Table). 在代码里面的定义为 `struct elf32_phdr 和 [struct elf64_phdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L255)`,这里面除了有对于段的描述之外,最重要的是 p_vaddr,这个是这个段加载到内存的虚拟地址. 在 ELF 头里面有一项 e_entry,也是个虚拟地址,是这个程序运行的入口.
 
-基于动态连接库创建出来的二进制文件格式:
-- 多了一个.interp 的 Segment,这里面是 ld-linux.so,这是动态链接器, 即运行时的链接动作都是它做的
-- ELF 文件中还多了两个 section,一个是.plt,过程链接表(Procedure Linkage Table,PLT),一个是.got.plt,全局偏移量表(Global Offset Table,GOT)
-
-由于是运行时才去找,编译的时候,压根不知道被调用函数在哪里,所以就在 PLT 里面建立一项PLT[x]. 这一项也是一些代码,有点像一个本地的代理,在二进制程序里面,不直接调用
-具体的被调函数,而是调用 PLT[x] 里面的代理代码,这个代理代码会在运行的时候找真正的被调函数.
-
-查找具体被调函数的方法: GOT也会为 被调 函数创建一项 GOT[y], 它是运行时 被调 函数在内存中真正的地址. 如果这个地址在, 程序 调用 PLT[x] 里面的代理代码,代理代码调用 GOT 表中对应项 GOT[y],调用的就是加载到内存中的 xxx.so 里面的 具体 函数了.
-
-GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的入口函数,这个函数会找到加载到内存中的 xxx.so 里面的 具体 函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
+```c
+typedef struct elf64_phdr {
+  Elf64_Word p_type;
+  Elf64_Word p_flags;
+  Elf64_Off p_offset;		/* Segment file offset */
+  Elf64_Addr p_vaddr;		/* Segment virtual address */ 这个段加载到内存的虚拟地址
+  Elf64_Addr p_paddr;		/* Segment physical address */
+  Elf64_Xword p_filesz;		/* Segment size in file */
+  Elf64_Xword p_memsz;		/* Segment size in memory */
+  Elf64_Xword p_align;		/* Segment alignment, file & memory */
+} Elf64_Phdr;
+```
 
 一个ELF文件被加载后，代码段、数据段以及堆栈便在虚拟地址空间的分配:
 ![](/misc/img/compile/3-3.png)
@@ -93,6 +109,47 @@ GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT
 ![](/misc/img/compile/3-3.png)
 
 查看程序的虚拟地址空间: `cat /proc/self/maps | sort -n`. 更细节可参考: 《Linker && Loader》和《程序员的自我修养——链接、装载与库》.
+
+#### 程序->进程
+```c
+// https://elixir.bootlin.com/linux/latest/source/include/linux/binfmts.h#L102
+// kernel定义用来加载二进制文件的对象
+struct linux_binfmt {
+	struct list_head lh;
+	struct module *module;
+	int (*load_binary)(struct linux_binprm *);
+	int (*load_shlib)(struct file *);
+	int (*core_dump)(struct coredump_params *cprm);
+	unsigned long min_coredump;	/* minimal dump size */
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/latest/source/fs/binfmt_elf.c#L93
+// 对于 ELF 文件格式，对应的linux_binfmt实现
+static struct linux_binfmt elf_format = {
+	.module		= THIS_MODULE,
+	.load_binary	= load_elf_binary,
+	.load_shlib	= load_elf_library,
+	.core_dump	= elf_core_dump,
+	.min_coredump	= ELF_EXEC_PAGESIZE,
+};
+```
+
+![](/misc/img/compile/465b740b86ccc6ad3f8e38de25336bf6.jpg)
+
+### 共享对象文件（Shared Object）
+
+当一个动态链接库被链接到一个程序文件中的时候，最后的程序文件并不包括动态链接库中的代码，而仅仅包括对动态链接库的引用，并且不保存动态链接库的全路径，**仅仅保存动态链接库的名称.**
+
+基于动态连接库创建出来的二进制文件格式:
+- 多了一个.interp 的 Segment,这里面是 ld-linux.so(动态链接器), 即运行时的链接动作都是它做的
+- ELF 文件中还多了两个 section,一个是.plt,过程链接表(Procedure Linkage Table,PLT),一个是.got.plt,全局偏移量表(Global Offset Table,GOT)
+
+由于是运行时才去找,编译的时候,压根不知道被调用函数在哪里,所以就在 PLT 里面建立一项PLT[x]. 这一项也是一些代码,有点像一个本地的代理,在二进制程序里面,不直接调用
+具体的被调函数,而是调用 PLT[x] 里面的代理代码,这个代理代码会在运行的时候找真正的被调函数.
+
+查找具体被调函数的方法: GOT也会为被调函数创建一项 GOT[y], 它是运行时被调函数在内存中真正的地址. 如果这个地址在, 程序调用 PLT[x] 里面的代理代码, 代理代码调用 GOT 表中对应项 GOT[y],调用的就是加载到内存中的 xxx.so 里面的具体函数了.
+
+GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT, 这个时候 PLT 会转而调用 PLT[0],也即第一项,PLT[0] 转而调用 GOT[2],这里面是 ld-linux.so 的入口函数,这个函数会找到加载到内存中的 xxx.so 里面的具体函数的地址,然后把这个地址放在 GOT[y] 里面. 下次,PLT[x] 的代理函数就能够直接调用了.
 
 #### elf内存装载
 一般32位可执行程序的默认加载首地址是：0x8048000，64位可执行程序的默认首加载地址是：0x400000, 可通过`ld --verbose`查看. `.text`会被加载到该地址, `.data`段紧随其后, 再之后是`.bss`.
