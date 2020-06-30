@@ -148,7 +148,7 @@ $ sudo make install
 参考:
 - [linux 内核裁剪与编译](https://www.jianshu.com/p/3e5f9bc0aa54)
 - [linux kernel data structures](https://docs.huihoo.com/doxygen/linux/kernel/3.7/annotated.html)
-- [linux kernel 在线阅读](https://elixir.bootlin.com/linux/latest/source)
+- [linux kernel 在线阅读](https://elixir.bootlin.com/linux/latest/source)或[kernel on sourcegraph](https://sourcegraph.com/github.com/torvalds/linux@v5.8-rc3)
 
 各目录说明
 - arch：包含和硬件体系结构相关的代码，每种平台占一个相应的目录，如 i386、arm、arm64、powerpc、mips 等. Linux 内核目前已经支持30种左右的体系结构.
