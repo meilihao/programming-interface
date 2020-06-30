@@ -73,7 +73,7 @@ copy_process()执行内容:
 > fork会拷贝父进程的数据段, 而vfork在子程序没有调用exec和exit前, 子进程和父进程共享数据段. fork不限制父子进程的执行顺序; vfork则子进程先运行,此时父进程挂起, 直到子进程调用了exec或exit后，才不再限制父子进程的执行顺序.
 
 ### fork
-是POSIX中创建进程的唯一方法.
+是POSIX中创建**进程**的唯一方法.
 
 > windows的CreateProcess不同于`fork`, 它会load真正的程序.
 > Linux kernel 并**不提供直接创建新进程的系统调用**,剩下的所有进程都是 init 进程通过**fork**机制建立的
