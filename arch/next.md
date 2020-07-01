@@ -93,3 +93,10 @@ RDMA思路:
 1. DPDK用户可获得协议栈的控制权，可自主定制协议栈；RDMA则无法定制协议栈
 
 因为**RDMA以前只能运行在InfiniBand网络下，为了将这种技术用在以太网环境下，就逐步发展出了RoCE/iWarp两种协议**, 可参考[深入浅出全面解析RDMA](https://zhuanlan.zhihu.com/p/37669618). RoCE目前主要是由Mellonax主导，和TCP协议无关，性能更好. iWarp主要由Chelsio主导，下层会依赖TCP协议，性能和可扩性行都差一些，优点是考虑了对广域网的支持. 目前来看RoCE比iWarp前景更好，实际使用也更广泛.
+
+## 存储
+参考:
+- [AIO 的新归宿：io_uring](https://zhuanlan.zhihu.com/p/62682475)
+- [Alibaba Cloud Linux 2 LTS 率先提供支持 io_uring](https://developer.aliyun.com/article/764720)
+
+io_uring和SPDK
