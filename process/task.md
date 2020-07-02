@@ -309,6 +309,9 @@ struct files_struct *files;
 ```c
 struct thread_info		thread_info;
 void				*stack; // 内核栈
+
+/* CPU-specific state of this task: */
+struct thread_struct		thread; // 在 Linux 中，真的参与进程切换的寄存器很少，主要的就是栈顶寄存器. 于是，在 task_struct 里面保留了要切换进程的时候需要修改的寄存器
 ```
 
 #### 用户态函数栈
