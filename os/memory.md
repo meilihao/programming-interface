@@ -35,6 +35,138 @@ Linux像多数现代内核一样,采用了虚拟内存管理技术. 该技术利
 
 - 程序员和编译器, 链接器之类的工具不用关心程序的内存布局
 
+## 内存管理
+![](/misc/img/os/7dd9039e4ad2f6433aa09c14ede92991.jpg)
+
+内存管理:
+- 连续分配
+
+	不实用: 32 位环境下，虚拟地址空间共 4GB. 如果分成 4KB 一个页，那就是 1M 个页, 每个页表项需要 4 个字节来存储，那么整个 4GB 空间的映射就需要 4MB 的内存来存储映射表, 如果每个进程都有自己的映射表，100 个进程就需要 400MB 的内存, 对内存的消耗实在是太大了, 更别说 64bit 环境了.
+
+- 不连续分配
+
+	- 分页
+	- 分段
+	- 段页结合
+
+### 分段机制
+分段机制下的虚拟地址由两部分组成: 段选择子和段内偏移量.
+
+段选择子就保存在段寄存器中, 段选择子里面最重要的是段号，用作段表的索引. 段表里面保存的是这个段的基地址、段的界限和特权等级等.
+
+虚拟地址中的段内偏移量应该位于 0 和段界限之间, 如果段内偏移量是合法的，就将段基地址加上段内偏移量得到物理内存地址.
+
+在 Linux 里面，段表全称段描述符表（segment descriptors），放在全局描述符表 GDT（Global Descriptor Table）里面，会有下面的宏来初始化段描述符表里面的表项:
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/desc_defs.h#L23
+#define GDT_ENTRY_INIT(flags, base, limit)			\
+	{							\
+		.limit0		= (u16) (limit),		\
+		.limit1		= ((limit) >> 16) & 0x0F,	\
+		.base0		= (u16) (base),			\
+		.base1		= ((base) >> 16) & 0xFF,	\
+		.base2		= ((base) >> 24) & 0xFF,	\
+		.type		= (flags & 0x0f),		\
+		.s		= (flags >> 4) & 0x01,		\
+		.dpl		= (flags >> 5) & 0x03,		\
+		.p		= (flags >> 7) & 0x01,		\
+		.avl		= (flags >> 12) & 0x01,		\
+		.l		= (flags >> 13) & 0x01,		\
+		.d		= (flags >> 14) & 0x01,		\
+		.g		= (flags >> 15) & 0x01,		\
+	}
+```
+
+一个段表项由段基地址 base、段界限 limit，还有一些标识符组成:
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/kernel/cpu/common.c#L113
+DEFINE_PER_CPU_PAGE_ALIGNED(struct gdt_page, gdt_page) = { .gdt = {
+#ifdef CONFIG_X86_64
+	/*
+	 * We need valid kernel segments for data and code in long mode too
+	 * IRET will check the segment types  kkeil 2000/10/28
+	 * Also sysret mandates a special GDT layout
+	 *
+	 * TLS descriptors are currently at a different place compared to i386.
+	 * Hopefully nobody expects them at a fixed place (Wine?)
+	 */
+	[GDT_ENTRY_KERNEL32_CS]		= GDT_ENTRY_INIT(0xc09b, 0, 0xfffff),
+	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xa09b, 0, 0xfffff),
+	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc093, 0, 0xfffff),
+	[GDT_ENTRY_DEFAULT_USER32_CS]	= GDT_ENTRY_INIT(0xc0fb, 0, 0xfffff),
+	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f3, 0, 0xfffff),
+	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xa0fb, 0, 0xfffff),
+#else
+	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xc09a, 0, 0xfffff),
+	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
+	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xc0fa, 0, 0xfffff),
+	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f2, 0, 0xfffff),
+	/*
+	 * Segments used for calling PnP BIOS have byte granularity.
+	 * They code segments and data segments have fixed 64k limits,
+	 * the transfer segment sizes are set at run time.
+	 */
+	/* 32-bit code */
+	[GDT_ENTRY_PNPBIOS_CS32]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
+	/* 16-bit code */
+	[GDT_ENTRY_PNPBIOS_CS16]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
+	/* 16-bit data */
+	[GDT_ENTRY_PNPBIOS_DS]		= GDT_ENTRY_INIT(0x0092, 0, 0xffff),
+	/* 16-bit data */
+	[GDT_ENTRY_PNPBIOS_TS1]		= GDT_ENTRY_INIT(0x0092, 0, 0),
+	/* 16-bit data */
+	[GDT_ENTRY_PNPBIOS_TS2]		= GDT_ENTRY_INIT(0x0092, 0, 0),
+	/*
+	 * The APM segments have byte granularity and their bases
+	 * are set at run time.  All have 64k limits.
+	 */
+	/* 32-bit code */
+	[GDT_ENTRY_APMBIOS_BASE]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
+	/* 16-bit code */
+	[GDT_ENTRY_APMBIOS_BASE+1]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
+	/* data */
+	[GDT_ENTRY_APMBIOS_BASE+2]	= GDT_ENTRY_INIT(0x4092, 0, 0xffff),
+
+	[GDT_ENTRY_ESPFIX_SS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
+	[GDT_ENTRY_PERCPU]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
+	GDT_STACK_CANARY_INIT
+#endif
+} };
+EXPORT_PER_CPU_SYMBOL_GPL(gdt_page);
+```
+
+这里面对于 64 位的和 32 位的，都定义了内核代码段、内核数据段、用户代码段和用户数据段.
+
+另外，还会定义下面四个段选择子，指向上面的段描述符表项. 内核初始化的时候，启动第一个用户态的进程，就是将这四个值赋值给段寄存器.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/segment.h#L134
+/*
+ * Segment selector values corresponding to the above entries:
+ */
+
+#define __KERNEL_CS			(GDT_ENTRY_KERNEL_CS*8)
+#define __KERNEL_DS			(GDT_ENTRY_KERNEL_DS*8)
+#define __USER_DS			(GDT_ENTRY_DEFAULT_USER_DS*8 + 3)
+#define __USER_CS			(GDT_ENTRY_DEFAULT_USER_CS*8 + 3)
+```
+
+通过分析现，所有的段的起始地址都是一样的，都是 0. 所以，在 Linux 操作系统中，并没有使用到全部的分段功能, 而是用分段做权限审核，例如用户态 DPL 是 3，内核态 DPL 是 0, 当用户态试图访问内核态的时候，会因为权限不足而报错.
+
+### 分页机制
+其实 Linux 倾向于另外一种从虚拟地址到物理地址的转换方式，称为分页（Paging）. 对于物理内存，操作系统把它分成一块一块大小相同的页，这样更方便管理，例如有的内存页面长时间不用了，可以暂时写到硬盘上，称为换出. 一旦需要的时候，再加载进来，叫做换入. 这样可以扩大可用物理内存的大小，提高物理内存的利用率. 这个换入和换出都是以页为单位的. 页面的大小一般为 4KB. 为了能够定位和访问每个页，需要有个页表，保存每个页的起始地址，再加上在页内的偏移量，组成线性地址，就能对于内存中的每个位置进行访问了.
+
+虚拟地址分为两部分: 页号和页内偏移, 页号作为页表的索引，页表包含物理页每页所在物理内存的基地址. 这个基地址与页内偏移的组合就形成了物理内存地址.
+
+在32bit上, 会用前 10 位定位到页目录表中的一项, 将这一项对应的页表取出来共 1k 项，再用中间 10 位定位到页表中的一项，将这一项对应的存放数据的页取出来，再用最后 12 位(range=0~4k)定位到页中的具体位置访问数据, 这样加起来正好 32 位即4B.
+
+如果这样的话，映射 4GB 地址空间就需要`4KB + 4MB(一级页表size+二级页表size = 1K*4B + 1k*1k*4B)`的内存, 还变多了? 但结合实际情况, 根据局部性原理可知，很多时候，进程在一段时间内只需要访问某几个页面就可以正常运行了, 没必要让所有页面都常驻内存, 因此使用多级页表可节省空间.
+
+![](/misc/img/os/b6960eb0a7eea008d33f8e0c4facc8b8.jpg)
+
+对于 64 位的系统，两级肯定不够了，而是使用四级目录，分别是全局页目录项 PGD（Page Global Directory）、上层页目录项 PUD（Page Upper Directory）、中间页目录项 PMD（Page Middle Directory）和页表项 PTE（Page Table Entry）.
+![](/misc/img/os/42eff3e7574ac8ce2501210e25cd2c0b.jpg)
+
 ## 内存分配
 Linux内核内存管理的一项重要工作就是如何在频繁申请释放内存的情况下，避免碎片的产生. Linux采用伙伴系统解决外部碎片的问题，采用slab解决内部碎片的问题.
 
