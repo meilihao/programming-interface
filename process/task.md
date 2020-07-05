@@ -288,12 +288,570 @@ cap_bset,也就是capability bounding set,是系统中所有进程允许保留�
 cap_ambient是比较新加入内核的,就是为了解决cap_inheritable鸡肋的状况,也就是,非root用户进程使用exec执行一个程序的时候,如何保留权限的问题. 当执行exec的时候,cap_ambient会被添加到cap_permitted中,同时设置到cap_effective中.
 
 ### 内存管理
+> [linux内存布局和ASLR下的可分配地址空间](https://zsummer.github.io/2019/11/04/2019-11-04-aslr/)
+
+参考:
+- [x86_64 Memory Management](https://github.com/torvalds/linux/blob/master/Documentation/x86/x86_64/mm.rst)
+
 ```c
-struct mm_struct *mm;
+struct mm_struct *mm; // 进程的虚拟地址空间
 struct mm_struct *active_mm;
 ```
 
-每个进程都有自己独立的虚拟内存空间, 用mm_struct表示.
+大多数计算机上系统的全部虚拟地址空间分为两个部分: 供用户态程序访问的虚拟地址空间和供内核访问的内核空间. 每当内核执行上下文切换时, 虚拟地址空间的用户层部分都会切换, 以便当前运行的进程匹配, 而内核空间不会放生切换.
+
+对于普通用户进程来说，mm指向虚拟地址空间的用户空间部分，而对于内核线程，mm为NULL.
+
+内核线程和普通的进程间的区别在于内核线程没有独立的地址空间，mm指针被设置为NULL；它只在 内核空间运行，从来不切换到用户空间去；并且和普通进程一样，可以被调度，也可以被抢占.
+
+>为什么没有mm指针的进程称为惰性TLB进程?
+>
+>假如内核线程之后运行的进程与之前是同一个, 在这种情况下, 内核并不需要修改用户空间地址表。地址转换后备缓冲器(即TLB)中的信息仍然有效。只有在内核线程之后, 执行的进程是与此前不同的用户层进程时, 才需要切换(并对应清除TLB数据)
+
+每个进程都有自己独立的虚拟内存空间, 用[mm_struct](https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L380)表示. 在 struct mm_struct 的`unsigned long task_size; /* size of task vm space */` 是区分用户态地址空间和内核态地址空间的分界线.
+```c
+// --- 32bit
+// https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/processor.h#L855
+#define TASK_SIZE		PAGE_OFFSET
+
+// https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/page_types.h#L36
+#define PAGE_OFFSET		((unsigned long)__PAGE_OFFSET)
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/page_32_types.h#L18
+#define __PAGE_OFFSET_BASE	_AC(CONFIG_PAGE_OFFSET, UL)
+#define __PAGE_OFFSET		__PAGE_OFFSET_BASE
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/Kconfig#L1420
+choice
+	prompt "Memory split" if EXPERT
+	default VMSPLIT_3G
+	depends on X86_32
+	help
+	  Select the desired split between kernel and user memory.
+
+	  If the address range available to the kernel is less than the
+	  physical memory installed, the remaining memory will be available
+	  as "high memory". Accessing high memory is a little more costly
+	  than low memory, as it needs to be mapped into the kernel first.
+	  Note that increasing the kernel address space limits the range
+	  available to user programs, making the address space there
+	  tighter.  Selecting anything other than the default 3G/1G split
+	  will also likely make your kernel incompatible with binary-only
+	  kernel modules.
+
+	  If you are not absolutely sure what you are doing, leave this
+	  option alone!
+
+	config VMSPLIT_3G
+		bool "3G/1G user/kernel split"
+	config VMSPLIT_3G_OPT
+		depends on !X86_PAE
+		bool "3G/1G user/kernel split (for full 1G low memory)"
+	config VMSPLIT_2G
+		bool "2G/2G user/kernel split"
+	config VMSPLIT_2G_OPT
+		depends on !X86_PAE
+		bool "2G/2G user/kernel split (for full 2G low memory)"
+	config VMSPLIT_1G
+		bool "1G/3G user/kernel split"
+endchoice
+
+config PAGE_OFFSET
+	hex
+	default 0xB0000000 if VMSPLIT_3G_OPT
+	default 0x80000000 if VMSPLIT_2G
+	default 0x78000000 if VMSPLIT_2G_OPT
+	default 0x40000000 if VMSPLIT_1G
+	default 0xC0000000 // 3G = 0xC00 * 1M/1024 = 3072 *1M/1024
+	depends on X86_32
+
+// --- 64bit
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/processor.h#L889
+#define TASK_SIZE_MAX	((1UL << __VIRTUAL_MASK_SHIFT) - PAGE_SIZE)
+...
+#define TASK_SIZE		(test_thread_flag(TIF_ADDR32) ? \
+					IA32_PAGE_OFFSET : TASK_SIZE_MAX)
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/page_64_types.h#L55
+#ifdef CONFIG_X86_5LEVEL
+#define __VIRTUAL_MASK_SHIFT	(pgtable_l5_enabled() ? 56 : 47)
+#else
+#define __VIRTUAL_MASK_SHIFT	47
+#endif
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/page_64_types.h#L49
+#define __START_KERNEL_map	_AC(0xffffffff80000000, UL)
+```
+
+对于 32 位系统，最大能够寻址 2^32=4G，其中用户态虚拟地址空间是 3G，内核态是 1G
+
+不开启5级页表[`pgtable_l5_enabled()`](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/pgtable_64_types.h#L36)下, 对于 64 位系统，虚拟地址只使用了 48 位. 就像代码里面写的一样，1 左移了 47 位，就相当于 48 位地址空间一半的位置，0x0000800000000000，然后减去一个页，就是 0x00007FFFFFFFF000(2^47-4096)，共 128T.
+
+`__START_KERNEL_map`是内核空间的起点, 但linux仅使用了48位虚拟地址, 因此, 实际的起点是`0xFFFF8000 00000000`. 内核空间大小同样是 128T.
+
+内核空间和用户空间之间隔着很大的空隙.
+
+64bit下, 这种用户/内核空间的切分方案叫`sign extension`. 比如当len(virtual address)=48时, 一个虚拟地址的低 48 位可以被用于寻址, 但第 48 位到第 63 位全是 0 或 1, 即此时这个虚拟地址空间被分为两部分：
+- 内核空间(高位全1)
+- 用户空间(高位全0)
+
+> [五级页表PML5可参考这里](https://software.intel.com/sites/default/files/managed/2b/80/5-level_paging_white_paper.pdf)
+
+![64 位系统下进程地址空间布局](/misc/img/space_linux_x64.png)
+
+当执行一个新的进程的时候，会做该的设置`me->mm->task_size = TASK_SIZE`.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/exec.c#L1509
+void setup_new_exec(struct linux_binprm * bprm)
+{
+	/* Setup things that can depend upon the personality */
+	struct task_struct *me = current;
+
+	arch_pick_mmap_layout(me->mm, &bprm->rlim_stack);
+
+	arch_setup_new_exec();
+
+	/* Set the new mm task size. We have to do that late because it may
+	 * depend on TIF_32BIT which is only updated in flush_thread() on
+	 * some architectures like powerpc
+	 */
+	me->mm->task_size = TASK_SIZE;
+	mutex_unlock(&me->signal->exec_update_mutex);
+	mutex_unlock(&me->signal->cred_guard_mutex);
+}
+EXPORT_SYMBOL(setup_new_exec);
+```
+
+#### 用户态布局
+```
+在 struct mm_struct 里面，有下面这些变量定义了这些区域的统计信息和位置:
+```c
+// https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L380
+unsigned long mmap_base;  /* base of mmap area */
+unsigned long total_vm;    /* Total pages mapped */
+unsigned long locked_vm;  /* Pages that have PG_mlocked set */
+unsigned long pinned_vm;  /* Refcount permanently increased */
+unsigned long data_vm;    /* VM_WRITE & ~VM_SHARED & ~VM_STACK */
+unsigned long exec_vm;    /* VM_EXEC & ~VM_WRITE & ~VM_STACK */
+unsigned long stack_vm;    /* VM_STACK */
+unsigned long start_code, end_code, start_data, end_data;
+unsigned long start_brk, brk, start_stack;
+unsigned long arg_start, arg_end, env_start, env_end;
+```
+
+其中，total_vm 是总共映射的页的数目. 这么大的虚拟地址空间，不可能都有真实内存对应, 当内存吃紧的时候，有些页可以换出到硬盘上. 有的页因为比较重要，不能换出. locked_vm 就是被锁定不能换出，pinned_vm 是不能换出，也不能移动.
+
+data_vm 是存放数据的页的数目，exec_vm 是存放可执行文件的页的数目，stack_vm 是栈所占的页的数目.
+
+start_code 和 end_code 表示可执行代码的开始和结束位置，start_data 和 end_data 表示已初始化数据的开始位置和结束位置.
+
+start_brk 是堆的起始位置，brk 是堆当前的结束位置. malloc 申请一小块内存的话，就是通过改变 brk 位置实现的.
+
+start_stack 是栈的起始位置，栈的结束位置在寄存器的栈顶指针中.
+
+arg_start 和 arg_end 是参数列表的位置， env_start 和 env_end 是环境变量的位置, 它们都位于栈中最高地址的地方.
+
+mmap_base 表示虚拟地址空间中用于内存映射的起始地址. 一般情况下，这个空间是从高地址到低地址增长的. malloc 申请一大块内存的时候，就是通过 mmap 在这里映射一块区域到物理内存. 我们加载动态链接库 so 文件，也是在这个区域里面，映射一块区域到 so 文件. 具体布局参考上图`64 位系统下进程地址空间布局`即可.
+
+除了位置信息之外，struct mm_struct 里面还专门有一个结构 vm_area_struct，来描述这些区域的属性:
+```c
+// https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L382
+struct vm_area_struct *mmap;    /* list of VMAs */
+struct rb_root mm_rb;
+```
+
+这里面一个是单链表，用于将这些区域串起来. 另外还有一个红黑树, 是为了快速查找一个内存区域，并在需要改变的时候，能够快速修改.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L297
+/*
+ * This struct describes a virtual memory area. There is one of these
+ * per VM-area/task. A VM area is any part of the process virtual memory
+ * space that has a special rule for the page-fault handlers (ie a shared
+ * library, the executable area etc).
+ */
+struct vm_area_struct {
+	/* The first cache line has the info for VMA tree walking. */
+
+	unsigned long vm_start;		/* Our start address within vm_mm. */
+	unsigned long vm_end;		/* The first byte after our end address
+					   within vm_mm. */
+
+	/* linked list of VM areas per task, sorted by address */
+	struct vm_area_struct *vm_next, *vm_prev;
+
+	struct rb_node vm_rb;
+
+	/*
+	 * Largest free memory gap in bytes to the left of this VMA.
+	 * Either between this VMA and vma->vm_prev, or between one of the
+	 * VMAs below us in the VMA rbtree and its ->vm_prev. This helps
+	 * get_unmapped_area find a free area of the right size.
+	 */
+	unsigned long rb_subtree_gap;
+
+	/* Second cache line starts here. */
+
+	struct mm_struct *vm_mm;	/* The address space we belong to. */
+
+	/*
+	 * Access permissions of this VMA.
+	 * See vmf_insert_mixed_prot() for discussion.
+	 */
+	pgprot_t vm_page_prot;
+	unsigned long vm_flags;		/* Flags, see mm.h. */
+
+	/*
+	 * For areas with an address space and backing store,
+	 * linkage into the address_space->i_mmap interval tree.
+	 */
+	struct {
+		struct rb_node rb;
+		unsigned long rb_subtree_last;
+	} shared;
+
+	/*
+	 * A file's MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
+	 * list, after a COW of one of the file pages.	A MAP_SHARED vma
+	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
+	 * or brk vma (with NULL file) can only be in an anon_vma list.
+	 */
+	struct list_head anon_vma_chain; /* Serialized by mmap_sem &
+					  * page_table_lock */
+	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
+
+	/* Function pointers to deal with this struct. */
+	const struct vm_operations_struct *vm_ops;
+
+	/* Information about our backing store: */
+	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
+					   units */
+	struct file * vm_file;		/* File we map to (can be NULL). */
+	void * vm_private_data;		/* was vm_pte (shared mem) */
+
+#ifdef CONFIG_SWAP
+	atomic_long_t swap_readahead_info;
+#endif
+#ifndef CONFIG_MMU
+	struct vm_region *vm_region;	/* NOMMU mapping region */
+#endif
+#ifdef CONFIG_NUMA
+	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
+#endif
+	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
+} __randomize_layout;
+```
+
+vm_start 和 vm_end 指定了该区域在用户空间中的起始和结束地址, vm_next 和 vm_prev 将这个区域串在链表上. vm_rb 将这个区域放在红黑树上. vm_ops 里面是对这个内存区域可以做的操作的定义.
+
+虚拟内存区域可以映射到物理内存，也可以映射到文件，映射到物理内存的时候称为匿名映射，anon_vma 中，anoy 就是 anonymous，匿名的意思，映射到文件就需要有 vm_file 指定被映射的文件.
+
+vm_area_struct 是在 load_elf_binary 里面实现和上面的内存区域关联的.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/binfmt_elf.c#L796
+
+static int load_elf_binary(struct linux_binprm *bprm)
+{
+......
+    setup_new_exec(bprm);
+
+	/* Do this so that we can load the interpreter, if need be.  We will
+	   change some of these later */
+	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
+			executable_stack);
+......
+		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
+				elf_prot, elf_flags, total_size);
+......
+	retval = set_brk(elf_bss, elf_brk, bss_prot);
+......
+		elf_entry = load_elf_interp(interp_elf_ex,
+					    interpreter,
+					    load_bias, interp_elf_phdata,
+					    &arch_state);
+......
+	mm = current->mm;
+	mm->end_code = end_code;
+	mm->start_code = start_code;
+	mm->start_data = start_data;
+	mm->end_data = end_data;
+	mm->start_stack = bprm->p;
+......
+}
+```
+load_elf_binary 会完成以下的事情：
+1. 调用 setup_new_exec，设置内存映射区 mmap_base
+1. 调用 setup_arg_pages，设置栈的 vm_area_struct，这里面设置了 mm->arg_start 是指向栈底的，current->mm->start_stack 就是栈底
+1. elf_map 会将 ELF 文件中的代码部分映射到内存中来
+1. set_brk 设置了堆的 vm_area_struct，这里面设置了 current->mm->start_brk = current->mm->brk，也即堆里面还是空的
+1. load_elf_interp 将依赖的 so 映射到内存中的内存映射区域
+
+最终就形成下面这个内存映射图:
+![](/misc/img/process/7af58012466c7d006511a7e16143314c.jpeg)
+
+映射完毕后，什么情况下会修改呢？
+1. 函数的调用，涉及函数栈的改变，主要是改变栈顶指针
+2. 通过 malloc 申请一个堆内的空间，当然底层要么执行 brk，要么执行 mmap
+
+brk 系统调用实现的入口是 sys_brk 函数:
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/mmap.c#L190
+SYSCALL_DEFINE1(brk, unsigned long, brk)
+{
+	unsigned long retval;
+	unsigned long newbrk, oldbrk, origbrk;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *next;
+	unsigned long min_brk;
+	bool populate;
+	bool downgraded = false;
+	LIST_HEAD(uf);
+
+	if (mmap_write_lock_killable(mm))
+		return -EINTR;
+
+	origbrk = mm->brk;
+
+#ifdef CONFIG_COMPAT_BRK
+	/*
+	 * CONFIG_COMPAT_BRK can still be overridden by setting
+	 * randomize_va_space to 2, which will still cause mm->start_brk
+	 * to be arbitrarily shifted
+	 */
+	if (current->brk_randomized)
+		min_brk = mm->start_brk;
+	else
+		min_brk = mm->end_data;
+#else
+	min_brk = mm->start_brk;
+#endif
+	if (brk < min_brk)
+		goto out;
+
+	/*
+	 * Check against rlimit here. If this check is done later after the test
+	 * of oldbrk with newbrk then it can escape the test and let the data
+	 * segment grow beyond its set limit the in case where the limit is
+	 * not page aligned -Ram Gupta
+	 */
+	if (check_data_rlimit(rlimit(RLIMIT_DATA), brk, mm->start_brk,
+			      mm->end_data, mm->start_data))
+		goto out;
+
+	newbrk = PAGE_ALIGN(brk);
+	oldbrk = PAGE_ALIGN(mm->brk);
+	if (oldbrk == newbrk) {
+		mm->brk = brk;
+		goto success;
+	}
+
+	/*
+	 * Always allow shrinking brk.
+	 * __do_munmap() may downgrade mmap_lock to read.
+	 */
+	if (brk <= mm->brk) {
+		int ret;
+
+		/*
+		 * mm->brk must to be protected by write mmap_lock so update it
+		 * before downgrading mmap_lock. When __do_munmap() fails,
+		 * mm->brk will be restored from origbrk.
+		 */
+		mm->brk = brk;
+		ret = __do_munmap(mm, newbrk, oldbrk-newbrk, &uf, true);
+		if (ret < 0) {
+			mm->brk = origbrk;
+			goto out;
+		} else if (ret == 1) {
+			downgraded = true;
+		}
+		goto success;
+	}
+
+	/* Check against existing mmap mappings. */
+	next = find_vma(mm, oldbrk);
+	if (next && newbrk + PAGE_SIZE > vm_start_gap(next))
+		goto out;
+
+	/* Ok, looks good - let it rip. */
+	if (do_brk_flags(oldbrk, newbrk-oldbrk, 0, &uf) < 0)
+		goto out;
+	mm->brk = brk;
+
+success:
+	populate = newbrk > oldbrk && (mm->def_flags & VM_LOCKED) != 0;
+	if (downgraded)
+		mmap_read_unlock(mm);
+	else
+		mmap_write_unlock(mm);
+	userfaultfd_unmap_complete(mm, &uf);
+	if (populate)
+		mm_populate(oldbrk, newbrk - oldbrk);
+	return brk;
+
+out:
+	retval = origbrk;
+	mmap_write_unlock(mm);
+	return retval;
+}
+```
+
+堆是从低地址向高地址增长的，sys_brk 函数的参数 brk 是新的堆顶位置，而当前的 mm->brk 是原来堆顶的位置.
+
+首先要做的第一个事情，将原来的堆顶和现在的堆顶，都按照页对齐地址，然后比较大小. 如果两者相同，说明这次增加的堆的量很小，还在一个页里面，不需要另行分配页，直接跳到 set_brk 那里，设置 mm->brk 为新的 brk 就可以了.
+
+如果发现新旧堆顶不在一个页里面，麻烦了，这下要跨页了. 如果发现新堆顶小于旧堆顶，这说明不是新分配内存了，而是释放内存了，释放的还不小，至少释放了一页，于是调用 do_munmap 将这一页的内存映射去掉.
+
+如果堆将要扩大，就要调用 find_vma. 如果打开这个函数，看到的是对红黑树的查找，找到的是原堆顶所在的 vm_area_struct 的下一个 vm_area_struct，看当前的堆顶和下一个 vm_area_struct 之间还能不能分配一个完整的页. 如果不能，没办法只好直接退出返回，内存空间都被占满了. 如果还有空间，就调用 do_brk 进一步分配堆空间，从旧堆顶开始，分配计算出的新旧堆顶之间的页数.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/mmap.c#L190
+/*
+ *  this is really a simplified "do_mmap".  it only handles
+ *  anonymous maps.  eventually we may be able to do some
+ *  brk-specific accounting here.
+ */
+static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long flags, struct list_head *uf)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma, *prev;
+	struct rb_node **rb_link, *rb_parent;
+	pgoff_t pgoff = addr >> PAGE_SHIFT;
+	int error;
+	unsigned long mapped_addr;
+
+	/* Until we need other flags, refuse anything except VM_EXEC. */
+	if ((flags & (~VM_EXEC)) != 0)
+		return -EINVAL;
+	flags |= VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
+
+	mapped_addr = get_unmapped_area(NULL, addr, len, 0, MAP_FIXED);
+	if (IS_ERR_VALUE(mapped_addr))
+		return mapped_addr;
+
+	error = mlock_future_check(mm, mm->def_flags, len);
+	if (error)
+		return error;
+
+	/*
+	 * Clear old maps.  this also does some error checking for us
+	 */
+	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
+			      &rb_parent)) {
+		if (do_munmap(mm, addr, len, uf))
+			return -ENOMEM;
+	}
+
+	/* Check against address space limits *after* clearing old maps... */
+	if (!may_expand_vm(mm, flags, len >> PAGE_SHIFT))
+		return -ENOMEM;
+
+	if (mm->map_count > sysctl_max_map_count)
+		return -ENOMEM;
+
+	if (security_vm_enough_memory_mm(mm, len >> PAGE_SHIFT))
+		return -ENOMEM;
+
+	/* Can we just expand an old private anonymous mapping? */
+	vma = vma_merge(mm, prev, addr, addr + len, flags,
+			NULL, NULL, pgoff, NULL, NULL_VM_UFFD_CTX);
+	if (vma)
+		goto out;
+
+	/*
+	 * create a vma struct for an anonymous mapping
+	 */
+	vma = vm_area_alloc(mm);
+	if (!vma) {
+		vm_unacct_memory(len >> PAGE_SHIFT);
+		return -ENOMEM;
+	}
+
+	vma_set_anonymous(vma);
+	vma->vm_start = addr;
+	vma->vm_end = addr + len;
+	vma->vm_pgoff = pgoff;
+	vma->vm_flags = flags;
+	vma->vm_page_prot = vm_get_page_prot(flags);
+	vma_link(mm, vma, prev, rb_link, rb_parent);
+out:
+	perf_event_mmap(vma);
+	mm->total_vm += len >> PAGE_SHIFT;
+	mm->data_vm += len >> PAGE_SHIFT;
+	if (flags & VM_LOCKED)
+		mm->locked_vm += (len >> PAGE_SHIFT);
+	vma->vm_flags |= VM_SOFTDIRTY;
+	return 0;
+}
+```
+
+在 do_brk_flags 中，调用 find_vma_links 找到将来的 vm_area_struct 节点在红黑树的位置，找到它的父节点、前序节点. 接下来调用 vma_merge，看这个新节点是否能够和现有树中的节点合并. 如果地址是连着的，能够合并，则不用创建新的 vm_area_struct 了，直接跳到 out，更新统计值即可；如果不能合并，则创建新的 vm_area_struct，既加到 anon_vma_chain 链表中，也加到红黑树中.
+
+#### 内核态的布局
+内核态的虚拟空间和某一个进程没有关系，所有进程通过系统调用进入到内核之后，看到的虚拟地址空间都是一样的.
+
+在内核态，32 位和 64 位的布局差别比较大，主要是因为 32 位内核态空间太小了.
+
+##### 32 bit
+![32 位的内核态的布局](/misc/img/process/83a6511faf802014fbc2c02afc397a04.jpg)
+
+32 位的内核态虚拟地址空间一共就 1G，占绝大部分的前 896M，我们称为直接映射区.
+
+所谓的直接映射区，就是这一块空间是连续的，和物理内存是非常简单的映射关系，其实就是虚拟内存地址减去 3G，就得到物理内存的位置.
+
+在内核里面，有两个宏:
+- __pa(vaddr) 返回与虚拟地址 vaddr 相关的物理地址
+- __va(paddr) 则计算出对应于物理地址 paddr 的虚拟地址
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/page.h#L59
+#ifndef __pa
+#define __pa(x)		__phys_addr((unsigned long)(x))
+...
+#ifndef __va
+#define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/page_32.h#L13
+#define __phys_addr_nodebug(x)	((x) - PAGE_OFFSET)
+...
+#define __phys_addr(x)		__phys_addr_nodebug(x)
+```
+
+这里虚拟地址和物理地址发生了关联关系，在物理内存的开始的 896M 的空间，会被直接映射到 3G 至 3G+896M 的虚拟地址，这样容易给人一种感觉，这些内存访问起来和物理内存差不多，别这样想，在大部分情况下，对于这一段内存的访问，在内核中，还是会使用虚拟地址的，并且将来也会为这一段空间建设页表，对这段地址的访问也会走分页地址的流程，只不过页表里面比较简单，是直接的一一对应而已
+
+这 896M 还需要仔细分解. 在系统启动的时候，物理内存的前 1M 已经被占用了，从 1M 开始加载内核代码段，然后就是内核的全局变量、BSS 等，也是 ELF 里面涵盖的. 这样内核的代码段，全局变量，BSS 也就会被映射到 3G 后的虚拟地址空间里面. 具体的物理内存布局可以查看 /proc/iomem.
+
+在内核运行的过程中，如果碰到系统调用创建进程，会创建 task_struct 这样的实例，内核的进程管理代码会将实例创建在 3G 至 3G+896M 的虚拟空间中，当然也会被放在物理内存里面的前 896M 里面，相应的页表也会被创建.
+
+在内核运行的过程中，会涉及内核栈的分配，内核的进程管理的代码会将内核栈创建在 3G 至 3G+896M 的虚拟空间中，当然也就会被放在物理内存里面的前 896M 里面，相应的页表也会被创建.
+
+896M 这个值在内核中被定义为 high_memory，在此之上常称为“高端内存”. 这是个很笼统的说法，到底是虚拟内存的 3G+896M 以上的是高端内存，还是物理内存 896M 以上的是高端内存呢？
+
+这里仍然需要辨析一下，高端内存是物理内存的概念. 它仅仅是内核中的内存管理模块看待物理内存的时候的概念. 在内核中，除了内存管理模块直接操作物理地址之外，内核的其他模块，仍然要操作虚拟地址，而虚拟地址是需要内存管理模块分配和映射好的.
+
+假设咱们的电脑有 2G 内存，现在如果内核的其他模块想要访问物理内存 1.5G 的地方，应该怎么办呢？首先，你不能使用物理地址。你需要使用内存管理模块给你分配的虚拟地址，但是虚拟地址的 0 到 3G 已经被用户态进程占用去了，你作为内核不能使用. 因为你写 1.5G 的虚拟内存位置，一方面你不知道应该根据哪个进程的页表进行映射；另一方面，就算映射了也不是你真正想访问的物理内存的地方，所以你发现你作为内核，能够使用的虚拟内存地址，只剩下 1G 减去 896M 的空间了.
+
+于是，我们可以将剩下的虚拟内存地址分成下面这几个部分:
+- 在 896M 到 VMALLOC_START 之间有 8M 的空间
+- VMALLOC_START 到 VMALLOC_END 之间称为内核动态映射空间，也即内核想像用户态进程一样 malloc 申请内存，在内核里面可以使用 vmalloc. 假设物理内存里面，896M 到 1.5G 之间已经被用户态进程占用了，并且映射关系放在了进程的页表中，内核 vmalloc 的时候，只能从分配物理内存 1.5G 开始，就需要使用这一段的虚拟地址进行映射，映射关系放在专门给内核自己用的页表里面
+- PKMAP_BASE 到 FIXADDR_START 的空间称为持久内核映射. 使用 alloc_pages() 函数的时候，在物理内存的高端内存得到 struct page 结构，可以调用 kmap 将其映射到这个区域
+- FIXADDR_START 到 FIXADDR_TOP(0xFFFF F000) 的空间，称为固定映射区域，主要用于满足特殊需求
+- 在最后一个区域可以通过 kmap_atomic 实现临时内核映射. 假设用户态的进程要映射一个文件到内存中，先要映射用户态进程空间的一段虚拟地址到物理内存，然后将文件内容写入这个物理内存供用户态进程访问. 给用户态进程分配物理内存页可以通过 alloc_pages()，分配完毕后，按说将用户态进程虚拟地址和物理内存的映射关系放在用户态进程的页表中，就完事大吉了. 这个时候，用户态进程可以通过用户态的虚拟地址，也即 0 至 3G 的部分，经过页表映射后访问物理内存，并不需要内核态的虚拟地址里面也划出一块来，映射到这个物理内存页. 但是如果要把文件内容写入物理内存，这件事情要内核来干了，这就只好通过 kmap_atomic 做一个临时映射，写入物理内存完毕后，再 kunmap_atomic 来解映射即可.
+
+到此, 32 位的内核态布局就完了.
+
+##### 64 bit
+其实 64 位的内核布局反而简单，因为虚拟空间实在是太大了，根本不需要所谓的高端内存，因为内核是 128T，根本不可能有物理内存超过这个值.
+![](/misc/img/process/7eaf620768c62ff53e5ea2b11b4940f6.jpg)
+
+64 位的内核主要包含以下几个部分:
+- 从 0xffff800000000000 开始就是内核的部分，只不过一开始有 8T 的空洞区域
+- 从 __PAGE_OFFSET_BASE(0xffff880000000000) 开始的 64T 的虚拟地址空间是直接映射区域，也就是减去 PAGE_OFFSET 就是物理地址. 虚拟地址和物理地址之间的映射在大部分情况下还是会通过建立页表的方式进行映射
+- 从 VMALLOC_START（0xffffc90000000000）开始到 VMALLOC_END（0xffffe90000000000）的 32T 的空间是给 vmalloc 的
+- 从 VMEMMAP_START（0xffffea0000000000）开始的 1T 空间用于存放物理页面的描述结构 struct page 的
+- 从 __START_KERNEL_map（0xffffffff80000000）开始的 512M 用于存放内核代码段、全局变量、BSS 等. 这里对应到物理内存开始的位置，减去 __START_KERNEL_map 就能得到物理内存的地址. 这里和直接映射区有点像，但是不矛盾，因为直接映射区之前有 8T 的空当区域，早就过了内核代码在物理内存中加载的位置.
+
+到此, 64 位的内核态布局也完了.
 
 ### 文件和文件系统
 ```c

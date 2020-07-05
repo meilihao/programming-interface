@@ -26,5 +26,13 @@
 ### 源码
 文中引用的kernel/glibc repo来自[清华大学开源软件镜像站](https://mirror.tuna.tsinghua.edu.cn/help/linux-stable.git/)
 
+#### linux kernel在线阅读
+- [elixir.bootlin.com/linux](https://elixir.bootlin.com/linux/latest/source), 适合跳转, **推荐**
+- [sourcegraph.com](https://sourcegraph.com/search?q=repo:%5Egithub%5C.com/torvalds/linux%24%40v5.8-rc3+&patternType=literal), 适合跳转+搜索
+- [github.com/torvalds/linux](https://github.com/torvalds/linux), 适合搜索
+
 ## 其他书单
 - `<<深入理解程序设计使用Linux汇编语言>>的Chapter13`
+
+## todo
+- [ ] [Linux 内核揭秘](https://github.com/MintCN/linux-insides-zh)
