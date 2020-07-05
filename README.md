@@ -36,3 +36,7 @@
 
 ## todo
 - [ ] [Linux 内核揭秘](https://github.com/MintCN/linux-insides-zh)
+
+## tool
+### 内核预处理
+- [linux 源码分析小技巧，查看某一文件经编译预处理后的内容](http://blog.chinaunix.net/uid-21419530-id-5820125.html)
