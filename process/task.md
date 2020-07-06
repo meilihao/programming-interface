@@ -294,7 +294,7 @@ cap_ambient是比较新加入内核的,就是为了解决cap_inheritable鸡肋�
 - [x86_64 Memory Management](https://github.com/torvalds/linux/blob/master/Documentation/x86/x86_64/mm.rst)
 
 ```c
-struct mm_struct *mm; // 进程的虚拟地址空间
+struct mm_struct *mm; // 进程的虚拟地址空间, 含用户态的页表结构.
 struct mm_struct *active_mm;
 ```
 
@@ -2526,6 +2526,808 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 
 从上面的代码可以看出，shrink_list 会先缩减活跃页面列表，再压缩不活跃的页面列表. 对于不活跃列表的缩减，shrink_inactive_list 就需要对页面进行回收；对于匿名页来讲，需要分配 swap，将内存页写入文件系统；对于内存映射关联了文件的，我们需要将在内存中对于文件的修改写回到文件中.
 
+
+##### mmap 的原理
+每一个进程都有一个列表 vm_area_struct，指向虚拟地址空间的不同的内存块，这个变量的名字叫 mmap.
+```c
+// https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L382
+struct mm_struct {
+	struct {
+		struct vm_area_struct *mmap;		/* list of VMAs */
+	...
+	}
+	...
+}
+```
+
+其实内存映射不仅仅是物理内存和虚拟内存之间的映射，还包括将文件中的内容映射到虚拟内存空间. 这个时候，访问内存空间就能够访问到文件里面的数据. 而仅有物理内存和虚拟内存的映射，是一种特殊情况.
+
+要申请小块内存，就用 brk. 如果申请一大块内存，就要用 mmap. 对于堆的申请来讲，mmap 是映射内存空间到物理内存. 另外，如果一个进程想映射一个文件到自己的虚拟内存空间，也要通过 mmap 系统调用. 这个时候 mmap 是映射内存空间到物理内存再到文件.
+
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L1602
+SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
+		unsigned long, prot, unsigned long, flags,
+		unsigned long, fd, unsigned long, pgoff)
+{
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff);
+}
+
+// https://elixir.bootlin.com/linux/latest/source/arch/x86/kernel/sys_x86_64.c#L89
+SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
+		unsigned long, prot, unsigned long, flags,
+		unsigned long, fd, unsigned long, off)
+{
+	long error;
+	error = -EINVAL;
+	if (off & ~PAGE_MASK)
+		goto out;
+
+	error = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+out:
+	return error;
+}
+
+// https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L1553
+unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
+			      unsigned long prot, unsigned long flags,
+			      unsigned long fd, unsigned long pgoff)
+{
+	struct file *file = NULL;
+	unsigned long retval;
+
+	if (!(flags & MAP_ANONYMOUS)) {
+		audit_mmap_fd(fd, flags);
+		file = fget(fd);
+		if (!file)
+			return -EBADF;
+		if (is_file_hugepages(file))
+			len = ALIGN(len, huge_page_size(hstate_file(file)));
+		retval = -EINVAL;
+		if (unlikely(flags & MAP_HUGETLB && !is_file_hugepages(file)))
+			goto out_fput;
+	} else if (flags & MAP_HUGETLB) {
+		struct user_struct *user = NULL;
+		struct hstate *hs;
+
+		hs = hstate_sizelog((flags >> MAP_HUGE_SHIFT) & MAP_HUGE_MASK);
+		if (!hs)
+			return -EINVAL;
+
+		len = ALIGN(len, huge_page_size(hs));
+		/*
+		 * VM_NORESERVE is used because the reservations will be
+		 * taken when vm_ops->mmap() is called
+		 * A dummy user value is used because we are not locking
+		 * memory so no accounting is necessary
+		 */
+		file = hugetlb_file_setup(HUGETLB_ANON_FILE, len,
+				VM_NORESERVE,
+				&user, HUGETLB_ANONHUGE_INODE,
+				(flags >> MAP_HUGE_SHIFT) & MAP_HUGE_MASK);
+		if (IS_ERR(file))
+			return PTR_ERR(file);
+	}
+
+	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+
+	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+out_fput:
+	if (file)
+		fput(file);
+	return retval;
+}
+```
+
+如果要映射到文件，fd 会传进来一个文件描述符，并且 mmap_pgoff 里面通过 fget 函数，根据文件描述符获得 struct file。struct file 表示打开的一个文件. 接下来的调用链是 [vm_mmap_pgoff](https://elixir.bootlin.com/linux/latest/source/mm/util.c#L493)->[do_mmap_pgoff](https://elixir.bootlin.com/linux/latest/source/include/linux/mm.h#L2560)->[do_mmap](https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L1366). 这里面主要干了两件事情：调用 [get_unmapped_area](https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L2190) 找到一个没有映射的区域；调用 [mmap_region](https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L1687) 映射这个区域. 先来看 get_unmapped_area 函数:
+```c
+// https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L2190
+unsigned long
+get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
+		unsigned long pgoff, unsigned long flags)
+{
+	unsigned long (*get_area)(struct file *, unsigned long,
+				  unsigned long, unsigned long, unsigned long);
+
+	unsigned long error = arch_mmap_check(addr, len, flags);
+	if (error)
+		return error;
+
+	/* Careful about overflows.. */
+	if (len > TASK_SIZE)
+		return -ENOMEM;
+
+	get_area = current->mm->get_unmapped_area;
+	if (file) {
+		if (file->f_op->get_unmapped_area)
+			get_area = file->f_op->get_unmapped_area;
+	} else if (flags & MAP_SHARED) {
+		/*
+		 * mmap_region() will call shmem_zero_setup() to create a file,
+		 * so use shmem's get_unmapped_area in case it can be huge.
+		 * do_mmap_pgoff() will clear pgoff, so match alignment.
+		 */
+		pgoff = 0;
+		get_area = shmem_get_unmapped_area;
+	}
+
+	addr = get_area(file, addr, len, pgoff, flags);
+	if (IS_ERR_VALUE(addr))
+		return addr;
+
+	if (addr > TASK_SIZE - len)
+		return -ENOMEM;
+	if (offset_in_page(addr))
+		return -EINVAL;
+
+	error = security_mmap_addr(addr);
+	return error ? error : addr;
+}
+```
+
+这里面如果是匿名映射，则调用 mm_struct 里面的 get_unmapped_area 函数. 这个函数其实是 arch_get_unmapped_area. 它会调用 find_vma_prev，在表示虚拟内存区域的 vm_area_struct 红黑树上找到相应的位置. 之所以叫 prev，是说这个时候虚拟内存区域还没有建立，找到前一个 vm_area_struct.
+
+如果不是匿名映射，而是映射到一个文件，这样在 Linux 里面，每个打开的文件都有一个 struct file 结构，里面有一个 file_operations，用来表示和这个文件相关的操作. 如果是我们熟知的 ext4 文件系统，调用的是 thp_get_unmapped_area. 如果我们仔细看这个函数，最终还是调用 mm_struct 里面的 get_unmapped_area 函数. 殊途同归.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/fs/ext4/file.c#L884
+const struct file_operations ext4_file_operations = {
+	...
+	.mmap		= ext4_file_mmap,
+	.get_unmapped_area = thp_get_unmapped_area,
+	...
+};
+
+// https://elixir.bootlin.com/linux/latest/source/mm/huge_memory.c#L569
+unsigned long thp_get_unmapped_area(struct file *filp, unsigned long addr,
+		unsigned long len, unsigned long pgoff, unsigned long flags)
+{
+	unsigned long ret;
+	loff_t off = (loff_t)pgoff << PAGE_SHIFT;
+
+	if (!IS_DAX(filp->f_mapping->host) || !IS_ENABLED(CONFIG_FS_DAX_PMD))
+		goto out;
+
+	ret = __thp_get_unmapped_area(filp, addr, len, off, flags, PMD_SIZE);
+	if (ret)
+		return ret;
+out:
+	return current->mm->get_unmapped_area(filp, addr, len, pgoff, flags);
+}
+EXPORT_SYMBOL_GPL(thp_get_unmapped_area);
+
+// https://elixir.bootlin.com/linux/latest/source/mm/huge_memory.c#L533
+static unsigned long __thp_get_unmapped_area(struct file *filp,
+		unsigned long addr, unsigned long len,
+		loff_t off, unsigned long flags, unsigned long size)
+{
+	loff_t off_end = off + len;
+	loff_t off_align = round_up(off, size);
+	unsigned long len_pad, ret;
+
+	if (off_end <= off_align || (off_end - off_align) < size)
+		return 0;
+
+	len_pad = len + size;
+	if (len_pad < len || (off + len_pad) < off)
+		return 0;
+
+	ret = current->mm->get_unmapped_area(filp, addr, len_pad,
+					      off >> PAGE_SHIFT, flags);
+
+	/*
+	 * The failure might be due to length padding. The caller will retry
+	 * without the padding.
+	 */
+	if (IS_ERR_VALUE(ret))
+		return 0;
+
+	/*
+	 * Do not try to align to THP boundary if allocation at the address
+	 * hint succeeds.
+	 */
+	if (ret == addr)
+		return addr;
+
+	ret += (off - ret) & (size - 1);
+	return ret;
+}
+```
+
+再来看 mmap_region，看它如何映射这个虚拟内存区域:
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L1687
+unsigned long mmap_region(struct file *file, unsigned long addr,
+		unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
+		struct list_head *uf)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma, *prev;
+	int error;
+	struct rb_node **rb_link, *rb_parent;
+	unsigned long charged = 0;
+
+	/* Check against address space limit. */
+	if (!may_expand_vm(mm, vm_flags, len >> PAGE_SHIFT)) {
+		unsigned long nr_pages;
+
+		/*
+		 * MAP_FIXED may remove pages of mappings that intersects with
+		 * requested mapping. Account for the pages it would unmap.
+		 */
+		nr_pages = count_vma_pages_range(mm, addr, addr + len);
+
+		if (!may_expand_vm(mm, vm_flags,
+					(len >> PAGE_SHIFT) - nr_pages))
+			return -ENOMEM;
+	}
+
+	/* Clear old maps */
+	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
+			      &rb_parent)) {
+		if (do_munmap(mm, addr, len, uf))
+			return -ENOMEM;
+	}
+
+	/*
+	 * Private writable mapping: check memory availability
+	 */
+	if (accountable_mapping(file, vm_flags)) {
+		charged = len >> PAGE_SHIFT;
+		if (security_vm_enough_memory_mm(mm, charged))
+			return -ENOMEM;
+		vm_flags |= VM_ACCOUNT;
+	}
+
+	/*
+	 * Can we just expand an old mapping?
+	 */
+	vma = vma_merge(mm, prev, addr, addr + len, vm_flags,
+			NULL, file, pgoff, NULL, NULL_VM_UFFD_CTX);
+	if (vma)
+		goto out;
+
+	/*
+	 * Determine the object being mapped and call the appropriate
+	 * specific mapper. the address has already been validated, but
+	 * not unmapped, but the maps are removed from the list.
+	 */
+	vma = vm_area_alloc(mm);
+	if (!vma) {
+		error = -ENOMEM;
+		goto unacct_error;
+	}
+
+	vma->vm_start = addr;
+	vma->vm_end = addr + len;
+	vma->vm_flags = vm_flags;
+	vma->vm_page_prot = vm_get_page_prot(vm_flags);
+	vma->vm_pgoff = pgoff;
+
+	if (file) {
+		if (vm_flags & VM_DENYWRITE) {
+			error = deny_write_access(file);
+			if (error)
+				goto free_vma;
+		}
+		if (vm_flags & VM_SHARED) {
+			error = mapping_map_writable(file->f_mapping);
+			if (error)
+				goto allow_write_and_free_vma;
+		}
+
+		/* ->mmap() can change vma->vm_file, but must guarantee that
+		 * vma_link() below can deny write-access if VM_DENYWRITE is set
+		 * and map writably if VM_SHARED is set. This usually means the
+		 * new file must not have been exposed to user-space, yet.
+		 */
+		vma->vm_file = get_file(file);
+		error = call_mmap(file, vma);
+		if (error)
+			goto unmap_and_free_vma;
+
+		/* Can addr have changed??
+		 *
+		 * Answer: Yes, several device drivers can do it in their
+		 *         f_op->mmap method. -DaveM
+		 * Bug: If addr is changed, prev, rb_link, rb_parent should
+		 *      be updated for vma_link()
+		 */
+		WARN_ON_ONCE(addr != vma->vm_start);
+
+		addr = vma->vm_start;
+		vm_flags = vma->vm_flags;
+	} else if (vm_flags & VM_SHARED) {
+		error = shmem_zero_setup(vma);
+		if (error)
+			goto free_vma;
+	} else {
+		vma_set_anonymous(vma);
+	}
+
+	vma_link(mm, vma, prev, rb_link, rb_parent);
+	/* Once vma denies write, undo our temporary denial count */
+	if (file) {
+		if (vm_flags & VM_SHARED)
+			mapping_unmap_writable(file->f_mapping);
+		if (vm_flags & VM_DENYWRITE)
+			allow_write_access(file);
+	}
+	file = vma->vm_file;
+out:
+	perf_event_mmap(vma);
+
+	vm_stat_account(mm, vm_flags, len >> PAGE_SHIFT);
+	if (vm_flags & VM_LOCKED) {
+		if ((vm_flags & VM_SPECIAL) || vma_is_dax(vma) ||
+					is_vm_hugetlb_page(vma) ||
+					vma == get_gate_vma(current->mm))
+			vma->vm_flags &= VM_LOCKED_CLEAR_MASK;
+		else
+			mm->locked_vm += (len >> PAGE_SHIFT);
+	}
+
+	if (file)
+		uprobe_mmap(vma);
+
+	/*
+	 * New (or expanded) vma always get soft dirty status.
+	 * Otherwise user-space soft-dirty page tracker won't
+	 * be able to distinguish situation when vma area unmapped,
+	 * then new mapped in-place (which must be aimed as
+	 * a completely new data area).
+	 */
+	vma->vm_flags |= VM_SOFTDIRTY;
+
+	vma_set_page_prot(vma);
+
+	return addr;
+
+unmap_and_free_vma:
+	vma->vm_file = NULL;
+	fput(file);
+
+	/* Undo any partial mapping done by a device driver. */
+	unmap_region(mm, vma, prev, vma->vm_start, vma->vm_end);
+	charged = 0;
+	if (vm_flags & VM_SHARED)
+		mapping_unmap_writable(file->f_mapping);
+allow_write_and_free_vma:
+	if (vm_flags & VM_DENYWRITE)
+		allow_write_access(file);
+free_vma:
+	vm_area_free(vma);
+unacct_error:
+	if (charged)
+		vm_unacct_memory(charged);
+	return error;
+}
+```
+
+还记得咱们刚找到了虚拟内存区域的前一个 vm_area_struct，我们首先要看，是否能够基于它进行扩展，也即调用 vma_merge，和前一个 vm_area_struct 合并到一起.
+
+如果不能，就需要调用 kmem_cache_zalloc，在 Slub 里面创建一个新的 vm_area_struct 对象，设置起始和结束位置，将它加入队列. 如果是映射到文件，则设置 vm_file 为目标文件，调用 call_mmap. 其实就是调用 file_operations 的 mmap 函数. 对于 ext4 文件系统，调用的是 ext4_file_mmap. 从这个函数的参数可以看出，这一刻文件和内存开始发生关系了. 这里我们将 vm_area_struct 的内存操作设置为文件系统操作，也就是说，读写内存其实就是读写文件系统.
+
+再回到 mmap_region 函数. 最终，vma_link 函数将新创建的 vm_area_struct 挂在了 mm_struct 里面的红黑树上. 这个时候，从内存到文件的映射关系，至少要在逻辑层面建立起来. 那从文件到内存的映射关系呢？[vma_link](https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L643) 还做了另外一件事情，就是 [__vma_link_file](https://elixir.bootlin.com/linux/latest/source/mm/mmap.c#L615). 这个函数就是用于建立这层映射关系. 对于打开的文件，会有一个结构 [struct file](https://elixir.bootlin.com/linux/latest/source/include/linux/fs.h#L941) 来表示. 它有个成员指向 [struct address_space](https://elixir.bootlin.com/linux/latest/source/include/linux/fs.h#L445) 结构，这里面有棵变量名为 i_mmap 的红黑树，vm_area_struct 就挂在这棵树上.
+
+到这里，内存映射的内容要告一段落了. 到目前为止，我们还没有开始真正访问内存呀！这个时候，内存管理并不直接分配物理内存，因为物理内存相对于虚拟地址空间太宝贵了，只有等你真正用的那一刻才会开始分配.
+
+##### 用户态缺页异常
+一旦开始访问虚拟内存的某个地址，如果我们发现，并没有对应的物理页，那就触发缺页中断，调用 do_page_fault:
+```c
+// https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/fault.c#L1522
+dotraplinkage void
+do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
+		unsigned long address)
+{
+	prefetchw(&current->mm->mmap_sem);
+	trace_page_fault_entries(regs, hw_error_code, address);
+
+	if (unlikely(kmmio_fault(regs, address)))
+		return;
+
+	/* Was the fault on kernel-controlled part of the address space? */
+	if (unlikely(fault_in_kernel_space(address)))
+		do_kern_addr_fault(regs, hw_error_code, address);
+	else
+		do_user_addr_fault(regs, hw_error_code, address);
+}
+NOKPROBE_SYMBOL(do_page_fault);
+```
+
+在 do_page_fault 里面，先要判断缺页中断是否发生在内核. 如果发生在内核则调用 do_kern_addr_fault, 而用户空间的部分用[`do_user_addr_fault`](https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/fault.c#L1305).
+
+先看do_user_addr_fault，它会找到你访问的那个地址所在的区域 vm_area_struct，然后调用 [handle_mm_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4354) 来映射这个区域.
+
+handle_mm_fault还会调用[__handle_mm_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4354).
+
+到这里，终于看到了熟悉的 PGD、P4G、PUD、PMD、PTE，因为暂且不考虑五级页表，所以先暂时忽略 P4G.
+
+
+pgd_t 用于全局页目录项，pud_t 用于上层页目录项，pmd_t 用于中间页目录项，pte_t 用于直接页表项. 每个进程都有独立的地址空间，为了这个进程独立完成映射，每个进程都有独立的进程页表，这个页表的最顶级的 pgd 存放在 task_struct 中的 mm_struct 的 pgd 变量里面. 在一个进程新创建的时候，会调用 fork，对于内存的部分会调用 copy_mm，里面调用 dup_mm.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/kernel/fork.c#L1348
+/**
+ * dup_mm() - duplicates an existing mm structure
+ * @tsk: the task_struct with which the new mm will be associated.
+ * @oldmm: the mm to duplicate.
+ *
+ * Allocates a new mm structure and duplicates the provided @oldmm structure
+ * content into it.
+ *
+ * Return: the duplicated mm or NULL on failure.
+ */
+static struct mm_struct *dup_mm(struct task_struct *tsk,
+				struct mm_struct *oldmm)
+{
+	struct mm_struct *mm;
+	int err;
+
+	mm = allocate_mm();
+	if (!mm)
+		goto fail_nomem;
+
+	memcpy(mm, oldmm, sizeof(*mm));
+
+	if (!mm_init(mm, tsk, mm->user_ns))
+		goto fail_nomem;
+
+	err = dup_mmap(mm, oldmm);
+	if (err)
+		goto free_pt;
+
+	mm->hiwater_rss = get_mm_rss(mm);
+	mm->hiwater_vm = mm->total_vm;
+
+	if (mm->binfmt && !try_module_get(mm->binfmt->module))
+		goto free_pt;
+
+	return mm;
+
+free_pt:
+	/* don't put binfmt in mmput, we haven't got module yet */
+	mm->binfmt = NULL;
+	mm_init_owner(mm, NULL);
+	mmput(mm);
+
+fail_nomem:
+	return NULL;
+}
+```
+
+在这里，除了创建一个新的 mm_struct，并且通过 memcpy 将它和父进程的弄成一模一样之外，还需要调用 [mm_init](https://elixir.bootlin.com/linux/latest/source/kernel/fork.c#L1009) 进行初始化. 接下来，mm_init 调用 [mm_alloc_pgd](https://elixir.bootlin.com/linux/latest/source/kernel/fork.c#L635)，分配全局页目录项，赋值给 mm_struct 的 pgd 成员变量.
+
+[pgd_alloc](https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/pgtable.c#L417) 里面除了分配 PGD 之外，还做了很重要的一个事情，就是调用 [pgd_ctor](https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/pgtable.c#L116).
+
+pgd_ctor 拷贝了对于 swapper_pg_dir 的引用. swapper_pg_dir 是内核页表的最顶级的全局页目录.
+
+一个进程的虚拟地址空间包含用户态和内核态两部分. 为了从虚拟地址空间映射到物理页面，页表也分为用户地址空间的页表和内核页表，这就和上面遇到的 vmalloc 有关系了. 在内核里面，映射靠内核页表，这里内核页表会拷贝一份到进程的页表.
+
+至此，一个进程 fork 完毕之后，有了内核页表，有了自己顶级的 pgd，但是对于用户地址空间来讲，还完全没有映射过. 这需要等到这个进程在某个 CPU 上运行，并且对内存访问的那一刻了.
+
+当这个进程被调度到某个 CPU 上运行的时候，要调用 context_switch 进行上下文切换. 对于内存方面的切换会调用 switch_mm_irqs_off，这里面会调用 load_new_mm_cr3.
+
+cr3 是 CPU 的一个寄存器，它会指向当前进程的顶级 pgd. 如果 CPU 的指令要访问进程的虚拟内存，它就会自动从 cr3 里面得到 pgd 在物理内存的地址，然后根据里面的页表解析虚拟内存的地址为物理内存，从而访问真正的物理内存上的数据.
+
+这里需要注意两点:
+1. cr3 里面存放当前进程的顶级 pgd，这个是硬件的要求. cr3 里面需要存放 pgd 在物理内存的地址，不能是虚拟地址. 因而 load_new_mm_cr3 里面会使用 __pa，将 mm_struct 里面的成员变量 pgd（mm_struct 里面存的都是虚拟地址）变为物理地址，才能加载到 cr3 里面去.
+
+1. 用户进程在运行的过程中，访问虚拟内存中的数据，会被 cr3 里面指向的页表转换为物理地址后，才在物理内存中访问数据，这个过程都是在用户态运行的，地址转换的过程无需进入内核态.
+
+只有访问虚拟内存的时候，发现没有映射到物理内存，页表也没有创建过，才触发缺页异常. 进入内核调用 do_page_fault，一直调用到 __handle_mm_fault. 既然原来没有创建过页表，那只好补上这一课. 于是，__handle_mm_fault 调用 pud_alloc 和 pmd_alloc，来创建相应的页目录项，最后调用 handle_pte_fault 来创建页表项.
+
+绕了一大圈，终于将页表整个机制的各个部分串了起来. 但物理的内存还没找到, 还得接着分析 [handle_pte_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4171) 的实现.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4171
+/*
+ * These routines also need to handle stuff like marking pages dirty
+ * and/or accessed for architectures that don't do it in hardware (most
+ * RISC architectures).  The early dirtying is also good on the i386.
+ *
+ * There is also a hook called "update_mmu_cache()" that architectures
+ * with external mmu caches can use to update those (ie the Sparc or
+ * PowerPC hashed page tables that act as extended TLBs).
+ *
+ * We enter with non-exclusive mmap_sem (to exclude vma changes, but allow
+ * concurrent faults).
+ *
+ * The mmap_sem may have been released depending on flags and our return value.
+ * See filemap_fault() and __lock_page_or_retry().
+ */
+static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+{
+	pte_t entry;
+
+	if (unlikely(pmd_none(*vmf->pmd))) {
+		/*
+		 * Leave __pte_alloc() until later: because vm_ops->fault may
+		 * want to allocate huge page, and if we expose page table
+		 * for an instant, it will be difficult to retract from
+		 * concurrent faults and from rmap lookups.
+		 */
+		vmf->pte = NULL;
+	} else {
+		/* See comment in pte_alloc_one_map() */
+		if (pmd_devmap_trans_unstable(vmf->pmd))
+			return 0;
+		/*
+		 * A regular pmd is established and it can't morph into a huge
+		 * pmd from under us anymore at this point because we hold the
+		 * mmap_sem read mode and khugepaged takes it in write mode.
+		 * So now it's safe to run pte_offset_map().
+		 */
+		vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
+		vmf->orig_pte = *vmf->pte;
+
+		/*
+		 * some architectures can have larger ptes than wordsize,
+		 * e.g.ppc44x-defconfig has CONFIG_PTE_64BIT=y and
+		 * CONFIG_32BIT=y, so READ_ONCE cannot guarantee atomic
+		 * accesses.  The code below just needs a consistent view
+		 * for the ifs and we later double check anyway with the
+		 * ptl lock held. So here a barrier will do.
+		 */
+		barrier();
+		if (pte_none(vmf->orig_pte)) {
+			pte_unmap(vmf->pte);
+			vmf->pte = NULL;
+		}
+	}
+
+	if (!vmf->pte) {
+		if (vma_is_anonymous(vmf->vma))
+			return do_anonymous_page(vmf);
+		else
+			return do_fault(vmf);
+	}
+
+	if (!pte_present(vmf->orig_pte))
+		return do_swap_page(vmf);
+
+	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
+		return do_numa_page(vmf);
+
+	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
+	spin_lock(vmf->ptl);
+	entry = vmf->orig_pte;
+	if (unlikely(!pte_same(*vmf->pte, entry)))
+		goto unlock;
+	if (vmf->flags & FAULT_FLAG_WRITE) {
+		if (!pte_write(entry))
+			return do_wp_page(vmf);
+		entry = pte_mkdirty(entry);
+	}
+	entry = pte_mkyoung(entry);
+	if (ptep_set_access_flags(vmf->vma, vmf->address, vmf->pte, entry,
+				vmf->flags & FAULT_FLAG_WRITE)) {
+		update_mmu_cache(vmf->vma, vmf->address, vmf->pte);
+	} else {
+		/*
+		 * This is needed only for protection faults but the arch code
+		 * is not yet telling us if this is a protection fault or not.
+		 * This still avoids useless tlb flushes for .text page faults
+		 * with threads.
+		 */
+		if (vmf->flags & FAULT_FLAG_WRITE)
+			flush_tlb_fix_spurious_fault(vmf->vma, vmf->address);
+	}
+unlock:
+	pte_unmap_unlock(vmf->pte, vmf->ptl);
+	return 0;
+}
+```
+
+这里面总的来说分了三种情况. 如果 PTE，也就是页表项，从来没有出现过，那就是新映射的页. 如果是匿名页，就是第一种情况，应该映射到一个物理内存页，在这里调用的是 do_anonymous_page. 如果是映射到文件，调用的就是 do_fault，这是第二种情况. 如果 PTE 原来出现过，说明原来页面在物理内存中，后来换出到硬盘了，现在应该换回来，调用的是 do_swap_page.
+
+先看第一种情况，[do_anonymous_page](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L3308). 对于匿名页的映射，需要先通过 pte_alloc 分配一个页表项，然后通过 [alloc_zeroed_user_highpage_movable](https://elixir.bootlin.com/linux/latest/source/include/linux/highmem.h#L205) 分配一个页. 之后它会调用 alloc_pages_vma，并最终调用 __alloc_pages_nodemask. 它是伙伴系统的核心函数，专门用来分配物理页面的. do_anonymous_page 接下来要调用 [mk_pte](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/pgtable.h#L857)，将页表项指向新分配的物理页，set_pte_at 会将页表项塞到页表里面.
+
+第二种情况映射到文件 [do_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L3939), 最终会调用 [__do_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L3423).
+
+
+它调用了 struct vm_operations_struct vm_ops 的 fault 函数. 对于 ext4 文件系统，vm_ops 指向了 ext4_file_vm_ops，也就是调用了 ext4_filemap_fault.
+```c
+// https://elixir.bootlin.com/linux/latest/source/fs/ext4/file.c#L733
+static const struct vm_operations_struct ext4_file_vm_ops = {
+	.fault		= ext4_filemap_fault,
+	.map_pages	= filemap_map_pages,
+	.page_mkwrite   = ext4_page_mkwrite,
+};
+```
+
+[ext4_filemap_fault](https://elixir.bootlin.com/linux/latest/source/fs/ext4/inode.c#L6041) 里面的逻辑我们很容易就能读懂. vm_file 就是当时 mmap 的时候映射的那个文件，然后需要调用 [filemap_fault](https://elixir.bootlin.com/linux/latest/source/mm/filemap.c#L2461). 对于文件映射来说，一般这个文件会在物理内存里面有页面作为它的缓存，[find_get_page](https://elixir.bootlin.com/linux/latest/source/include/linux/pagemap.h#L255) 就是找那个页. 如果找到了，就调用 [do_async_mmap_readahead](https://elixir.bootlin.com/linux/latest/source/mm/filemap.c#L2416)，预读一些数据到内存里面；如果没有，就调用 [do_sync_mmap_readahead](https://elixir.bootlin.com/linux/latest/source/mm/filemap.c#L2368), 将文件内容读到内存中.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/mm/filemap.c#L2461
+/**
+ * filemap_fault - read in file data for page fault handling
+ * @vmf:	struct vm_fault containing details of the fault
+ *
+ * filemap_fault() is invoked via the vma operations vector for a
+ * mapped memory region to read in file data during a page fault.
+ *
+ * The goto's are kind of ugly, but this streamlines the normal case of having
+ * it in the page cache, and handles the special cases reasonably without
+ * having a lot of duplicated code.
+ *
+ * vma->vm_mm->mmap_sem must be held on entry.
+ *
+ * If our return value has VM_FAULT_RETRY set, it's because the mmap_sem
+ * may be dropped before doing I/O or by lock_page_maybe_drop_mmap().
+ *
+ * If our return value does not have VM_FAULT_RETRY set, the mmap_sem
+ * has not been released.
+ *
+ * We never return with VM_FAULT_RETRY and a bit from VM_FAULT_ERROR set.
+ *
+ * Return: bitwise-OR of %VM_FAULT_ codes.
+ */
+vm_fault_t filemap_fault(struct vm_fault *vmf)
+{
+	int error;
+	struct file *file = vmf->vma->vm_file;
+	struct file *fpin = NULL;
+	struct address_space *mapping = file->f_mapping;
+	struct file_ra_state *ra = &file->f_ra;
+	struct inode *inode = mapping->host;
+	pgoff_t offset = vmf->pgoff;
+	pgoff_t max_off;
+	struct page *page;
+	vm_fault_t ret = 0;
+
+	max_off = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
+	if (unlikely(offset >= max_off))
+		return VM_FAULT_SIGBUS;
+
+	/*
+	 * Do we have something in the page cache already?
+	 */
+	page = find_get_page(mapping, offset);
+	if (likely(page) && !(vmf->flags & FAULT_FLAG_TRIED)) {
+		/*
+		 * We found the page, so try async readahead before
+		 * waiting for the lock.
+		 */
+		fpin = do_async_mmap_readahead(vmf, page);
+	} else if (!page) {
+		/* No page in the page cache at all */
+		count_vm_event(PGMAJFAULT);
+		count_memcg_event_mm(vmf->vma->vm_mm, PGMAJFAULT);
+		ret = VM_FAULT_MAJOR;
+		fpin = do_sync_mmap_readahead(vmf);
+retry_find:
+		page = pagecache_get_page(mapping, offset,
+					  FGP_CREAT|FGP_FOR_MMAP,
+					  vmf->gfp_mask);
+		if (!page) {
+			if (fpin)
+				goto out_retry;
+			return VM_FAULT_OOM;
+		}
+	}
+
+	if (!lock_page_maybe_drop_mmap(vmf, page, &fpin))
+		goto out_retry;
+
+	/* Did it get truncated? */
+	if (unlikely(compound_head(page)->mapping != mapping)) {
+		unlock_page(page);
+		put_page(page);
+		goto retry_find;
+	}
+	VM_BUG_ON_PAGE(page_to_pgoff(page) != offset, page);
+
+	/*
+	 * We have a locked page in the page cache, now we need to check
+	 * that it's up-to-date. If not, it is going to be due to an error.
+	 */
+	if (unlikely(!PageUptodate(page)))
+		goto page_not_uptodate;
+
+	/*
+	 * We've made it this far and we had to drop our mmap_sem, now is the
+	 * time to return to the upper layer and have it re-find the vma and
+	 * redo the fault.
+	 */
+	if (fpin) {
+		unlock_page(page);
+		goto out_retry;
+	}
+
+	/*
+	 * Found the page and have a reference on it.
+	 * We must recheck i_size under page lock.
+	 */
+	max_off = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
+	if (unlikely(offset >= max_off)) {
+		unlock_page(page);
+		put_page(page);
+		return VM_FAULT_SIGBUS;
+	}
+
+	vmf->page = page;
+	return ret | VM_FAULT_LOCKED;
+
+page_not_uptodate:
+	/*
+	 * Umm, take care of errors if the page isn't up-to-date.
+	 * Try to re-read it _once_. We do this synchronously,
+	 * because there really aren't any performance issues here
+	 * and we need to check for errors.
+	 */
+	ClearPageError(page);
+	fpin = maybe_unlock_mmap_for_io(vmf, fpin);
+	error = mapping->a_ops->readpage(file, page);
+	if (!error) {
+		wait_on_page_locked(page);
+		if (!PageUptodate(page))
+			error = -EIO;
+	}
+	if (fpin)
+		goto out_retry;
+	put_page(page);
+
+	if (!error || error == AOP_TRUNCATED_PAGE)
+		goto retry_find;
+
+	/* Things didn't work out. Return zero to tell the mm layer so. */
+	shrink_readahead_size_eio(ra);
+	return VM_FAULT_SIGBUS;
+
+out_retry:
+	/*
+	 * We dropped the mmap_sem, we need to return to the fault handler to
+	 * re-find the vma and come back and find our hopefully still populated
+	 * page.
+	 */
+	if (page)
+		put_page(page);
+	if (fpin)
+		fput(fpin);
+	return ret | VM_FAULT_RETRY;
+}
+EXPORT_SYMBOL(filemap_fault);
+```
+
+[do_sync_mmap_readahead](https://elixir.bootlin.com/linux/latest/source/mm/filemap.c#L2368) -> [page_cache_sync_readahead](https://elixir.bootlin.com/linux/latest/source/mm/readahead.c#L509) -> [force_page_cache_readahead](https://elixir.bootlin.com/linux/latest/source/mm/readahead.c#L222) -> [__do_page_cache_readahead](https://elixir.bootlin.com/linux/latest/source/mm/readahead.c#L155) -> [read_pages](https://elixir.bootlin.com/linux/latest/source/mm/readahead.c#L116)
+
+struct address_space_operations 对于 ext4 文件系统的定义如下所示.
+```c
+// https://elixir.bootlin.com/linux/latest/source/fs/ext4/inode.c#L3606
+static const struct address_space_operations ext4_aops = {
+	.readpage		= ext4_readpage,
+	.readpages		= ext4_readpages,
+	.writepage		= ext4_writepage,
+	.writepages		= ext4_writepages,
+	.write_begin		= ext4_write_begin,
+	.write_end		= ext4_write_end,
+	.set_page_dirty		= ext4_set_page_dirty,
+	.bmap			= ext4_bmap,
+	.invalidatepage		= ext4_invalidatepage,
+	.releasepage		= ext4_releasepage,
+	.direct_IO		= noop_direct_IO,
+	.migratepage		= buffer_migrate_page,
+	.is_partially_uptodate  = block_is_partially_uptodate,
+	.error_remove_page	= generic_error_remove_page,
+};
+```
+
+这么说来，上面的 readpage 调用的其实是 ext4_readpage, 最后会调用 [ext4_read_inline_page](https://elixir.bootlin.com/linux/latest/source/fs/ext4/inline.c#L464)，这里面有部分逻辑和内存映射有关.
+
+在 ext4_read_inline_page 函数里，需要先调用 kmap_atomic，将物理内存映射到内核的虚拟地址空间，得到内核中的地址 kaddr. kmap_atomic是用来做临时内核映射的. 本来把物理内存映射到用户虚拟地址空间，不需要在内核里面映射一把. 但是，现在因为要从文件里面读取数据并写入这个物理页面，又不能使用物理地址，我们只能使用虚拟地址，这就需要在内核里面临时映射一把. 临时映射后，ext4_read_inline_data 读取文件到这个虚拟地址. 读取完毕后，我们取消这个临时映射 kunmap_atomic 就行了.
+
+再来看第三种情况，do_swap_page. 如果长时间不用，这部分数据就要换出到硬盘，也就是 swap，现在这部分数据又要访问了，就得想办法再次读到内存中来.
+
+[do_swap_page](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L3089) 函数会先查找 swap 文件有没有缓存页. 如果没有，就调用 [swapin_readahead](https://elixir.bootlin.com/linux/latest/source/mm/swap_state.c#L781)，将 swap 文件读到内存中来，形成内存页，并通过 mk_pte 生成页表项. set_pte_at 将页表项插入页表，swap_free 将 swap 文件清理. 因为重新加载回内存了，不再需要 swap 文件了. swapin_readahead 会最终调用 swap_readpage，在这里，我们看到了熟悉的 readpage 函数，也就是说读取普通文件和读取 swap 文件，过程是一样的，同样需要用 kmap_atomic 做临时映射.
+
+通过上面复杂的过程，用户态缺页异常处理完毕了. 物理内存中有了页面，页表也建立好了映射. 接下来，用户程序在虚拟内存空间里面，可以通过虚拟地址顺利经过页表映射的访问物理页面上的数据了. 为了加快映射速度，我们不需要每次从虚拟地址到物理地址的转换都走一遍页表.
+
+页表一般都很大，只能存放在内存中. 操作系统每次访问内存都要折腾两步，先通过查询页表得到物理地址，然后访问该物理地址读取指令、数据. 为了提高映射速度，引入了 TLB（Translation Lookaside Buffer），就是快表，专门用来做地址映射的硬件设备. 它不在内存中，可存储的数据比较少，但是比内存要快. 所以，可以认为，TLB 就是页表的 Cache，其中存储了当前最可能被访问到的页表项，其内容是部分页表项的一个副本. 有了 TLB 之后，先查快表，快表中有映射关系，然后直接转换为物理地址. 如果在 TLB 查不到映射关系时，才会到内存中查询页表.
+
+![](/misc/img/process/78d351d0105c8e5bf0e49c685a2c1a44.jpg)
 
 ### 文件和文件系统
 ```c
