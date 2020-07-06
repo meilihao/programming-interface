@@ -2344,6 +2344,182 @@ out:
 
 在这里，我们看到了 alloc_slab_page 分配页面. 分配的时候，要按 kmem_cache_order_objects 里面的 order 来. 如果第一次分配不成功，说明内存已经很紧张了，那就换成 min 版本的 kmem_cache_order_objects.
 
+#### 页面换出
+另一个物理内存管理必须要处理的事情就是，页面换出. 每个进程都有自己的虚拟地址空间，无论是 32 位还是 64 位，虚拟地址空间都非常大，物理内存不可能有这么多的空间放得下. 所以，一般情况下，页面只有在被使用的时候，才会放在物理内存中。如果过了一段时间不被使用，即便用户进程并没有释放它，物理内存管理也有责任做一定的干预. 例如，将这些物理内存中的页面换出到硬盘上去；将空出的物理内存，交给活跃的进程去使用.
+
+什么情况下会触发页面换出呢?
+
+可以想象，最常见的情况就是，分配内存的时候，发现没有地方了，就试图回收一下. 例如，咱们解析申请一个页面的时候，会调用 get_page_from_freelist，接下来的调用链为 get_page_from_freelist->node_reclaim->__node_reclaim->shrink_node，通过这个调用链可以看出，页面换出也是以内存节点为单位的.
+
+当然还有一种情况，就是作为内存管理系统应该主动去做的，而不能等真的出了事儿再做，这就是内核线程 [kswapd](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L3865). 这个内核线程，在系统初始化的时候就被创建. 这样它会进入一个无限循环，直到系统停止. 在这个循环中，如果内存使用没有那么紧张，那它就可以放心睡大觉；如果内存紧张了，就需要去检查一下内存，看看是否需要换出一些内存页.
+
+kswapd的调用链是 [balance_pgdat](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L3545)->[kswapd_shrink_node](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L3497)->[shrink_node](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L2669)，是以内存节点为单位的. shrink_node 会调用 [shrink_node_memcgs](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L2611) -> [shrink_lruvec](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L2426). shrink_lruvec里面有一个循环处理页面的列表，看这个函数的注释，其实和上面我们想表达的内存换出是一样的.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L2426
+static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
+{
+	unsigned long nr[NR_LRU_LISTS];
+	unsigned long targets[NR_LRU_LISTS];
+	unsigned long nr_to_scan;
+	enum lru_list lru;
+	unsigned long nr_reclaimed = 0;
+	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
+	struct blk_plug plug;
+	bool scan_adjusted;
+
+	get_scan_count(lruvec, sc, nr);
+
+	/* Record the original scan target for proportional adjustments later */
+	memcpy(targets, nr, sizeof(nr));
+
+	/*
+	 * Global reclaiming within direct reclaim at DEF_PRIORITY is a normal
+	 * event that can occur when there is little memory pressure e.g.
+	 * multiple streaming readers/writers. Hence, we do not abort scanning
+	 * when the requested number of pages are reclaimed when scanning at
+	 * DEF_PRIORITY on the assumption that the fact we are direct
+	 * reclaiming implies that kswapd is not keeping up and it is best to
+	 * do a batch of work at once. For memcg reclaim one check is made to
+	 * abort proportional reclaim if either the file or anon lru has already
+	 * dropped to zero at the first pass.
+	 */
+	scan_adjusted = (!cgroup_reclaim(sc) && !current_is_kswapd() &&
+			 sc->priority == DEF_PRIORITY);
+
+	blk_start_plug(&plug);
+	while (nr[LRU_INACTIVE_ANON] || nr[LRU_ACTIVE_FILE] ||
+					nr[LRU_INACTIVE_FILE]) {
+		unsigned long nr_anon, nr_file, percentage;
+		unsigned long nr_scanned;
+
+		for_each_evictable_lru(lru) {
+			if (nr[lru]) {
+				nr_to_scan = min(nr[lru], SWAP_CLUSTER_MAX);
+				nr[lru] -= nr_to_scan;
+
+				nr_reclaimed += shrink_list(lru, nr_to_scan,
+							    lruvec, sc);
+			}
+		}
+
+		cond_resched();
+
+		if (nr_reclaimed < nr_to_reclaim || scan_adjusted)
+			continue;
+
+		/*
+		 * For kswapd and memcg, reclaim at least the number of pages
+		 * requested. Ensure that the anon and file LRUs are scanned
+		 * proportionally what was requested by get_scan_count(). We
+		 * stop reclaiming one LRU and reduce the amount scanning
+		 * proportional to the original scan target.
+		 */
+		nr_file = nr[LRU_INACTIVE_FILE] + nr[LRU_ACTIVE_FILE];
+		nr_anon = nr[LRU_INACTIVE_ANON] + nr[LRU_ACTIVE_ANON];
+
+		/*
+		 * It's just vindictive to attack the larger once the smaller
+		 * has gone to zero.  And given the way we stop scanning the
+		 * smaller below, this makes sure that we only make one nudge
+		 * towards proportionality once we've got nr_to_reclaim.
+		 */
+		if (!nr_file || !nr_anon)
+			break;
+
+		if (nr_file > nr_anon) {
+			unsigned long scan_target = targets[LRU_INACTIVE_ANON] +
+						targets[LRU_ACTIVE_ANON] + 1;
+			lru = LRU_BASE;
+			percentage = nr_anon * 100 / scan_target;
+		} else {
+			unsigned long scan_target = targets[LRU_INACTIVE_FILE] +
+						targets[LRU_ACTIVE_FILE] + 1;
+			lru = LRU_FILE;
+			percentage = nr_file * 100 / scan_target;
+		}
+
+		/* Stop scanning the smaller of the LRU */
+		nr[lru] = 0;
+		nr[lru + LRU_ACTIVE] = 0;
+
+		/*
+		 * Recalculate the other LRU scan count based on its original
+		 * scan target and the percentage scanning already complete
+		 */
+		lru = (lru == LRU_FILE) ? LRU_BASE : LRU_FILE;
+		nr_scanned = targets[lru] - nr[lru];
+		nr[lru] = targets[lru] * (100 - percentage) / 100;
+		nr[lru] -= min(nr[lru], nr_scanned);
+
+		lru += LRU_ACTIVE;
+		nr_scanned = targets[lru] - nr[lru];
+		nr[lru] = targets[lru] * (100 - percentage) / 100;
+		nr[lru] -= min(nr[lru], nr_scanned);
+
+		scan_adjusted = true;
+	}
+	blk_finish_plug(&plug);
+	sc->nr_reclaimed += nr_reclaimed;
+
+	/*
+	 * Even if we did not try to evict anon pages at all, we want to
+	 * rebalance the anon lru active/inactive ratio.
+	 */
+	if (total_swap_pages && inactive_is_low(lruvec, LRU_INACTIVE_ANON))
+		shrink_active_list(SWAP_CLUSTER_MAX, lruvec,
+				   sc, LRU_ACTIVE_ANON);
+}
+```
+
+这里面有个 lru 列表. 从下面的定义，我们可以想象，所有的页面都被挂在 LRU 列表中. LRU 是 Least Recent Use，也就是最近最少使用. 也就是说，这个列表里面会按照活跃程度进行排序，这样就容易把不怎么用的内存页拿出来做处理.
+
+内存页总共分两类，一类是匿名页，和虚拟地址空间进行关联；一类是内存映射，不但和虚拟地址空间关联，还和文件管理关联.
+
+它们每一类都有两个列表，一个是 active，一个是 inactive. 顾名思义，active 就是比较活跃的，inactive 就是不怎么活跃的. 这两个里面的页会变化，过一段时间，活跃的可能变为不活跃，不活跃的可能变为活跃. 如果要换出内存，那就是从不活跃的列表中找出最不活跃的，换出到硬盘上.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/mmzone.h#L222
+/*
+ * We do arithmetic on the LRU lists in various places in the code,
+ * so it is important to keep the active lists LRU_ACTIVE higher in
+ * the array than the corresponding inactive lists, and to keep
+ * the *_FILE lists LRU_FILE higher than the corresponding _ANON lists.
+ *
+ * This has to be kept in sync with the statistics in zone_stat_item
+ * above and the descriptions in vmstat_text in mm/vmstat.c
+ */
+#define LRU_BASE 0
+#define LRU_ACTIVE 1
+#define LRU_FILE 2
+
+enum lru_list {
+	LRU_INACTIVE_ANON = LRU_BASE,
+	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,
+	LRU_INACTIVE_FILE = LRU_BASE + LRU_FILE,
+	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
+	LRU_UNEVICTABLE,
+	NR_LRU_LISTS
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmscan.c#L2426
+static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
+				 struct lruvec *lruvec, struct scan_control *sc)
+{
+	if (is_active_lru(lru)) {
+		if (sc->may_deactivate & (1 << is_file_lru(lru)))
+			shrink_active_list(nr_to_scan, lruvec, sc, lru);
+		else
+			sc->skipped_deactivate = 1;
+		return 0;
+	}
+
+	return shrink_inactive_list(nr_to_scan, lruvec, sc, lru);
+}
+```
+
+从上面的代码可以看出，shrink_list 会先缩减活跃页面列表，再压缩不活跃的页面列表. 对于不活跃列表的缩减，shrink_inactive_list 就需要对页面进行回收；对于匿名页来讲，需要分配 swap，将内存页写入文件系统；对于内存映射关联了文件的，我们需要将在内存中对于文件的修改写回到文件中.
+
 
 ### 文件和文件系统
 ```c
