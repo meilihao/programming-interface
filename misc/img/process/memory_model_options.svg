@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 memory_model_options.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		width="9.45595in" height="4.23923in" viewBox="0 0 680.829 305.224" xml:space="preserve" color-interpolation-filters="sRGB"
+		class="st21">
+	<style type="text/css">
+	<![CDATA[
+		.st1 {visibility:visible}
+		.st2 {fill:#5b9bd5;fill-opacity:0.22;filter:url(#filter_2);stroke:#5b9bd5;stroke-opacity:0.22}
+		.st3 {fill:#a5a5a5;stroke:#000000;stroke-width:0.25}
+		.st4 {fill:#000000;font-family:Times New Roman;font-size:0.916672em}
+		.st5 {fill:#7f7f7f;stroke:#000000;stroke-width:0.25}
+		.st6 {fill:none;stroke:none;stroke-width:0.25}
+		.st7 {fill:#000000;font-family:宋体;font-size:0.916672em}
+		.st8 {fill:#d8d8d8;stroke:#000000;stroke-width:0.25}
+		.st9 {fill:none;filter:url(#filter_2);stroke:#5b9bd5;stroke-opacity:0.22}
+		.st10 {fill:#5b9bd5;filter:url(#filter_2);font-family:Times New Roman;font-size:0.916672em;opacity:0.219608}
+		.st11 {fill:none;stroke:#48d9fd;stroke-width:0.25}
+		.st12 {fill:#48d9fd;font-family:Times New Roman;font-size:0.916672em}
+		.st13 {fill:#000000;font-family:Times New Roman;font-size:0.916672em;font-weight:bold}
+		.st14 {marker-end:url(#mrkr5-48);stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.5}
+		.st15 {fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;stroke-width:0.16556291390728}
+		.st16 {stroke:#000000;stroke-width:0.25}
+		.st17 {fill:none;filter:url(#filter_2);stroke:#5b9bd5;stroke-dasharray:1.75,1.25;stroke-opacity:0.22}
+		.st18 {fill:none;stroke:#000000;stroke-dasharray:1.75,1.25;stroke-width:0.25}
+		.st19 {font-size:1em}
+		.st20 {font-family:Times New Roman;font-size:1em}
+		.st21 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<defs id="Markers">
+		<g id="lend5">
+			<path d="M 2 1 L 0 0 L 1.98117 -0.993387 C 1.67173 -0.364514 1.67301 0.372642 1.98465 1.00043 " style="stroke:none"/>
+		</g>
+		<marker id="mrkr5-48" class="st15" refX="-10.57" orient="auto" markerUnits="strokeWidth" overflow="visible">
+			<use xlink:href="#lend5" transform="scale(-6.04,-6.04) "/>
+		</marker>
+	</defs>
+	<defs id="Filters">
+		<filter id="filter_2">
+			<feGaussianBlur stdDeviation="2"/>
+		</filter>
+	</defs>
+	<g>
+		<title>页-1</title>
+		<g id="group51-1" transform="translate(3.0294,-0.25)">
+			<title>工作表.51</title>
+			<g id="shape1-2" transform="translate(0,-285.039)">
+				<title>流程</title>
+				<desc>ARCH_SELECT_MEMORY_MODEL</desc>
+				<g id="shadow1-3" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="188.504" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="188.504" height="18.4252" class="st3"/>
+				<text x="6.25" y="299.31" class="st4">ARCH_SELECT_MEMORY_MODEL</text>			</g>
+			<g id="shape2-8" transform="translate(16.2992,-246.614)">
+				<title>流程.2</title>
+				<desc>SELECT_MEMORY_MODEL</desc>
+				<g id="shadow2-9" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="156.614" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="156.614" height="18.4252" class="st5"/>
+				<text x="8.33" y="299.31" class="st4">SELECT_MEMORY_MODEL</text>			</g>
+			<g id="shape39-14" transform="translate(191.339,-284.724)">
+				<title>工作表.39</title>
+				<desc>当体系架构需要支持内存模型手动选择功能时才会使用</desc>
+				<rect x="0" y="285.224" width="276.378" height="20" class="st6"/>
+				<text x="6.19" y="298.52" class="st7">当体系架构需要支持内存模型手动选择功能时才会使用</text>			</g>
+			<g id="shape40-17" transform="translate(173.622,-245.039)">
+				<title>工作表.40</title>
+				<desc>若为true用户能够手动选择内存模型。若为false选用体系架构默认的内存模型</desc>
+				<rect x="0" y="285.224" width="421.654" height="20" class="st6"/>
+				<text x="10.08" y="298.52" class="st7">若为true，用户能够手动选择内存模型。若为false，选用体系架构默认的内存模型</text>			</g>
+			<g id="shape5-20" transform="translate(505.843,-145.276)">
+				<title>流程.5</title>
+				<desc>ARCH_SPARSEMEM_ENABLE</desc>
+				<g id="shadow5-21" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="162.992" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="162.992" height="18.4252" class="st3"/>
+				<text x="5.71" y="299.31" class="st4">ARCH_SPARSEMEM_ENABLE</text>			</g>
+			<g id="shape8-26" transform="translate(505.843,-105.591)">
+				<title>流程.8</title>
+				<desc>SPARSEMEM_ENABLE</desc>
+				<g id="shadow8-27" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="162.992" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="162.992" height="18.4252" class="st8"/>
+				<text x="23.74" y="299.31" class="st4">SPARSEMEM_ENABLE</text>			</g>
+			<g id="shape11-32" transform="translate(505.843,-25.5118)">
+				<title>流程.11</title>
+				<desc>SPARSEMEM</desc>
+				<g id="shadow11-33" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="162.992" height="18.4252" class="st9"/>
+					<text x="48.18" y="299.31" class="st10">SPARSEMEM</text>				</g>
+				<rect x="0" y="286.799" width="162.992" height="18.4252" class="st11"/>
+				<text x="48.18" y="299.31" class="st12">SPARSEMEM</text>			</g>
+			<g id="shape14-40" transform="translate(534.518,-81.4961)">
+				<title>工作表.14</title>
+				<desc>[ ] Sparse Memory</desc>
+				<rect x="0" y="286.799" width="105.642" height="18.4252" class="st6"/>
+				<text x="8.99" y="299.31" class="st13">[ ] Sparse Memory</text>			</g>
+			<g id="shape17-43" transform="translate(282.114,159.949) rotate(-90) scale(-1,1)">
+				<title>直线连接线.17</title>
+				<path d="M0 305.22 L15.97 305.22" class="st14"/>
+			</g>
+			<g id="shape20-49" transform="translate(282.114,223.728) rotate(-90) scale(-1,1)">
+				<title>直线连接线.20</title>
+				<path d="M0 305.22 L32.27 305.22" class="st14"/>
+			</g>
+			<g id="shape4-54" transform="translate(299.622,-145.276)">
+				<title>流程.4</title>
+				<desc>ARCH_DISCONTIGMEM_ENABLE</desc>
+				<g id="shadow4-55" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="188.504" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="188.504" height="18.4252" class="st3"/>
+				<text x="9" y="299.31" class="st4">ARCH_DISCONTIGMEM_ENABLE</text>			</g>
+			<g id="shape7-60" transform="translate(299.622,-105.591)">
+				<title>流程.7</title>
+				<desc>DISCONTIGMEM_ENABLE</desc>
+				<g id="shadow7-61" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="188.504" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="188.504" height="18.4252" class="st8"/>
+				<text x="27.03" y="299.31" class="st4">DISCONTIGMEM_ENABLE</text>			</g>
+			<g id="shape10-66" transform="translate(299.622,-25.5118)">
+				<title>流程.10</title>
+				<desc>DISCONTIGMEM</desc>
+				<g id="shadow10-67" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="188.504" height="18.4252" class="st9"/>
+					<text x="51.47" y="299.31" class="st10">DISCONTIGMEM</text>				</g>
+				<rect x="0" y="286.799" width="188.504" height="18.4252" class="st11"/>
+				<text x="51.47" y="299.31" class="st12">DISCONTIGMEM</text>			</g>
+			<g id="shape13-74" transform="translate(322.982,-80.1575)">
+				<title>工作表.13</title>
+				<desc>[ ] Discontiguous Memory</desc>
+				<rect x="0" y="286.799" width="141.783" height="18.4252" class="st6"/>
+				<text x="9.94" y="299.31" class="st13">[ ] Discontiguous Memory</text>			</g>
+			<g id="shape16-77" transform="translate(88.6496,159.949) rotate(-90) scale(-1,1)">
+				<title>直线连接线.16</title>
+				<path d="M0 305.22 L15.97 305.22" class="st14"/>
+			</g>
+			<g id="shape19-82" transform="translate(88.6496,225.067) rotate(-90) scale(-1,1)">
+				<title>直线连接线.19</title>
+				<path d="M0 305.22 L30.94 305.22" class="st14"/>
+			</g>
+			<g id="shape3-87" transform="translate(125.291,-145.276)">
+				<title>流程.3</title>
+				<desc>ARCH_FLATMEM_ENABLE</desc>
+				<g id="shadow3-88" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="156.614" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="156.614" height="18.4252" class="st3"/>
+				<text x="8.94" y="299.31" class="st4">ARCH_FLATMEM_ENABLE</text>			</g>
+			<g id="shape6-93" transform="translate(125.291,-105.591)">
+				<title>流程.6</title>
+				<desc>FLATMEM_ENABLE</desc>
+				<g id="shadow6-94" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="156.614" height="18.4252" class="st2"/>
+				</g>
+				<rect x="0" y="286.799" width="156.614" height="18.4252" class="st8"/>
+				<text x="26.98" y="299.31" class="st4">FLATMEM_ENABLE</text>			</g>
+			<g id="shape9-99" transform="translate(125.291,-25.5118)">
+				<title>流程.9</title>
+				<desc>FLATMEM</desc>
+				<g id="shadow9-100" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<rect x="0" y="286.799" width="156.614" height="18.4252" class="st9"/>
+					<text x="51.42" y="299.31" class="st10">FLATMEM</text>				</g>
+				<rect x="0" y="286.799" width="156.614" height="18.4252" class="st11"/>
+				<text x="51.42" y="299.31" class="st12">FLATMEM</text>			</g>
+			<g id="shape12-107" transform="translate(162.142,-81.4961)">
+				<title>工作表.12</title>
+				<desc>[ ] Flat Memory</desc>
+				<rect x="0" y="286.799" width="83.3189" height="18.4252" class="st6"/>
+				<text x="4.25" y="299.31" class="st13">[ ] Flat Memory</text>			</g>
+			<g id="shape15-110" transform="translate(-101.626,159.949) rotate(-90) scale(-1,1)">
+				<title>直线连接线</title>
+				<path d="M0 305.22 L15.97 305.22" class="st14"/>
+			</g>
+			<g id="shape18-115" transform="translate(-101.419,222.081) rotate(-89.6907) scale(-1,1)">
+				<title>直线连接线.18</title>
+				<path d="M0 305.22 L32.27 305.22" class="st14"/>
+			</g>
+			<g id="shape30-120" transform="translate(125.291,433.992) scale(1,-1)">
+				<title>侧边大括号</title>
+				<path d="M0 298.14 L0 299.56 A5.6692 5.6692 -180 0 0 5.67 305.22 L265.8 305.22 A5.6692 5.6692 0 0 1 271.47 310.89
+							 A5.6692 5.6692 0 0 1 277.14 305.22 L537.17 305.22 A5.6692 5.6692 -180 0 0 542.83 299.56 L542.83 298.14"
+						class="st16"/>
+			</g>
+			<g id="shape31-123" transform="translate(302.457,-181.417)">
+				<title>工作表.31</title>
+				<desc>体系架构支持的内存模型多个</desc>
+				<rect x="0" y="285.224" width="188.504" height="20" class="st6"/>
+				<text x="11.75" y="298.89" class="st7">体系架构支持的内存模型（多个）</text>			</g>
+			<g id="shape42-126" transform="translate(119.622,-99.9213)">
+				<title>流程.42</title>
+				<g id="shadow42-127" transform="matrix(1,0,0,1,0.345598,1.97279)" class="st1">
+					<path d="M0 305.22 L554.46 305.22 L554.46 275.46 L0 275.46 L0 305.22 Z" class="st17"/>
+				</g>
+				<path d="M0 305.22 L554.46 305.22 L554.46 275.46 L0 275.46 L0 305.22 Z" class="st18"/>
+			</g>
+			<g id="shape43-131" transform="translate(4.22638,-90.5512)">
+				<title>工作表.43</title>
+				<desc>能手动选择的Kconfig显示条目</desc>
+				<rect x="0" y="275.461" width="90.7598" height="29.7638" class="st6"/>
+				<text x="4" y="287.04" class="st7">能手动选择的<tspan x="4" dy="1.2em" class="st19">Kconfig</tspan>显示条目</text>			</g>
+			<g id="shape44-135" transform="translate(4.25197,-25.5118)">
+				<title>工作表.44</title>
+				<desc>最终确定的内存模型(唯一)</desc>
+				<rect x="0" y="275.461" width="116.22" height="29.7638" class="st6"/>
+				<text x="4" y="287.04" class="st7">最终确定的内存模型<tspan x="4" dy="1.2em" class="st19">(</tspan>唯一)</text>			</g>
+			<g id="shape45-139" transform="translate(399.428,14.7784) rotate(88.985)">
+				<title>直线连接线.45</title>
+				<path d="M0 305.22 L14.72 305.22" class="st14"/>
+			</g>
+			<g id="shape46-144" transform="translate(94.6063,363.835) scale(1,-1)">
+				<title>顶部/底部到侧边</title>
+				<path d="M0 305.22 L0 173.41 L19.73 173.41" class="st14"/>
+			</g>
+			<g id="shape50-149" transform="translate(192.189,0)">
+				<title>工作表.50</title>
+				<desc>即使Flatmem已经被启用但当选择了Discontiguous或Sparse后会自动禁用它。</desc>
+				<rect x="0" y="286.799" width="421.228" height="18.4252" class="st6"/>
+				<text x="4" y="299.63" class="st7">即使<tspan class="st20">Flatmem</tspan>已经被启用，但当选择了<tspan class="st20">Discontiguous</tspan>或<tspan
+							class="st20">Sparse</tspan>后，会自动禁用它。</text>			</g>
+		</g>
+	</g>
+</svg>

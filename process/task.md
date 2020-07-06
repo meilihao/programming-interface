@@ -854,6 +854,41 @@ out:
 到此, 64 位的内核态布局也完了.
 
 #### 物理内存的管理
+参考:
+- [内存管理（上）](https://www.lagou.com/lgeduarticle/46096.html)
+- [内存模型「memory model」](https://chasinglulu.github.io/2019/05/29/%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%E3%80%8Cmemory-model%E3%80%8D/)
+- [linux内存管理笔记(十七）----linux内存模型](https://blog.csdn.net/u012489236/article/details/106323088)
+
+Linux目前支持三种内存模型(memory model)： FLATMEM（平坦内存模型）、DISCONTIGMEM（不连续内存模型）和SPARSEMEM（稀疏内存模型）. 不同Linux内存模型以不同方式管理和组织可用物理内存，具体方式取决于系统物理内存是否不连续且存在空隙. SPARSEMEM和DISCONTIGMEM实际上作用相同, 目前多采用SPARSEMEM, 其支持内存热插拔等新特性.
+
+> memory model，其实就是从cpu的角度看其物理内存的分布情况, 在linux kernel中，使用什么的方式来管理这些物理内存.
+
+每种内存模型的特点：
+- FLATMEM
+
+	- 内存连续且不存在空隙
+    - 在大多数情况下，应用于UMA系统`Uniform Memory Access`
+    - 通过CONFIG_FLATMEM配置
+
+- DISCONTIGMEM
+
+    - 多个内存节点不连续并且存在空隙`hole`
+    - 适用于UMA系统和NUMA系统`Non-Uniform Memory Access`
+    - [ARM在2010年已移除了对DISCONTIGMEM内存模型的支持](https://github.com/torvalds/linux/commit/be370302742ff9948f2a42b15cb2ba174d97b930)
+    - 通过CONFIG_CONTIGMEM配置
+
+- SPARSEMEM
+
+    - 多个内存区域不连续并且存在空隙
+    - 支持内存热插拔`hot-plug memory`，但性能稍逊色于DISCONTIGMEM
+    - 在x86或ARM64内核采用了最近实现的SPARSEMEM_VMEMMAP变种，其性能比DISCONTIGMEM更优并且与FLATMEM相当
+    - 对于ARM64内核，默认选择SPARSEMEM内存模型
+    - 以section为单位管理online和hot-plug内存
+    - 通过CONFIG_SPARSEMEM配置
+
+![主流体系架构支持的内存模型](/misc/img/process/Kazam_screenshot_00000.png)
+![确定内存模型的内核配置选项](/misc/img/process/memory_model_options.svg)
+
 ![](/misc/img/process/8f158f58dda94ec04b26200073e15449.jpeg)
 
 SMP （Symmetric Multiprocessing, 对称多处理器）, 顾名思义, 在SMP中所有的处理器都是对等的, 它们通过公用总线连接共享同一块物理内存，而且距离都是一样的, 这也就导致了系统中所有资源(CPU、内存、I/O等)都是共享的. 它有一个显著的缺点，就是总线会成为瓶颈，因为数据都要走它. 其架构简单，但是拓展性能非常差，从linux 上能看到:
