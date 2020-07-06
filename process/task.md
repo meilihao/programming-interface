@@ -2915,29 +2915,36 @@ unacct_error:
 到这里，内存映射的内容要告一段落了. 到目前为止，我们还没有开始真正访问内存呀！这个时候，内存管理并不直接分配物理内存，因为物理内存相对于虚拟地址空间太宝贵了，只有等你真正用的那一刻才会开始分配.
 
 ##### 用户态缺页异常
-一旦开始访问虚拟内存的某个地址，如果我们发现，并没有对应的物理页，那就触发缺页中断，调用 do_page_fault:
+一旦开始访问虚拟内存的某个地址，如果我们发现，并没有对应的物理页，那就触发缺页中断，调用 handle_page_fault:
 ```c
-// https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/fault.c#L1522
-dotraplinkage void
-do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
-		unsigned long address)
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/fault.c#L1104
+static __always_inline void
+handle_page_fault(struct pt_regs *regs, unsigned long error_code,
+			      unsigned long address)
 {
-	prefetchw(&current->mm->mmap_sem);
-	trace_page_fault_entries(regs, hw_error_code, address);
+	trace_page_fault_entries(regs, error_code, address);
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
 
 	/* Was the fault on kernel-controlled part of the address space? */
-	if (unlikely(fault_in_kernel_space(address)))
-		do_kern_addr_fault(regs, hw_error_code, address);
-	else
-		do_user_addr_fault(regs, hw_error_code, address);
+	if (unlikely(fault_in_kernel_space(address))) {
+		do_kern_addr_fault(regs, error_code, address);
+	} else {
+		do_user_addr_fault(regs, error_code, address);
+		/*
+		 * User address page fault handling might have reenabled
+		 * interrupts. Fixing up all potential exit points of
+		 * do_user_addr_fault() and its leaf functions is just not
+		 * doable w/o creating an unholy mess or turning the code
+		 * upside down.
+		 */
+		local_irq_disable();
+	}
 }
-NOKPROBE_SYMBOL(do_page_fault);
 ```
 
-在 do_page_fault 里面，先要判断缺页中断是否发生在内核. 如果发生在内核则调用 do_kern_addr_fault, 而用户空间的部分用[`do_user_addr_fault`](https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/fault.c#L1305).
+在 handle_page_fault 里面，先要判断缺页中断是否发生在内核. 如果发生在内核则调用 do_kern_addr_fault, 而用户空间的部分用[`do_user_addr_fault`](https://elixir.bootlin.com/linux/latest/source/arch/x86/mm/fault.c#L1305).
 
 先看do_user_addr_fault，它会找到你访问的那个地址所在的区域 vm_area_struct，然后调用 [handle_mm_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4354) 来映射这个区域.
 
@@ -3017,7 +3024,7 @@ cr3 是 CPU 的一个寄存器，它会指向当前进程的顶级 pgd. 如果 C
 
 1. 用户进程在运行的过程中，访问虚拟内存中的数据，会被 cr3 里面指向的页表转换为物理地址后，才在物理内存中访问数据，这个过程都是在用户态运行的，地址转换的过程无需进入内核态.
 
-只有访问虚拟内存的时候，发现没有映射到物理内存，页表也没有创建过，才触发缺页异常. 进入内核调用 do_page_fault，一直调用到 __handle_mm_fault. 既然原来没有创建过页表，那只好补上这一课. 于是，__handle_mm_fault 调用 pud_alloc 和 pmd_alloc，来创建相应的页目录项，最后调用 handle_pte_fault 来创建页表项.
+只有访问虚拟内存的时候，发现没有映射到物理内存，页表也没有创建过，才触发缺页异常. 进入内核调用 handle_page_fault，一直调用到 __handle_mm_fault. 既然原来没有创建过页表，那只好补上这一课. 于是，__handle_mm_fault 调用 pud_alloc 和 pmd_alloc，来创建相应的页目录项，最后调用 handle_pte_fault 来创建页表项.
 
 绕了一大圈，终于将页表整个机制的各个部分串了起来. 但物理的内存还没找到, 还得接着分析 [handle_pte_fault](https://elixir.bootlin.com/linux/latest/source/mm/memory.c#L4171) 的实现.
 
@@ -3328,6 +3335,215 @@ static const struct address_space_operations ext4_aops = {
 页表一般都很大，只能存放在内存中. 操作系统每次访问内存都要折腾两步，先通过查询页表得到物理地址，然后访问该物理地址读取指令、数据. 为了提高映射速度，引入了 TLB（Translation Lookaside Buffer），就是快表，专门用来做地址映射的硬件设备. 它不在内存中，可存储的数据比较少，但是比内存要快. 所以，可以认为，TLB 就是页表的 Cache，其中存储了当前最可能被访问到的页表项，其内容是部分页表项的一个副本. 有了 TLB 之后，先查快表，快表中有映射关系，然后直接转换为物理地址. 如果在 TLB 查不到映射关系时，才会到内存中查询页表.
 
 ![](/misc/img/process/78d351d0105c8e5bf0e49c685a2c1a44.jpg)
+
+##### 内核页表
+和用户态页表不同，在系统初始化的时候，就要创建内核页表了. 从内核页表的根 [swapper_pg_dir](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/pgtable_64.h#L29) 开始找线索，在 arch/x86/include/asm/pgtable_64.h 中就能找到它的定义.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/include/asm/pgtable_64.h#L19
+extern p4d_t level4_kernel_pgt[512];
+extern p4d_t level4_ident_pgt[512];
+extern pud_t level3_kernel_pgt[512];
+extern pud_t level3_ident_pgt[512];
+extern pmd_t level2_kernel_pgt[512];
+extern pmd_t level2_fixmap_pgt[512];
+extern pmd_t level2_ident_pgt[512];
+extern pte_t level1_fixmap_pgt[512 * FIXMAP_PMD_NUM];
+extern pgd_t init_top_pgt[];
+
+#define swapper_pg_dir init_top_pgt
+```
+
+swapper_pg_dir 指向内核最顶级的目录 pgd，同时出现的还有几个页表目录. 64 位系统的虚拟地址空间的布局，其中 XXX_ident_pgt 对应的是直接映射区，XXX_kernel_pgt 对应的是内核代码区，XXX_fixmap_pgt 对应的是固定映射区. 它们是在汇编语言的文件里面的[arch\x86\kernel\head_64.S](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/kernel/head_64.S#L388)里初始化.
+
+内核页表的顶级目录 init_top_pgt，定义在 __INITDATA(即.init 区域) 里面. 可以看到，页表的根其实是全局变量，这就使得初始化的时候，甚至内存管理还没有初始化的时候，很容易就可以定位到
+
+接下来，定义 init_top_pgt 包含哪些项，不懂汇编的人可以简单地认为，quad 是声明了一项的内容，org 是跳到了某个位置.
+
+所以，init_top_pgt 有三项，上来先有一项，指向的是 level3_ident_pgt，也即直接映射区页表的三级目录. 为什么要减去 __START_KERNEL_map 呢？因为 level3_ident_pgt 是定义在内核代码里的，写代码的时候，写的都是虚拟地址，谁写代码的时候也不知道将来加载的物理地址是多少呀，对不对？
+
+因为 level3_ident_pgt 是在虚拟地址的内核代码段里的，而 __START_KERNEL_map 正是虚拟地址空间的内核代码段的起始地址. 这样，level3_ident_pgt 减去 __START_KERNEL_map 才是物理地址. 第一项定义完了以后，接下来我们跳到 PGD_PAGE_OFFSET 的位置，再定义一项. 从定义可以看出，这一项就应该是 __PAGE_OFFSET_BASE 对应的. __PAGE_OFFSET_BASE 是虚拟地址空间里面内核的起始地址. 第二项也指向 level3_ident_pgt，直接映射区.
+
+第二项定义完了以后，接下来跳到 PGD_START_KERNEL 的位置，再定义一项. 从定义可以看出，这一项应该是 __START_KERNEL_map 对应的项，__START_KERNEL_map 是虚拟地址空间里面内核代码段的起始地址. 第三项指向 level3_kernel_pgt，内核代码区.
+
+内核页表定义完了，一开始这里面的页表能够覆盖的内存范围比较小. 例如，内核代码区 512M，直接映射区 1G. 这个时候，其实只要能够映射基本的内核代码和数据结构就可以了. 可以看出，里面还空着很多项，可以用于将来映射巨大的内核虚拟地址空间，等用到的时候再进行映射.
+
+如果是用户态进程页表，会有 mm_struct 指向进程顶级目录 pgd，对于内核来讲，也定义了一个 mm_struct，指向 swapper_pg_dir.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/init-mm.c#L29
+/*
+ * For dynamically allocated mm_structs, there is a dynamically sized cpumask
+ * at the end of the structure, the size of which depends on the maximum CPU
+ * number the system can see. That way we allocate only as much memory for
+ * mm_cpumask() as needed for the hundreds, or thousands of processes that
+ * a system typically runs.
+ *
+ * Since there is only one init_mm in the entire system, keep it simple
+ * and size this cpu_bitmask to NR_CPUS.
+ */
+struct mm_struct init_mm = {
+	.mm_rb		= RB_ROOT,
+	.pgd		= swapper_pg_dir,
+	.mm_users	= ATOMIC_INIT(2),
+	.mm_count	= ATOMIC_INIT(1),
+	MMAP_LOCK_INITIALIZER(init_mm)
+	.page_table_lock =  __SPIN_LOCK_UNLOCKED(init_mm.page_table_lock),
+	.arg_lock	=  __SPIN_LOCK_UNLOCKED(init_mm.arg_lock),
+	.mmlist		= LIST_HEAD_INIT(init_mm.mmlist),
+	.user_ns	= &init_user_ns,
+	.cpu_bitmap	= CPU_BITS_NONE,
+	INIT_MM_CONTEXT(init_mm)
+};
+```
+
+定义完了内核页表，接下来是初始化内核页表，在系统启动的时候 start_kernel 会调用 [setup_arch](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/kernel/setup.c#L789).
+
+在 setup_arch 中，load_cr3(swapper_pg_dir) 说明内核页表要开始起作用了，并且刷新了 TLB，初始化 init_mm 的成员变量，最重要的就是 [init_mem_mapping](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/init.c#L705). 最终它会调用 [kernel_physical_mapping_init](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/init_64.c#L787) -> [__kernel_physical_mapping_init](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/init_64.c#L730)
+
+在 __kernel_physical_mapping_init 里，先通过 __va 将物理地址转换为虚拟地址，然后再创建虚拟地址和物理地址的映射页表. 你可能会问，怎么这么麻烦啊？既然对于内核来讲，我们可以用 __va 和 __pa 直接在虚拟地址和物理地址之间直接转来转去，为啥还要辛辛苦苦建立页表呢？因为这是 CPU 和内存的硬件的需求，也就是说，CPU 在保护模式下访问虚拟地址的时候，就会用 CR3 这个寄存器，这个寄存器是 CPU 定义的，作为操作系统，我们是软件，只能按照硬件的要求来. 你可能又会问了，按照咱们讲初始化的时候的过程，系统早早就进入了保护模式，到了 setup_arch 里面才 load_cr3，如果使用 cr3 是硬件的要求，那之前是怎么办的呢？如果你仔细去看 arch\x86\kernel\head_64.S，这里面除了初始化内核页表之外，在这之前，还有另一个页表 early_top_pgt. 看到关键字 early 了嘛？这个页表就是专门用在真正的内核页表初始化之前，为了遵循硬件的要求而设置的. 早期页表不是我们这节的重点，这里就不展开多说了.
+
+##### vmalloc 和 kmap_atomic 原理
+在用户态可以通过 malloc 函数分配内存，当然 malloc 在分配比较大的内存的时候，底层调用的是 mmap，当然也可以直接通过 mmap 做内存映射，在内核里面也有相应的函数. 在虚拟地址空间里面，有个 vmalloc 区域，从 VMALLOC_START 开始到 VMALLOC_END，可以用于映射一段物理内存.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmalloc.c#L2615
+/**
+ * vzalloc - allocate virtually contiguous memory with zero fill
+ * @size:    allocation size
+ *
+ * Allocate enough pages to cover @size from the page level
+ * allocator and map them into contiguous kernel virtual space.
+ * The memory allocated is set to zero.
+ *
+ * For tight control over page level allocator and protection flags
+ * use __vmalloc() instead.
+ *
+ * Return: pointer to the allocated memory or %NULL on error
+ */
+void *vzalloc(unsigned long size)
+{
+	return __vmalloc_node(size, 1, GFP_KERNEL | __GFP_ZERO, NUMA_NO_NODE,
+				__builtin_return_address(0));
+}
+EXPORT_SYMBOL(vzalloc);
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmalloc.c#L2581
+/**
+ * __vmalloc_node - allocate virtually contiguous memory
+ * @size:	    allocation size
+ * @align:	    desired alignment
+ * @gfp_mask:	    flags for the page level allocator
+ * @node:	    node to use for allocation or NUMA_NO_NODE
+ * @caller:	    caller's return address
+ *
+ * Allocate enough pages to cover @size from the page level allocator with
+ * @gfp_mask flags.  Map them into contiguous kernel virtual space.
+ *
+ * Reclaim modifiers in @gfp_mask - __GFP_NORETRY, __GFP_RETRY_MAYFAIL
+ * and __GFP_NOFAIL are not supported
+ *
+ * Any use of gfp flags outside of GFP_KERNEL should be consulted
+ * with mm people.
+ *
+ * Return: pointer to the allocated memory or %NULL on error
+ */
+void *__vmalloc_node(unsigned long size, unsigned long align,
+			    gfp_t gfp_mask, int node, const void *caller)
+{
+	return __vmalloc_node_range(size, align, VMALLOC_START, VMALLOC_END,
+				gfp_mask, PAGE_KERNEL, 0, node, caller);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/vmalloc.c#L2522
+/**
+ * __vmalloc_node_range - allocate virtually contiguous memory
+ * @size:		  allocation size
+ * @align:		  desired alignment
+ * @start:		  vm area range start
+ * @end:		  vm area range end
+ * @gfp_mask:		  flags for the page level allocator
+ * @prot:		  protection mask for the allocated pages
+ * @vm_flags:		  additional vm area flags (e.g. %VM_NO_GUARD)
+ * @node:		  node to use for allocation or NUMA_NO_NODE
+ * @caller:		  caller's return address
+ *
+ * Allocate enough pages to cover @size from the page level
+ * allocator with @gfp_mask flags.  Map them into contiguous
+ * kernel virtual space, using a pagetable protection of @prot.
+ *
+ * Return: the address of the area or %NULL on failure
+ */
+void *__vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, unsigned long vm_flags, int node,
+			const void *caller)
+{
+	struct vm_struct *area;
+	void *addr;
+	unsigned long real_size = size;
+
+	size = PAGE_ALIGN(size);
+	if (!size || (size >> PAGE_SHIFT) > totalram_pages())
+		goto fail;
+
+	area = __get_vm_area_node(real_size, align, VM_ALLOC | VM_UNINITIALIZED |
+				vm_flags, start, end, node, gfp_mask, caller);
+	if (!area)
+		goto fail;
+
+	addr = __vmalloc_area_node(area, gfp_mask, prot, node);
+	if (!addr)
+		return NULL;
+
+	/*
+	 * In this function, newly allocated vm_struct has VM_UNINITIALIZED
+	 * flag. It means that vm_struct is not fully initialized.
+	 * Now, it is fully initialized, so remove this flag here.
+	 */
+	clear_vm_uninitialized_flag(area);
+
+	kmemleak_vmalloc(area, size, gfp_mask);
+
+	return addr;
+
+fail:
+	warn_alloc(gfp_mask, NULL,
+			  "vmalloc: allocation failure: %lu bytes", real_size);
+	return NULL;
+}
+```
+
+再来看内核的临时映射函数 kmap_atomic 的实现. 从下面的代码我们可以看出，如果是 32 位有高端地址的，就需要调用 set_pte 通过内核页表进行临时映射；如果是 64 位没有高端地址的，就调用 page_address，里面会调用 lowmem_page_address. 其实低端内存的映射，会直接使用 __va 进行临时映射.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/highmem.h#L92
+/*
+ * kmap_atomic/kunmap_atomic is significantly faster than kmap/kunmap because
+ * no global lock is needed and because the kmap code must perform a global TLB
+ * invalidation when the kmap pool wraps.
+ *
+ * However when holding an atomic kmap is is not legal to sleep, so atomic
+ * kmaps are appropriate for short, tight code paths only.
+ *
+ * The use of kmap_atomic/kunmap_atomic is discouraged - kmap/kunmap
+ * gives a more generic (and caching) interface. But kmap_atomic can
+ * be used in IRQ contexts, so in some (very limited) cases we need
+ * it.
+ */
+static inline void *kmap_atomic_prot(struct page *page, pgprot_t prot)
+{
+	preempt_disable();
+	pagefault_disable();
+	if (!PageHighMem(page))
+		return page_address(page);
+	return kmap_atomic_high_prot(page, prot);
+}
+#define kmap_atomic(page)	kmap_atomic_prot(page, kmap_prot)
+```
+
+##### 内核态缺页异常
+可以看出，kmap_atomic 和 vmalloc 不同. kmap_atomic 发现，没有页表的时候，就直接创建页表进行映射了. 而 vmalloc 没有，它只分配了内核的虚拟地址. 所以，访问它的时候，会产生缺页异常. 内核态的缺页异常还是会调用 [handle_page_fault](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/fault.c#L1104)，但是会走到咱们上面用户态缺页异常中没有解析的那部分 [do_kern_addr_fault](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/fault.c#L1104)->[spurious_kernel_fault](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/mm/fault.c#L976), 这个函数主要用于关联内核页表项.
 
 ### 文件和文件系统
 ```c
