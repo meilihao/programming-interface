@@ -1718,6 +1718,633 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 从当前的 order，也即指数开始，在伙伴系统的 free_area 找 2^order 大小的页块. 如果链表的第一个不为空，就找到了；如果为空，就到更大的 order 的页块链表里面去找. 找到以后，除了将页块从链表中取下来，我们还要把多余部分放到其他页块链表里面. [expand](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/page_alloc.c#L2102) 就是干这个事情的. area就是伙伴系统那个表里面的前一项，前一项里面的页块大小是当前项的页块大小除以 2，size 右移一位也就是除以 2，list_add 就是加到链表上，nr_free++ 就是计数加 1.
 
+##### 小内存的分配
+> 理论上 SLUB 优于 SLAB ， 同时还保持了不错的向 SLAB 的兼容. 目前SLUB取代了SLAB，成为了默认的内存分配器.
+
+参考:
+- [linux 内核 内存管理 slub算法 （一） 原理](https://blog.csdn.net/lukuen/article/details/6935068)
+
+如果遇到小的对象，会使用 slub 分配器进行分配.
+
+创建进程的时候，会调用 dup_task_struct，它想要试图复制一个 task_struct 对象，需要先调用 alloc_task_struct_node，分配一个 task_struct 对象. 从这段代码可以看出，它调用了 kmem_cache_alloc_node 函数，在 task_struct 的缓存区域 task_struct_cachep 分配了一块内存.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L167
+static inline struct task_struct *alloc_task_struct_node(int node)
+{
+	return kmem_cache_alloc_node(task_struct_cachep, GFP_KERNEL, node);
+}
+
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slab.c#L3573
+/**
+ * kmem_cache_alloc_node - Allocate an object on the specified node
+ * @cachep: The cache to allocate from.
+ * @flags: See kmalloc().
+ * @nodeid: node number of the target node.
+ *
+ * Identical to kmem_cache_alloc but it will allocate memory on the given
+ * node, which can improve the performance for cpu bound structures.
+ *
+ * Fallback to other node is possible if __GFP_THISNODE is not set.
+ *
+ * Return: pointer to the new object or %NULL in case of error
+ */
+void *kmem_cache_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid)
+{
+	void *ret = slab_alloc_node(cachep, flags, nodeid, _RET_IP_);
+
+	trace_kmem_cache_alloc_node(_RET_IP_, ret,
+				    cachep->object_size, cachep->size,
+				    flags, nodeid);
+
+	return ret;
+}
+EXPORT_SYMBOL(kmem_cache_alloc_node);
+```
+
+在系统初始化的时候，task_struct_cachep 会被 [kmem_cache_create](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slab_common.c#L561) 函数创建。这个函数也比较容易看懂，专门用于分配 task_struct 对象的缓存.
+
+这个缓存区的名字就叫 task_struct. 缓存区中每一块的大小正好等于 task_struct 的大小，也即 arch_task_struct_size. 有了这个缓存区，每次创建 task_struct 的时候，我们不用到内存里面去分配，先在缓存里面看看有没有直接可用的，这就是 kmem_cache_alloc_node 的作用.
+
+当一个进程结束，task_struct 也不用直接被销毁，而是放回到缓存中，这就是 [kmem_cache_free](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L3083) 的作用. 这样，新进程创建的时候，我们就可以直接用现成的缓存中的 task_struct 了.
+
+缓存区 struct kmem_cache 长这样:
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/slub_def.h#L82
+/*
+ * Slab cache management.
+ */
+struct kmem_cache {
+	struct kmem_cache_cpu __percpu *cpu_slab;
+	/* Used for retrieving partial slabs, etc. */
+	slab_flags_t flags;
+	unsigned long min_partial;
+	unsigned int size;	/* The size of an object including metadata */
+	unsigned int object_size;/* The size of an object without metadata */
+	unsigned int offset;	/* Free pointer offset */
+#ifdef CONFIG_SLUB_CPU_PARTIAL
+	/* Number of per cpu partial objects to keep around */
+	unsigned int cpu_partial;
+#endif
+	struct kmem_cache_order_objects oo;
+
+	/* Allocation and freeing of slabs */
+	struct kmem_cache_order_objects max;
+	struct kmem_cache_order_objects min;
+	gfp_t allocflags;	/* gfp flags to use on each alloc */
+	int refcount;		/* Refcount for slab cache destroy */
+	void (*ctor)(void *);
+	unsigned int inuse;		/* Offset to metadata */
+	unsigned int align;		/* Alignment */
+	unsigned int red_left_pad;	/* Left redzone padding size */
+	const char *name;	/* Name (only for display!) */
+	struct list_head list;	/* List of slab caches */
+#ifdef CONFIG_SYSFS
+	struct kobject kobj;	/* For sysfs */
+	struct work_struct kobj_remove_work;
+#endif
+#ifdef CONFIG_MEMCG
+	struct memcg_cache_params memcg_params;
+	/* For propagation, maximum size of a stored attr */
+	unsigned int max_attr_size;
+#ifdef CONFIG_SYSFS
+	struct kset *memcg_kset;
+#endif
+#endif
+
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	unsigned long random;
+#endif
+
+#ifdef CONFIG_NUMA
+	/*
+	 * Defragmentation by allocating from a remote node.
+	 */
+	unsigned int remote_node_defrag_ratio;
+#endif
+
+#ifdef CONFIG_SLAB_FREELIST_RANDOM
+	unsigned int *random_seq;
+#endif
+
+#ifdef CONFIG_KASAN
+	struct kasan_cache kasan_info;
+#endif
+
+	unsigned int useroffset;	/* Usercopy region offset */
+	unsigned int usersize;		/* Usercopy region size */
+
+	struct kmem_cache_node *node[MAX_NUMNODES];
+};
+```
+
+在 struct kmem_cache 里面，有个变量 struct list_head list，这个结构我们已经看到过多次了. 我们可以想象一下，对于操作系统来讲，要创建和管理的缓存绝对不止 task_struct. 难道 mm_struct 就不需要吗？fs_struct 就不需要吗？都需要. 因此，所有的缓存最后都会放在一个链表里面，也就是 LIST_HEAD(slab_caches).
+
+对于缓存来讲，其实就是分配了连续几页的大内存块，然后根据缓存对象的大小，切成小内存块.
+
+所以，我们这里有三个 kmem_cache_order_objects 类型的变量. 这里面的 order，就是 2 的 order 次方个页面的大内存块，objects 就是能够存放的缓存对象的数量.
+
+最终，我们将大内存块切分成小内存块.
+
+每一项的结构都是缓存对象后面跟一个下一个空闲对象的指针，这样非常方便将所有的空闲对象链成一个链. 其实，这就相当于咱们数据结构里面学的，用数组实现一个可随机插入和删除的链表. 所以，这里面就有三个变量：size 是包含这个指针的大小，object_size 是纯对象的大小，offset 就是把下一个空闲对象的指针存放在这一项里的偏移量.
+
+那这些缓存对象哪些被分配了、哪些在空着，什么情况下整个大内存块都被分配完了，需要向伙伴系统申请几个页形成新的大内存块？这些信息该由谁来维护呢？接下来就是最重要的两个成员变量出场的时候了. kmem_cache_cpu 和 kmem_cache_node，它们都是每个 NUMA 节点上有一个，我们只需要看一个节点里面的情况.
+
+在分配缓存块的时候，要分两种路径，fast path 和 slow path，也就是快速通道和普通通道. 其中 kmem_cache_cpu 就是快速通道，kmem_cache_node 是普通通道. 每次分配的时候，要先从 kmem_cache_cpu 进行分配. 如果 kmem_cache_cpu 里面没有空闲的块，那就到 kmem_cache_node 中进行分配；如果还是没有空闲的块，才去伙伴系统分配新的页. kmem_cache_cpu 里面是如何存放缓存块的.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/slub_def.h#L41
+struct kmem_cache_cpu {
+	void **freelist;	/* Pointer to next available object */
+	unsigned long tid;	/* Globally unique transaction id */
+	struct page *page;	/* The slab from which we are allocating */
+#ifdef CONFIG_SLUB_CPU_PARTIAL
+	struct page *partial;	/* Partially allocated frozen slabs */
+#endif
+#ifdef CONFIG_SLUB_STATS
+	unsigned stat[NR_SLUB_STAT_ITEMS];
+#endif
+};
+
+#ifdef CONFIG_SLUB_CPU_PARTIAL
+#define slub_percpu_partial(c)		((c)->partial)
+
+#define slub_set_percpu_partial(c, p)		\
+({						\
+	slub_percpu_partial(c) = (p)->next;	\
+})
+
+#define slub_percpu_partial_read_once(c)     READ_ONCE(slub_percpu_partial(c))
+#else
+#define slub_percpu_partial(c)			NULL
+
+#define slub_set_percpu_partial(c, p)
+
+#define slub_percpu_partial_read_once(c)	NULL
+#endif // CONFIG_SLUB_CPU_PARTIAL
+
+/*
+ * Word size structure that can be atomically updated or read and that
+ * contains both the order and the number of objects that a slab of the
+ * given order would contain.
+ */
+struct kmem_cache_order_objects {
+	unsigned int x;
+};
+```
+
+在这里，page 指向大内存块的第一个页，缓存块就是从里面分配的. freelist 指向大内存块里面第一个空闲的项. 按照上面说的，这一项会有指针指向下一个空闲的项，最终所有空闲的项会形成一个链表. partial 指向的也是大内存块的第一个页，之所以名字叫 partial（部分），就是因为它里面部分被分配出去了，部分是空的. 这是一个备用列表，当 page 满了，就会从这里找.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slab.h#L600
+/*
+ * The slab lists for all objects.
+ */
+struct kmem_cache_node {
+	spinlock_t list_lock;
+
+#ifdef CONFIG_SLAB
+	struct list_head slabs_partial;	/* partial list first, better asm code */
+	struct list_head slabs_full;
+	struct list_head slabs_free;
+	unsigned long total_slabs;	/* length of all slab lists */
+	unsigned long free_slabs;	/* length of free slab list only */
+	unsigned long free_objects;
+	unsigned int free_limit;
+	unsigned int colour_next;	/* Per-node cache coloring */
+	struct array_cache *shared;	/* shared per node */
+	struct alien_cache **alien;	/* on other nodes */
+	unsigned long next_reap;	/* updated without locking */
+	int free_touched;		/* updated without locking */
+#endif
+
+#ifdef CONFIG_SLUB
+	unsigned long nr_partial;
+	struct list_head partial;
+#ifdef CONFIG_SLUB_DEBUG
+	atomic_long_t nr_slabs;
+	atomic_long_t total_objects;
+	struct list_head full;
+#endif
+#endif
+
+};
+```
+
+这里面也有一个 partial，是一个链表. 这个链表里存放的是部分空闲的内存块. 这是 kmem_cache_cpu 里面的 partial 的备用列表，如果那里没有，就到这里来找. 下面我们就来看看这个分配过程. kmem_cache_alloc_node 会调用 slab_alloc_node.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L2740
+/*
+ * Inlined fastpath so that allocation functions (kmalloc, kmem_cache_alloc)
+ * have the fastpath folded into their functions. So no function call
+ * overhead for requests that can be satisfied on the fastpath.
+ *
+ * The fastpath works by first checking if the lockless freelist can be used.
+ * If not then __slab_alloc is called for slow processing.
+ *
+ * Otherwise we can simply pick the next object from the lockless free list.
+ */
+static __always_inline void *slab_alloc_node(struct kmem_cache *s,
+		gfp_t gfpflags, int node, unsigned long addr)
+{
+	void *object;
+	struct kmem_cache_cpu *c;
+	struct page *page;
+	unsigned long tid;
+
+	s = slab_pre_alloc_hook(s, gfpflags);
+	if (!s)
+		return NULL;
+redo:
+	/*
+	 * Must read kmem_cache cpu data via this cpu ptr. Preemption is
+	 * enabled. We may switch back and forth between cpus while
+	 * reading from one cpu area. That does not matter as long
+	 * as we end up on the original cpu again when doing the cmpxchg.
+	 *
+	 * We should guarantee that tid and kmem_cache are retrieved on
+	 * the same cpu. It could be different if CONFIG_PREEMPTION so we need
+	 * to check if it is matched or not.
+	 */
+	do {
+		tid = this_cpu_read(s->cpu_slab->tid);
+		c = raw_cpu_ptr(s->cpu_slab);
+	} while (IS_ENABLED(CONFIG_PREEMPTION) &&
+		 unlikely(tid != READ_ONCE(c->tid)));
+
+	/*
+	 * Irqless object alloc/free algorithm used here depends on sequence
+	 * of fetching cpu_slab's data. tid should be fetched before anything
+	 * on c to guarantee that object and page associated with previous tid
+	 * won't be used with current tid. If we fetch tid first, object and
+	 * page could be one associated with next tid and our alloc/free
+	 * request will be failed. In this case, we will retry. So, no problem.
+	 */
+	barrier();
+
+	/*
+	 * The transaction ids are globally unique per cpu and per operation on
+	 * a per cpu queue. Thus they can be guarantee that the cmpxchg_double
+	 * occurs on the right processor and that there was no operation on the
+	 * linked list in between.
+	 */
+
+	object = c->freelist;
+	page = c->page;
+	if (unlikely(!object || !node_match(page, node))) {
+		object = __slab_alloc(s, gfpflags, node, addr, c);
+		stat(s, ALLOC_SLOWPATH);
+	} else {
+		void *next_object = get_freepointer_safe(s, object);
+
+		/*
+		 * The cmpxchg will only match if there was no additional
+		 * operation and if we are on the right processor.
+		 *
+		 * The cmpxchg does the following atomically (without lock
+		 * semantics!)
+		 * 1. Relocate first pointer to the current per cpu area.
+		 * 2. Verify that tid and freelist have not been changed
+		 * 3. If they were not changed replace tid and freelist
+		 *
+		 * Since this is without lock semantics the protection is only
+		 * against code executing on this cpu *not* from access by
+		 * other cpus.
+		 */
+		if (unlikely(!this_cpu_cmpxchg_double(
+				s->cpu_slab->freelist, s->cpu_slab->tid,
+				object, tid,
+				next_object, next_tid(tid)))) {
+
+			note_cmpxchg_failure("slab_alloc", s, tid);
+			goto redo;
+		}
+		prefetch_freepointer(s, next_object);
+		stat(s, ALLOC_FASTPATH);
+	}
+
+	maybe_wipe_obj_freeptr(s, object);
+
+	if (unlikely(slab_want_init_on_alloc(gfpflags, s)) && object)
+		memset(object, 0, s->object_size);
+
+	slab_post_alloc_hook(s, gfpflags, 1, &object);
+
+	return object;
+}
+```
+
+快速通道很简单，取出 cpu_slab 也即 kmem_cache_cpu 的 freelist，这就是第一个空闲的项，可以直接返回了. 如果没有空闲的了，则只好进入普通通道，调用 __slab_alloc.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L2740
+/*
+ * Slow path. The lockless freelist is empty or we need to perform
+ * debugging duties.
+ *
+ * Processing is still very fast if new objects have been freed to the
+ * regular freelist. In that case we simply take over the regular freelist
+ * as the lockless freelist and zap the regular freelist.
+ *
+ * If that is not working then we fall back to the partial lists. We take the
+ * first element of the freelist as the object to allocate now and move the
+ * rest of the freelist to the lockless freelist.
+ *
+ * And if we were unable to get a new slab from the partial slab lists then
+ * we need to allocate a new slab. This is the slowest path since it involves
+ * a call to the page allocator and the setup of a new slab.
+ *
+ * Version of __slab_alloc to use when we know that interrupts are
+ * already disabled (which is the case for bulk allocation).
+ */
+static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
+			  unsigned long addr, struct kmem_cache_cpu *c)
+{
+	void *freelist;
+	struct page *page;
+
+	page = c->page;
+	if (!page) {
+		/*
+		 * if the node is not online or has no normal memory, just
+		 * ignore the node constraint
+		 */
+		if (unlikely(node != NUMA_NO_NODE &&
+			     !node_state(node, N_NORMAL_MEMORY)))
+			node = NUMA_NO_NODE;
+		goto new_slab;
+	}
+redo:
+
+	if (unlikely(!node_match(page, node))) {
+		/*
+		 * same as above but node_match() being false already
+		 * implies node != NUMA_NO_NODE
+		 */
+		if (!node_state(node, N_NORMAL_MEMORY)) {
+			node = NUMA_NO_NODE;
+			goto redo;
+		} else {
+			stat(s, ALLOC_NODE_MISMATCH);
+			deactivate_slab(s, page, c->freelist, c);
+			goto new_slab;
+		}
+	}
+
+	/*
+	 * By rights, we should be searching for a slab page that was
+	 * PFMEMALLOC but right now, we are losing the pfmemalloc
+	 * information when the page leaves the per-cpu allocator
+	 */
+	if (unlikely(!pfmemalloc_match(page, gfpflags))) {
+		deactivate_slab(s, page, c->freelist, c);
+		goto new_slab;
+	}
+
+	/* must check again c->freelist in case of cpu migration or IRQ */
+	freelist = c->freelist;
+	if (freelist)
+		goto load_freelist;
+
+	freelist = get_freelist(s, page);
+
+	if (!freelist) {
+		c->page = NULL;
+		stat(s, DEACTIVATE_BYPASS);
+		goto new_slab;
+	}
+
+	stat(s, ALLOC_REFILL);
+
+load_freelist:
+	/*
+	 * freelist is pointing to the list of objects to be used.
+	 * page is pointing to the page from which the objects are obtained.
+	 * That page must be frozen for per cpu allocations to work.
+	 */
+	VM_BUG_ON(!c->page->frozen);
+	c->freelist = get_freepointer(s, freelist);
+	c->tid = next_tid(c->tid);
+	return freelist;
+
+new_slab:
+
+	if (slub_percpu_partial(c)) {
+		page = c->page = slub_percpu_partial(c);
+		slub_set_percpu_partial(c, page);
+		stat(s, CPU_PARTIAL_ALLOC);
+		goto redo;
+	}
+
+	freelist = new_slab_objects(s, gfpflags, node, &c);
+
+	if (unlikely(!freelist)) {
+		slab_out_of_memory(s, gfpflags, node);
+		return NULL;
+	}
+
+	page = c->page;
+	if (likely(!kmem_cache_debug(s) && pfmemalloc_match(page, gfpflags)))
+		goto load_freelist;
+
+	/* Only entered in the debug case */
+	if (kmem_cache_debug(s) &&
+			!alloc_debug_processing(s, page, freelist, addr))
+		goto new_slab;	/* Slab failed checks. Next slab needed */
+
+	deactivate_slab(s, page, get_freepointer(s, freelist), c);
+	return freelist;
+}
+```
+
+在这里，我们首先再次尝试一下 kmem_cache_cpu 的 freelist. 为什么呢？万一当前进程被中断，等回来的时候，别人已经释放了一些缓存，说不定又有空间了呢. 如果找到了，就跳到 load_freelist，在这里将 freelist 指向下一个空闲项，返回就可以了.
+
+如果 freelist 还是没有，则跳到 new_slab 里面去. 这里面我们先去 kmem_cache_cpu 的 partial 里面看. 如果 partial 不是空的，那就将 kmem_cache_cpu 的 page，也就是快速通道的那一大块内存，替换为 partial 里面的大块内存. 然后 redo，重新试下. 这次应该就可以成功了. 如果真的还不行，那就要到 new_slab_objects 了.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L2499
+static inline void *new_slab_objects(struct kmem_cache *s, gfp_t flags,
+			int node, struct kmem_cache_cpu **pc)
+{
+	void *freelist;
+	struct kmem_cache_cpu *c = *pc;
+	struct page *page;
+
+	WARN_ON_ONCE(s->ctor && (flags & __GFP_ZERO));
+
+	freelist = get_partial(s, flags, node, c);
+
+	if (freelist)
+		return freelist;
+
+	page = new_slab(s, flags, node);
+	if (page) {
+		c = raw_cpu_ptr(s->cpu_slab);
+		if (c->page)
+			flush_slab(s, c);
+
+		/*
+		 * No other reference to the page yet so we can
+		 * muck around with it freely without cmpxchg
+		 */
+		freelist = page->freelist;
+		page->freelist = NULL;
+
+		stat(s, ALLOC_SLAB);
+		c->page = page;
+		*pc = c;
+	}
+
+	return freelist;
+}
+```
+
+在这里面，[get_partial](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1998) 会根据 node id，找到相应的 kmem_cache_node，然后调用 [get_partial_node](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1885)，开始在这个节点进行分配.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1885
+/*
+ * Try to allocate a partial slab from a specific node.
+ */
+static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
+				struct kmem_cache_cpu *c, gfp_t flags)
+{
+	struct page *page, *page2;
+	void *object = NULL;
+	unsigned int available = 0;
+	int objects;
+
+	/*
+	 * Racy check. If we mistakenly see no partial slabs then we
+	 * just allocate an empty slab. If we mistakenly try to get a
+	 * partial slab and there is none available then get_partials()
+	 * will return NULL.
+	 */
+	if (!n || !n->nr_partial)
+		return NULL;
+
+	spin_lock(&n->list_lock);
+	list_for_each_entry_safe(page, page2, &n->partial, slab_list) {
+		void *t;
+
+		if (!pfmemalloc_match(page, flags))
+			continue;
+
+		t = acquire_slab(s, n, page, object == NULL, &objects);
+		if (!t)
+			break;
+
+		available += objects;
+		if (!object) {
+			c->page = page;
+			stat(s, ALLOC_FROM_PARTIAL);
+			object = t;
+		} else {
+			put_cpu_partial(s, page, 0);
+			stat(s, CPU_PARTIAL_NODE);
+		}
+		if (!kmem_cache_has_cpu_partial(s)
+			|| available > slub_cpu_partial(s) / 2)
+			break;
+
+	}
+	spin_unlock(&n->list_lock);
+	return object;
+}
+```
+
+acquire_slab 会从 kmem_cache_node 的 partial 链表中拿下一大块内存来，并且将 freelist，也就是第一块空闲的缓存块，赋值给 t。并且当第一轮循环的时候，将 kmem_cache_cpu 的 page 指向取下来的这一大块内存，返回的 object 就是这块内存里面的第一个缓存块 t. 如果 kmem_cache_cpu 也有一个 partial，就会进行第二轮，再次取下一大块内存来，这次调用 put_cpu_partial，放到 kmem_cache_cpu 的 partial 里面.
+
+如果 kmem_cache_node 里面也没有空闲的内存，这就说明原来分配的页里面都放满了，就要回到 new_slab_objects 函数，里面 [new_slab](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1746) 函数会调用 [allocate_slab](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1666).
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/slub.c#L1666
+static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
+{
+	struct page *page;
+	struct kmem_cache_order_objects oo = s->oo;
+	gfp_t alloc_gfp;
+	void *start, *p, *next;
+	int idx;
+	bool shuffle;
+
+	flags &= gfp_allowed_mask;
+
+	if (gfpflags_allow_blocking(flags))
+		local_irq_enable();
+
+	flags |= s->allocflags;
+
+	/*
+	 * Let the initial higher-order allocation fail under memory pressure
+	 * so we fall-back to the minimum order allocation.
+	 */
+	alloc_gfp = (flags | __GFP_NOWARN | __GFP_NORETRY) & ~__GFP_NOFAIL;
+	if ((alloc_gfp & __GFP_DIRECT_RECLAIM) && oo_order(oo) > oo_order(s->min))
+		alloc_gfp = (alloc_gfp | __GFP_NOMEMALLOC) & ~(__GFP_RECLAIM|__GFP_NOFAIL);
+
+	page = alloc_slab_page(s, alloc_gfp, node, oo);
+	if (unlikely(!page)) {
+		oo = s->min;
+		alloc_gfp = flags;
+		/*
+		 * Allocation may have failed due to fragmentation.
+		 * Try a lower order alloc if possible
+		 */
+		page = alloc_slab_page(s, alloc_gfp, node, oo);
+		if (unlikely(!page))
+			goto out;
+		stat(s, ORDER_FALLBACK);
+	}
+
+	page->objects = oo_objects(oo);
+
+	page->slab_cache = s;
+	__SetPageSlab(page);
+	if (page_is_pfmemalloc(page))
+		SetPageSlabPfmemalloc(page);
+
+	kasan_poison_slab(page);
+
+	start = page_address(page);
+
+	setup_page_debug(s, page, start);
+
+	shuffle = shuffle_freelist(s, page);
+
+	if (!shuffle) {
+		start = fixup_red_left(s, start);
+		start = setup_object(s, page, start);
+		page->freelist = start;
+		for (idx = 0, p = start; idx < page->objects - 1; idx++) {
+			next = p + s->size;
+			next = setup_object(s, page, next);
+			set_freepointer(s, p, next);
+			p = next;
+		}
+		set_freepointer(s, p, NULL);
+	}
+
+	page->inuse = page->objects;
+	page->frozen = 1;
+
+out:
+	if (gfpflags_allow_blocking(flags))
+		local_irq_disable();
+	if (!page)
+		return NULL;
+
+	inc_slabs_node(s, page_to_nid(page), page->objects);
+
+	return page;
+}
+```
+
+在这里，我们看到了 alloc_slab_page 分配页面. 分配的时候，要按 kmem_cache_order_objects 里面的 order 来. 如果第一次分配不成功，说明内存已经很紧张了，那就换成 min 版本的 kmem_cache_order_objects.
+
+
 ### 文件和文件系统
 ```c
 /* Filesystem information: */
