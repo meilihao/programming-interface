@@ -908,6 +908,12 @@ SMP （Symmetric Multiprocessing, 对称多处理器）, 顾名思义, 在SMP中
 
 ![](/misc/img/process/3fa8123990e5ae2c86859f70a8351f4f.jpeg)
 
+伙伴系统将多个连续的页面作为一个大的内存块分配给上层.
+kswapd 负责物理页面的换入换出.
+Slub Allocator 将从伙伴系统申请的大内存块切成小块，分配给其他系统.
+
+![](/misc/img/process/527e5c861fd06c6eb61a761e4214ba54.jpeg)
+
 kernel使用了`typedef struct pglist_data pg_data_t`来表示NUMA node:
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/mmzone.h#L662
