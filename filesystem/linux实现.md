@@ -33,6 +33,8 @@ struct stat {
 - [*Ext4文件系统架构分析(一)](https://www.cnblogs.com/alantu2018/p/8461272.html)
 - [*linux io过程自顶向下分析](https://my.oschina.net/fileoptions/blog/3058792/print)
 
+![](/misc/img/fs/f81bf3e5a6cd060c3225a8ae1803a138.jpeg)
+
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L752
 /*
@@ -120,12 +122,12 @@ struct ext4_inode {
 #define	EXT4_N_BLOCKS			(EXT4_TIND_BLOCK + 1)
 ```
 
-![](/misc/img/filesystem/73349c0fab1a92d4e1ae0c684cfe06e2.jpeg)
+![](/misc/img/fs/73349c0fab1a92d4e1ae0c684cfe06e2.jpeg)
 
 在 ext2 和 ext3 中，其中前 12 项直接保存了块的位置，也就是说，可以直接通过 i_block[0-11]，直接得到保存文件内容的块. 对于大文件,可以让 i_block[12]指向一个块，这个块里面不放数据块，而是放数据块的位置，这个块被称为间接块. 也就是说，在 i_block[12]里面放间接块的位置，通过 i_block[12]找到间接块后，间接块里面放数据块的位置，通过间接块可以找到数据块. 如果文件再大一些，i_block[13]会指向一个块，我们可以用二次间接块. 二次间接块里面存放了间接块的位置，间接块里面存放了数据块的位置，数据块里面存放的是真正的数据. 如果文件再大一些，i_block[14]会指向三次间接块. 原理和之前都是一样的，需要一层一层展开才能拿到数据块. 对于大文件来讲，就要多次读取硬盘才能找到相应的块，这样访问速度就会比较慢. 为了解决这个问题，ext4 做了一定的改变. 它引入了一个新的概念，叫做 Extents.
 
 Exents 其实会保存成一棵树:
-![](/misc/img/filesystem/b8f184696be8d37ad6f2e2a4f12d002a.jpeg)
+![](/misc/img/fs/b8f184696be8d37ad6f2e2a4f12d002a.jpeg)
 
 树有一个个的节点，有叶子节点，也有分支节点. 每个节点都有一个头，ext4_extent_header 可以用来描述某个节点.
 
@@ -547,3 +549,531 @@ __ext4_new_inode里面一个重要的逻辑就是，从文件系统里面读取 
 当然，还需要有一个数据结构，对整个文件系统的情况进行描述，这个就是超级块[ext4_super_block](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L1245). 这里面有整个文件系统一共有多少 inode，s_inodes_count；一共有多少块，s_blocks_count_lo，每个块组有多少 inode，s_inodes_per_group，每个块组有多少块，s_blocks_per_group 等. 这些都是这类的全局信息.
 
 如果是一个启动盘，就还需要预留一块区域作为引导区，所以第一个块组的前面要留 1K，用于启动引导区.
+
+最终，整个文件系统格式就是下面这个样子.
+![](/misc/img/fs/e3718f0af6a2523a43606a0c4003631b.jpeg)
+
+超级块和块组描述符表都是全局信息，而且这些数据很重要. 如果这些数据丢失了，整个文件系统都打不开了，这比一个文件的一个块损坏更严重. 所以，这两部分都需要备份，但是采取不同的策略.
+
+默认情况下，超级块和块组描述符表都有副本保存在每一个块组里面.
+
+如果开启了 sparse_super 特性，超级块和块组描述符表的副本只会保存在块组索引为 0、3、5、7 的整数幂里. 除了块组 0 中存在一个超级块外，在块组 1（3^0=1）的第一个块中存在一个副本；在块组 3（3^1=3）、块组 5（5^1=5）、块组 7（7^1=7）、块组 9（3^2=9）、块组 25（5^2=25）、块组 27（3^3=27）的第一个 block 处也存在一个副本.
+
+对于超级块来讲，由于超级块不是很大，所以就算备份多了也没有太多问题. 但是，对于块组描述符表来讲，如果每个块组里面都保存一份完整的块组描述符表，一方面很浪费空间；另一个方面，由于一个块组最大 128M，而块组描述符表里面有多少项，这就限制了有多少个块组，128M * 块组的总数目是整个文件系统的大小，就被限制住了.
+
+改进的思路就是引入 Meta Block Groups 特性.
+
+首先，块组描述符表不会保存所有块组的描述符了，而是将块组分成多个组，我们称为元块组（Meta Block Group）. 每个元块组里面的块组描述符表仅仅包括自己的，一个元块组包含 64 个块组，这样一个元块组中的块组描述符表最多 64 项. 假设一共有 256 个块组，原来是一个整的块组描述符表，里面有 256 项，要备份就全备份，现在分成 4 个元块组，每个元块组里面的块组描述符表就只有 64 项了，这就小多了，而且四个元块组自己备份自己的.
+
+![](/misc/img/fs/b0bf4690882253a70705acc7368983b9.jpeg)
+
+根据图中，每一个元块组包含 64 个块组，块组描述符表也是 64 项，备份三份，在元块组的第一个，第二个和最后一个块组的开始处. 这样化整为零，就可以发挥出 ext4 的 48 位块寻址的优势了，在超级块 ext4_super_block 的定义中，我们可以看到块寻址分为高位和低位，均为 32 位，其中有用的是 48 位，2^48 个块是 1EB，足够用了.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L1245
+/*
+ * Structure of the super block
+ */
+struct ext4_super_block {
+/*00*/	__le32	s_inodes_count;		/* Inodes count */
+	__le32	s_blocks_count_lo;	/* Blocks count */
+	__le32	s_r_blocks_count_lo;	/* Reserved blocks count */
+	__le32	s_free_blocks_count_lo;	/* Free blocks count */
+/*10*/	__le32	s_free_inodes_count;	/* Free inodes count */
+	__le32	s_first_data_block;	/* First Data Block */
+	__le32	s_log_block_size;	/* Block size */
+	__le32	s_log_cluster_size;	/* Allocation cluster size */
+/*20*/	__le32	s_blocks_per_group;	/* # Blocks per group */
+	__le32	s_clusters_per_group;	/* # Clusters per group */
+	__le32	s_inodes_per_group;	/* # Inodes per group */
+	__le32	s_mtime;		/* Mount time */
+/*30*/	__le32	s_wtime;		/* Write time */
+	__le16	s_mnt_count;		/* Mount count */
+	__le16	s_max_mnt_count;	/* Maximal mount count */
+	__le16	s_magic;		/* Magic signature */
+	__le16	s_state;		/* File system state */
+	__le16	s_errors;		/* Behaviour when detecting errors */
+	__le16	s_minor_rev_level;	/* minor revision level */
+/*40*/	__le32	s_lastcheck;		/* time of last check */
+	__le32	s_checkinterval;	/* max. time between checks */
+	__le32	s_creator_os;		/* OS */
+	__le32	s_rev_level;		/* Revision level */
+/*50*/	__le16	s_def_resuid;		/* Default uid for reserved blocks */
+	__le16	s_def_resgid;		/* Default gid for reserved blocks */
+	/*
+	 * These fields are for EXT4_DYNAMIC_REV superblocks only.
+	 *
+	 * Note: the difference between the compatible feature set and
+	 * the incompatible feature set is that if there is a bit set
+	 * in the incompatible feature set that the kernel doesn't
+	 * know about, it should refuse to mount the filesystem.
+	 *
+	 * e2fsck's requirements are more strict; if it doesn't know
+	 * about a feature in either the compatible or incompatible
+	 * feature set, it must abort and not try to meddle with
+	 * things it doesn't understand...
+	 */
+	__le32	s_first_ino;		/* First non-reserved inode */
+	__le16  s_inode_size;		/* size of inode structure */
+	__le16	s_block_group_nr;	/* block group # of this superblock */
+	__le32	s_feature_compat;	/* compatible feature set */
+/*60*/	__le32	s_feature_incompat;	/* incompatible feature set */
+	__le32	s_feature_ro_compat;	/* readonly-compatible feature set */
+/*68*/	__u8	s_uuid[16];		/* 128-bit uuid for volume */
+/*78*/	char	s_volume_name[16];	/* volume name */
+/*88*/	char	s_last_mounted[64] __nonstring;	/* directory where last mounted */
+/*C8*/	__le32	s_algorithm_usage_bitmap; /* For compression */
+	/*
+	 * Performance hints.  Directory preallocation should only
+	 * happen if the EXT4_FEATURE_COMPAT_DIR_PREALLOC flag is on.
+	 */
+	__u8	s_prealloc_blocks;	/* Nr of blocks to try to preallocate*/
+	__u8	s_prealloc_dir_blocks;	/* Nr to preallocate for dirs */
+	__le16	s_reserved_gdt_blocks;	/* Per group desc for online growth */
+	/*
+	 * Journaling support valid if EXT4_FEATURE_COMPAT_HAS_JOURNAL set.
+	 */
+/*D0*/	__u8	s_journal_uuid[16];	/* uuid of journal superblock */
+/*E0*/	__le32	s_journal_inum;		/* inode number of journal file */
+	__le32	s_journal_dev;		/* device number of journal file */
+	__le32	s_last_orphan;		/* start of list of inodes to delete */
+	__le32	s_hash_seed[4];		/* HTREE hash seed */
+	__u8	s_def_hash_version;	/* Default hash version to use */
+	__u8	s_jnl_backup_type;
+	__le16  s_desc_size;		/* size of group descriptor */
+/*100*/	__le32	s_default_mount_opts;
+	__le32	s_first_meta_bg;	/* First metablock block group */
+	__le32	s_mkfs_time;		/* When the filesystem was created */
+	__le32	s_jnl_blocks[17];	/* Backup of the journal inode */
+	/* 64bit support valid if EXT4_FEATURE_COMPAT_64BIT */
+/*150*/	__le32	s_blocks_count_hi;	/* Blocks count */
+	__le32	s_r_blocks_count_hi;	/* Reserved blocks count */
+	__le32	s_free_blocks_count_hi;	/* Free blocks count */
+	__le16	s_min_extra_isize;	/* All inodes have at least # bytes */
+	__le16	s_want_extra_isize; 	/* New inodes should reserve # bytes */
+	__le32	s_flags;		/* Miscellaneous flags */
+	__le16  s_raid_stride;		/* RAID stride */
+	__le16  s_mmp_update_interval;  /* # seconds to wait in MMP checking */
+	__le64  s_mmp_block;            /* Block for multi-mount protection */
+	__le32  s_raid_stripe_width;    /* blocks on all data disks (N*stride)*/
+	__u8	s_log_groups_per_flex;  /* FLEX_BG group size */
+	__u8	s_checksum_type;	/* metadata checksum algorithm used */
+	__u8	s_encryption_level;	/* versioning level for encryption */
+	__u8	s_reserved_pad;		/* Padding to next 32bits */
+	__le64	s_kbytes_written;	/* nr of lifetime kilobytes written */
+	__le32	s_snapshot_inum;	/* Inode number of active snapshot */
+	__le32	s_snapshot_id;		/* sequential ID of active snapshot */
+	__le64	s_snapshot_r_blocks_count; /* reserved blocks for active
+					      snapshot's future use */
+	__le32	s_snapshot_list;	/* inode number of the head of the
+					   on-disk snapshot list */
+#define EXT4_S_ERR_START offsetof(struct ext4_super_block, s_error_count)
+	__le32	s_error_count;		/* number of fs errors */
+	__le32	s_first_error_time;	/* first time an error happened */
+	__le32	s_first_error_ino;	/* inode involved in first error */
+	__le64	s_first_error_block;	/* block involved of first error */
+	__u8	s_first_error_func[32] __nonstring;	/* function where the error happened */
+	__le32	s_first_error_line;	/* line number where error happened */
+	__le32	s_last_error_time;	/* most recent time of an error */
+	__le32	s_last_error_ino;	/* inode involved in last error */
+	__le32	s_last_error_line;	/* line number where error happened */
+	__le64	s_last_error_block;	/* block involved of last error */
+	__u8	s_last_error_func[32] __nonstring;	/* function where the error happened */
+#define EXT4_S_ERR_END offsetof(struct ext4_super_block, s_mount_opts)
+	__u8	s_mount_opts[64];
+	__le32	s_usr_quota_inum;	/* inode for tracking user quota */
+	__le32	s_grp_quota_inum;	/* inode for tracking group quota */
+	__le32	s_overhead_clusters;	/* overhead blocks/clusters in fs */
+	__le32	s_backup_bgs[2];	/* groups with sparse_super2 SBs */
+	__u8	s_encrypt_algos[4];	/* Encryption algorithms in use  */
+	__u8	s_encrypt_pw_salt[16];	/* Salt used for string2key algorithm */
+	__le32	s_lpf_ino;		/* Location of the lost+found inode */
+	__le32	s_prj_quota_inum;	/* inode for tracking project quota */
+	__le32	s_checksum_seed;	/* crc32c(uuid) if csum_seed set */
+	__u8	s_wtime_hi;
+	__u8	s_mtime_hi;
+	__u8	s_mkfs_time_hi;
+	__u8	s_lastcheck_hi;
+	__u8	s_first_error_time_hi;
+	__u8	s_last_error_time_hi;
+	__u8	s_first_error_errcode;
+	__u8    s_last_error_errcode;
+	__le16  s_encoding;		/* Filename charset encoding */
+	__le16  s_encoding_flags;	/* Filename charset encoding flags */
+	__le32	s_reserved[95];		/* Padding to the end of the block */
+	__le32	s_checksum;		/* crc32c(superblock) */
+};
+```
+
+## 目录的存储格式
+目录本身也是个文件，也有 inode. inode 里面也是指向一些块. 和普通文件不同的是，普通文件的块里面保存的是文件数据，而目录文件的块里面保存的是目录里面一项一项的文件信息. 这些信息称为 [ext4_dir_entry](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L1245). 从代码来看，有两个版本，在成员来讲几乎没有差别，只不过第二个版本 ext4_dir_entry_2 是将一个 16 位的 name_len，变成了一个 8 位的 name_len 和 8 位的 file_type.
+
+在目录文件的块中，最简单的保存格式是列表，就是一项一项地将 ext4_dir_entry_2 列在那里.
+
+每一项都会保存这个目录的下一级的文件的文件名和对应的 inode，通过这个 inode，就能找到真正的文件. 第一项是“.”，表示当前目录，第二项是“…”，表示上一级目录，接下来就是一项一项的文件名和 inode.
+
+有时候，如果一个目录下面的文件太多的时候，此时想在这个目录下找一个文件，按照列表一个个去找，太慢了，于是就添加了索引的模式. 如果在 inode 中设置 EXT4_INDEX_FL 标志，则目录文件的块的组织形式将发生变化，变成了下面定义的这个样子：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/namei.c#L209
+struct dx_entry
+{
+	__le32 hash;
+	__le32 block;
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/namei.c#L221
+struct dx_root
+{
+	struct fake_dirent dot;
+	char dot_name[4];
+	struct fake_dirent dotdot;
+	char dotdot_name[4];
+	struct dx_root_info
+	{
+		__le32 reserved_zero;
+		u8 hash_version;
+		u8 info_length; /* 8 */
+		u8 indirect_levels;
+		u8 unused_flags;
+	}
+	info;
+	struct dx_entry	entries[];
+};
+```
+
+接下来看索引项 dx_entry. 这个也很简单，其实就是文件名的哈希值和数据块的一个映射关系.
+
+如果要查找一个目录下面的文件名，可以通过名称取哈希. 如果哈希能够匹配上，就说明这个文件的信息在相应的块里面, 然后打开这个块; 如果里面不再是索引，而是索引树的叶子节点的话，那里面还是 ext4_dir_entry_2 的列表，我们只要一项一项找文件名就行. 通过索引树，可以将一个目录下面的 N 多的文件分散到很多的块里面，可以很快地进行查找.
+
+![](/misc/img/fs/3ea2ad5704f20538d9c911b02f42086d.jpeg)
+
+## 软链接和硬链接的存储格式
+所谓的链接（Link），可以认为是文件的别名，而链接又可分为两种，硬链接（Hard Link）和软链接（Symbolic Link）.
+
+![](/misc/img/fs/45a6cfdd9d45e30dc2f38f0d2572be7b.jpeg)
+
+
+硬链接与原始文件共用一个 inode 的，**但是 inode 是不跨文件系统的，每个文件系统都有自己的 inode 列表，因而硬链接是没有办法跨文件系统的**. 而软链接不同，软链接相当于重新创建了一个文件, 这个文件也有独立的 inode，只不过打开这个文件看里面内容的时候，内容指向另外的一个文件. 这就很灵活了, 也可以跨文件系统了，甚至目标文件被删除了，链接文件还是在的，只不过指向的文件找不到了而已.
+
+## linux io过程自顶向下分析
+![](/misc/img/fs/3c506edf93b15341da3db658e9970773.jpeg)
+
+### 挂载文件系统
+内核是不是支持某种类型的文件系统，需要先进行注册才能知道. 例如 ext4 文件系统，就需要通过 register_filesystem 进行注册，传入的参数是 ext4_fs_type，表示注册的是 ext4 类型的文件系统. 这里面最重要的一个成员变量就是 ext4_mount.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/super.c#L6262
+static struct file_system_type ext4_fs_type = {
+	.owner		= THIS_MODULE,
+	.name		= "ext4",
+	.mount		= ext4_mount,
+	.kill_sb	= kill_block_super,
+	.fs_flags	= FS_REQUIRES_DEV,
+};
+MODULE_ALIAS_FS("ext4");
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/super.c#L6274
+static int __init ext4_init_fs(void)
+{
+	int i, err;
+
+	ratelimit_state_init(&ext4_mount_msg_ratelimit, 30 * HZ, 64);
+	ext4_li_info = NULL;
+	mutex_init(&ext4_li_mtx);
+
+	/* Build-time check for flags consistency */
+	ext4_check_flag_values();
+
+	for (i = 0; i < EXT4_WQ_HASH_SZ; i++)
+		init_waitqueue_head(&ext4__ioend_wq[i]);
+
+	err = ext4_init_es();
+	if (err)
+		return err;
+
+	err = ext4_init_pending();
+	if (err)
+		goto out7;
+
+	err = ext4_init_post_read_processing();
+	if (err)
+		goto out6;
+
+	err = ext4_init_pageio();
+	if (err)
+		goto out5;
+
+	err = ext4_init_system_zone();
+	if (err)
+		goto out4;
+
+	err = ext4_init_sysfs();
+	if (err)
+		goto out3;
+
+	err = ext4_init_mballoc();
+	if (err)
+		goto out2;
+	err = init_inodecache();
+	if (err)
+		goto out1;
+	register_as_ext3();
+	register_as_ext2();
+	err = register_filesystem(&ext4_fs_type); // 注册
+	if (err)
+		goto out;
+
+	return 0;
+out:
+	unregister_as_ext2();
+	unregister_as_ext3();
+	destroy_inodecache();
+out1:
+	ext4_exit_mballoc();
+out2:
+	ext4_exit_sysfs();
+out3:
+	ext4_exit_system_zone();
+out4:
+	ext4_exit_pageio();
+out5:
+	ext4_exit_post_read_processing();
+out6:
+	ext4_exit_pending();
+out7:
+	ext4_exit_es();
+
+	return err;
+}
+```
+
+如果一种文件系统的类型曾经在内核注册过，这就说明允许挂载并且使用这个文件系统.
+
+从第一个 mount 系统调用开始解析.
+
+> mount入口地址有两个：
+> 1. 系统自带的 mount 命令会调用 /fs/namespace.c 中的 SYSCALL_DEFINE5
+> 1. busybox mount 命令会调用 /fs/compat.c 中的 COMPAT_SYSCALL_DEFINE5
+
+mount 系统调用的定义如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L3386
+SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,
+		char __user *, type, unsigned long, flags, void __user *, data)
+{
+	int ret;
+	char *kernel_type;
+	char *kernel_dev;
+	void *options;
+
+	kernel_type = copy_mount_string(type);
+	ret = PTR_ERR(kernel_type);
+	if (IS_ERR(kernel_type))
+		goto out_type;
+
+	kernel_dev = copy_mount_string(dev_name);
+	ret = PTR_ERR(kernel_dev);
+	if (IS_ERR(kernel_dev))
+		goto out_dev;
+
+	options = copy_mount_options(data);
+	ret = PTR_ERR(options);
+	if (IS_ERR(options))
+		goto out_data;
+
+	ret = do_mount(kernel_dev, dir_name, kernel_type, flags, options);
+
+	kfree(options);
+out_data:
+	kfree(kernel_dev);
+out_dev:
+	kfree(kernel_type);
+out_type:
+	return ret;
+}
+```
+
+接下来的调用链为：[do_mount](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L3118)->[do_new_mount](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L2833)->[vfs_get_tree](https://elixir.bootlin.com/linux/v5.8-rc3/C/ident/vfs_get_tree) + [do_new_mount_fc](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L2792)
+
+[do_new_mount_fc](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L2792)
+->[vfs_create_mount](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namespace.c#L949).
+
+> mount_fs() deleted in v5.0.21~v5.1-rc1 on 9bc61ab18b1d41f26dc06b9e6d3c203e65f83fe6 for "vfs: Introduce fs_context, switch vfs_kern_mount() to it."
+
+vfs_create_mount 会创建 [struct mount](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/mount.h#L40) 结构，每个挂载的文件系统都对应于这样一个结构.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/mount.h#L40
+struct mount {
+	struct hlist_node mnt_hash;
+	struct mount *mnt_parent;
+	struct dentry *mnt_mountpoint;
+	struct vfsmount mnt;
+	union {
+		struct rcu_head mnt_rcu;
+		struct llist_node mnt_llist;
+	};
+#ifdef CONFIG_SMP
+	struct mnt_pcp __percpu *mnt_pcp;
+#else
+	int mnt_count;
+	int mnt_writers;
+#endif
+	struct list_head mnt_mounts;	/* list of children, anchored here */
+	struct list_head mnt_child;	/* and going through their mnt_child */
+	struct list_head mnt_instance;	/* mount instance on sb->s_mounts */
+	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */
+	struct list_head mnt_list;
+	struct list_head mnt_expire;	/* link in fs-specific expiry list */
+	struct list_head mnt_share;	/* circular list of shared mounts */
+	struct list_head mnt_slave_list;/* list of slave mounts */
+	struct list_head mnt_slave;	/* slave list entry */
+	struct mount *mnt_master;	/* slave is on master->mnt_slave_list */
+	struct mnt_namespace *mnt_ns;	/* containing namespace */
+	struct mountpoint *mnt_mp;	/* where is it mounted */
+	union {
+		struct hlist_node mnt_mp_list;	/* list mounts with the same mountpoint */
+		struct hlist_node mnt_umount;
+	};
+	struct list_head mnt_umounting; /* list entry for umount propagation */
+#ifdef CONFIG_FSNOTIFY
+	struct fsnotify_mark_connector __rcu *mnt_fsnotify_marks;
+	__u32 mnt_fsnotify_mask;
+#endif
+	int mnt_id;			/* mount identifier */
+	int mnt_group_id;		/* peer group identifier */
+	int mnt_expiry_mark;		/* true if marked for expiry */
+	struct hlist_head mnt_pins;
+	struct hlist_head mnt_stuck_children;
+} __randomize_layout;
+```
+
+其中，mnt_parent 是装载点所在的父文件系统，mnt_mountpoint 是装载点在父文件系统中的 dentry；struct dentry 表示目录，并和目录的 inode 关联；mnt_root 是当前文件系统根目录的 dentry，mnt_sb 是指向超级块的指针. 接下来，来看调用 mount_fs 挂载文件系统.
+
+接下来看调用 vfs_get_tree 挂载文件系统。
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/super.c#L1536
+/**
+ * vfs_get_tree - Get the mountable root
+ * @fc: The superblock configuration context.
+ *
+ * The filesystem is invoked to get or create a superblock which can then later
+ * be used for mounting.  The filesystem places a pointer to the root to be
+ * used for mounting in @fc->root.
+ */
+int vfs_get_tree(struct fs_context *fc)
+{
+	struct super_block *sb;
+	int error;
+
+	if (fc->root)
+		return -EBUSY;
+
+	/* Get the mountable root in fc->root, with a ref on the root and a ref
+	 * on the superblock.
+	 */
+	error = fc->ops->get_tree(fc);
+	if (error < 0)
+		return error;
+
+	if (!fc->root) {
+		pr_err("Filesystem %s get_tree() didn't set fc->root\n",
+		       fc->fs_type->name);
+		/* We don't know what the locking state of the superblock is -
+		 * if there is a superblock.
+		 */
+		BUG();
+	}
+
+	sb = fc->root->d_sb;
+	WARN_ON(!sb->s_bdi);
+
+	/*
+	 * Write barrier is for super_cache_count(). We place it before setting
+	 * SB_BORN as the data dependency between the two functions is the
+	 * superblock structure contents that we just set up, not the SB_BORN
+	 * flag.
+	 */
+	smp_wmb();
+	sb->s_flags |= SB_BORN;
+
+	error = security_sb_set_mnt_opts(sb, fc->security, 0, NULL);
+	if (unlikely(error)) {
+		fc_drop_locked(fc);
+		return error;
+	}
+
+	/*
+	 * filesystems should never set s_maxbytes larger than MAX_LFS_FILESIZE
+	 * but s_maxbytes was an unsigned long long for many releases. Throw
+	 * this warning for a little while to try and catch filesystems that
+	 * violate this rule.
+	 */
+	WARN((sb->s_maxbytes < 0), "%s set sb->s_maxbytes to "
+		"negative value (%lld)\n", fc->fs_type->name, sb->s_maxbytes);
+
+	return 0;
+}
+EXPORT_SYMBOL(vfs_get_tree);
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/fs_context.c#L588
+/*
+ * Get a mountable root with the legacy mount command.
+ */
+static int legacy_get_tree(struct fs_context *fc)
+{
+	struct legacy_fs_context *ctx = fc->fs_private;
+	struct super_block *sb;
+	struct dentry *root;
+
+	root = fc->fs_type->mount(fc->fs_type, fc->sb_flags,
+				      fc->source, ctx->legacy_data);
+	if (IS_ERR(root))
+		return PTR_ERR(root);
+
+	sb = root->d_sb;
+	BUG_ON(!sb);
+
+	fc->root = root;
+	return 0;
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/fs_context.c#L619
+const struct fs_context_operations legacy_fs_context_ops = {
+	.free			= legacy_fs_context_free,
+	.dup			= legacy_fs_context_dup,
+	.parse_param		= legacy_parse_param,
+	.parse_monolithic	= legacy_parse_monolithic,
+	.get_tree		= legacy_get_tree,
+	.reconfigure		= legacy_reconfigure,
+};
+
+/*
+ * Initialise a legacy context for a filesystem that doesn't support
+ * fs_context.
+ */
+static int legacy_init_fs_context(struct fs_context *fc)
+{
+	fc->fs_private = kzalloc(sizeof(struct legacy_fs_context), GFP_KERNEL);
+	if (!fc->fs_private)
+		return -ENOMEM;
+	fc->ops = &legacy_fs_context_ops;
+	return 0;
+}
+```
+
+上面`fc->fs_type->mount`调用的是 ext4_fs_type 的 mount 函数，也就是 ext4_mount，从文件系统里面读取超级块. 在文件系统的实现中，每个在硬盘上的结构，在内存中也对应相同格式的结构. 当所有的数据结构都读到内存里面，内核就可以通过操作这些数据结构，来操作文件系统了.
+
+假设根文件系统下面有一个目录 home，有另外一个文件系统 A 挂载在这个目录 home 下面. 在文件系统 A 的根目录下面有另外一个文件夹 hello. 由于文件系统 A 已经挂载到了目录 home 下面，所以就有了目录 /home/hello，然后有另外一个文件系统 B 挂载在 /home/hello 下面. 在文件系统 B 的根目录下面有另外一个文件夹 world，在 world 下面有个文件夹 data. 由于文件系统 B 已经挂载到了 /home/hello 下面，所以就有了目录 /home/hello/world/data. 为了维护这些关系，操作系统创建了这一系列数据结构:
+![](/misc/img/fs/663b3c5903d15fd9ba52f6d049e0dc27.jpeg)
+
+从上图可知, 文件系统是树形组织. 每一个文件和文件夹都有 dentry，用于和 inode 关联. 因为这个例子涉及两次文件系统的挂载，再加上启动的时候挂载的根文件系统，一共三个 mount. 每个打开的文件都有一个 file 结构，它里面有两个变量，一个指向相应的 mount，一个指向相应的 dentry.
+
+从最上面往下看, 根目录 / 对应一个 dentry，根目录是在根文件系统上的，根文件系统是系统启动的时候挂载的，因而有一个 mount 结构. 这个 mount 结构的 mount point 指针和 mount root 指针都是指向根目录的 dentry. 根目录对应的 file 的两个指针，一个指向根目录的 dentry，一个指向根目录的挂载结构 mount.
+
+再来看第二层, 下一层目录 home 对应了两个 dentry，而且它们的 parent 都指向第一层的 dentry. 这是因为文件系统 A 挂载到了这个目录下, 这使得这个目录有两个用处: 一方面，home 是根文件系统的一个挂载点；另一方面，home 是文件系统 A 的根目录. 因为还有一次挂载，因而又有了一个 mount 结构. 这个 mount 结构的 mount point 指针指向作为挂载点的那个 dentry. mount root 指针指向作为根目录的那个 dentry，同时 parent 指针指向第一层的 mount 结构. home 对应的 file 的两个指针，一个指向文件系统 A 根目录的 dentry，一个指向文件系统 A 的挂载结构 mount.
+
+再来看第三层, 目录 hello 又挂载了一个文件系统 B，所以第三层的结构和第二层几乎一样.
+
+接下来是第四层, 目录 world 就是一个普通的目录. 只要它的 dentry 的 parent 指针指向上一层就可以了. 由于挂载点不变，world 对应的 file 结构还是指向第三层的 mount 结构.
+
+接下来是第五层, 对于文件 data，是一个普通的文件，它的 dentry 的 parent 指向第四层的 dentry. 对于 data 对应的 file 结构，由于挂载点不变，还是指向第三层的 mount 结构.
