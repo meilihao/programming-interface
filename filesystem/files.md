@@ -37,6 +37,10 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 - /root: root的主目录
 - /run : 外部设备的自动挂载点
 - /tmp : 存放临时文件
+
+	默认重启删除/tmp的内容.
+
+	systemd使用systemd-tmpfiles-clean.service来Cleanup of Temporary Directories, /tmp的清理规则主要取决于/usr/lib/tmpfiles.d/tmp.conf文件的设定
 - /usr : 存放应用和文件
 - /usr/lib64和/usr/local/lib64 : 64位系统中的函数库目录
 - /usr/src : 包含所有应用程序的源码, 主要是linux 核心生态程序的源码
