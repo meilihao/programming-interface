@@ -1077,3 +1077,243 @@ static int legacy_init_fs_context(struct fs_context *fc)
 接下来是第四层, 目录 world 就是一个普通的目录. 只要它的 dentry 的 parent 指针指向上一层就可以了. 由于挂载点不变，world 对应的 file 结构还是指向第三层的 mount 结构.
 
 接下来是第五层, 对于文件 data，是一个普通的文件，它的 dentry 的 parent 指向第四层的 dentry. 对于 data 对应的 file 结构，由于挂载点不变，还是指向第三层的 mount 结构.
+
+## 打开文件
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L1199
+SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
+{
+	return ksys_open(filename, flags, mode);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/syscalls.h#L1383
+static inline long ksys_open(const char __user *filename, int flags,
+			     umode_t mode)
+{
+	if (force_o_largefile())
+		flags |= O_LARGEFILE;
+	return do_sys_open(AT_FDCWD, filename, flags, mode);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L1192
+long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
+{
+	struct open_how how = build_open_how(flags, mode);
+	return do_sys_openat2(dfd, filename, &how);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L1163
+static long do_sys_openat2(int dfd, const char __user *filename,
+			   struct open_how *how)
+{
+	struct open_flags op;
+	int fd = build_open_flags(how, &op);
+	struct filename *tmp;
+
+	if (fd)
+		return fd;
+
+	tmp = getname(filename);
+	if (IS_ERR(tmp))
+		return PTR_ERR(tmp);
+
+	fd = get_unused_fd_flags(how->flags);
+	if (fd >= 0) {
+		struct file *f = do_filp_open(dfd, tmp, &op);
+		if (IS_ERR(f)) {
+			put_unused_fd(fd);
+			fd = PTR_ERR(f);
+		} else {
+			fsnotify_open(f);
+			fd_install(fd, f);
+		}
+	}
+	putname(tmp);
+	return fd;
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3379
+struct file *do_filp_open(int dfd, struct filename *pathname,
+		const struct open_flags *op)
+{
+	struct nameidata nd;
+	int flags = op->lookup_flags;
+	struct file *filp;
+
+	set_nameidata(&nd, dfd, pathname);
+	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
+	if (unlikely(filp == ERR_PTR(-ECHILD)))
+		filp = path_openat(&nd, op, flags);
+	if (unlikely(filp == ERR_PTR(-ESTALE)))
+		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
+	restore_nameidata();
+	return filp;
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L502
+struct nameidata {
+	struct path	path;
+	struct qstr	last;
+	struct path	root;
+	struct inode	*inode; /* path.dentry.d_inode */
+	unsigned int	flags;
+	unsigned	seq, m_seq, r_seq;
+	int		last_type;
+	unsigned	depth;
+	int		total_link_count;
+	struct saved {
+		struct path link;
+		struct delayed_call done;
+		const char *name;
+		unsigned seq;
+	} *stack, internal[EMBEDDED_LEVELS];
+	struct filename	*name;
+	struct nameidata *saved;
+	unsigned	root_seq;
+	int		dfd;
+	kuid_t		dir_uid;
+	umode_t		dir_mode;
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/path.h#L8
+struct path {
+	struct vfsmount *mnt;
+	struct dentry *dentry;
+} __randomize_layout;
+```
+
+要打开一个文件，首先要通过 get_unused_fd_flags 得到一个没有用的文件描述符. 如何获取这个文件描述符呢？在每一个进程的 task_struct 中，有一个指针 files，类型是 [files_struct](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fdtable.h#L48).
+
+files_struct 里面最重要的是一个文件描述符列表，每打开一个文件，就会在这个列表中分配一项，下标就是文件描述符.
+
+对于任何一个进程，默认情况下，文件描述符 0 表示 stdin 标准输入，文件描述符 1 表示 stdout 标准输出，文件描述符 2 表示 stderr 标准错误输出. 另外，再打开的文件，都会从这个列表中找一个空闲位置分配给它.
+
+文件描述符列表的每一项都是一个指向 struct file 的指针，也就是说，每打开一个文件，都会有一个 struct file 对应.
+
+do_sys_open 中调用 do_filp_open，就是创建这个 struct file 结构，然后 fd_install(fd, f) 是将文件描述符和这个结构关联起来.
+
+do_filp_open 里面首先初始化了 struct nameidata 这个结构. 文件都是一串的路径名称，需要逐个解析, 这个结构在解析和查找路径的时候提供辅助作用.
+
+在 struct nameidata 里面有一个关键的成员变量 struct path.
+
+其中，struct vfsmount 和文件系统的挂载有关, 另一个 struct dentry，除了上面说的用于标识目录之外，还可以表示文件名，还会建立文件名及其 inode 之间的关联.
+
+接下来就调用 [path_openat](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3340)，主要做了以下几件事情：
+1. alloc_empty_file 生成一个 struct file 结构
+1. path_init 初始化 nameidata，准备开始节点路径查找
+1. link_path_walk 对于路径名逐层进行节点路径查找，这里面有一个大的循环，用`/`分隔逐层处理
+1. [open_last_lookups](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3111) 获取文件对应的 inode 对象，并且初始化 file 对象
+
+例如，文件`/root/hello/world/data`，link_path_walk 会解析前面的路径部分`/root/hello/world`，解析完毕的时候 nameidata 的 dentry 为路径名的最后一部分的父目录`/root/hello/world`，而 nameidata 的 filename 为路径名的最后一部分`data`. 最后一部分的解析和处理，交给 open_last_lookups.
+
+在open_last_lookups里面，需要先查找文件路径最后一部分对应的 dentry. Linux 为了提高目录项对象的处理效率，设计与实现了目录项高速缓存 dentry cache，简称 dcache. 它主要由两个数据结构组成：
+- 哈希表 dentry_hashtable：dcache 中的所有 dentry 对象都通过 d_hash 指针链到相应的 dentry 哈希链表中
+- 未使用的 dentry 对象链表 s_dentry_lru：dentry 对象通过其 d_lru 指针链入 LRU 链表中. 只要有它，就说明长时间不使用，就应该释放了.
+
+![](/misc/img/fs/82dd76e1e84915206eefb8fc88385859.jpeg)
+
+
+这两个列表之间会产生复杂的关系：
+- 引用为 0：一个在散列表中的 dentry 变成没有人引用了，就会被加到 LRU 表中去
+- 再次被引用：一个在 LRU 表中的 dentry 再次被引用了，则从 LRU 表中移除
+- 分配：当 dentry 在散列表中没有找到，则从 Slub 分配器中分配一个
+- 过期归还：当 LRU 表中最长时间没有使用的 dentry 应该释放回 Slub 分配器
+- 文件删除：文件被删除了，相应的 dentry 应该释放回 Slub 分配器
+- 结构复用：当需要分配一个 dentry，但是无法分配新的，就从 LRU 表中取出一个来复用
+
+所以，open_last_lookups() 在查找 dentry 的时候，当然先从缓存中查找，调用的是 lookup_fast.
+
+如果缓存中没有找到，就需要真的到文件系统里面去找了，[lookup_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3003) 会创建一个新的 dentry，并且[调用上一级目录的 Inode 的 inode_operations 的 lookup 函数](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3074)，对于 ext4 来讲，调用的是 ext4_lookup，会到文件系统里面去找 inode. 最终找到后将新生成的 dentry 赋给 path 变量.
+
+path_openat() 的最后一步是调用 [do_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3201) -> [vfs_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L939) 真正打开文件.
+
+
+[vfs_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L939) -> [do_dentry_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L768) , do_dentry_open 里面最终要做的一件事情是，调用 f->f_op->open，也就是调用 [ext4_file_operations](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L884)的[ext4_file_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L813). 另外一件重要的事情是将打开文件的所有信息，填写到 [struct file](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L943https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L943) 这个结构里面.
+
+## 总结
+![](/misc/img/fs/8070294bacd74e0ac5ccc5ac88be1bb9.png)
+
+对于每一个进程，打开的文件都有一个文件描述符，在 files_struct 里面会有文件描述符数组. 每个一个文件描述符是这个数组的下标，里面的内容指向一个 file 结构，表示打开的文件。这个结构里面有这个文件对应的 inode，最重要的是这个文件对应的操作 file_operation. 如何操作这个文件，就看这个 file_operation 里面的定义了.
+
+对于每一个打开的文件，都有一个 dentry 对应，虽然叫作 directory entry，但是不仅仅表示文件夹，也表示文件. 它最重要的作用就是指向这个文件对应的 inode.
+
+如果说 file 结构是一个文件打开以后才创建的，dentry 是放在一个 dentry cache 里面的，文件关闭了，它依然存在，因而它可以更长期地维护内存中的文件的表示和硬盘上文件的表示之间的关系.
+
+inode 结构就表示硬盘上的 inode，包括块设备号等. 几乎每一种结构都有自己对应的 operation 结构，里面都是一些方法，因而当后面遇到对于某种结构进行处理的时候，如果不容易找到相应的处理函数，就先找这个 operation 结构，就清楚了.
+
+## 系统调用层和虚拟文件系统层
+文件系统的读写，其实就是调用系统函数 read 和 write.
+
+```c
+ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+{
+	struct fd f = fdget_pos(fd);
+	ssize_t ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos, *ppos = file_ppos(f.file);
+		if (ppos) {
+			pos = *ppos;
+			ppos = &pos;
+		}
+		ret = vfs_read(f.file, buf, count, ppos);
+		if (ret >= 0 && ppos)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+	}
+	return ret;
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/read_write.c#L596
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+{
+	return ksys_read(fd, buf, count);
+}
+
+ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t count)
+{
+	struct fd f = fdget_pos(fd);
+	ssize_t ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos, *ppos = file_ppos(f.file);
+		if (ppos) {
+			pos = *ppos;
+			ppos = &pos;
+		}
+		ret = vfs_write(f.file, buf, count, ppos);
+		if (ret >= 0 && ppos)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+	}
+
+	return ret;
+}
+
+SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
+		size_t, count)
+{
+	return ksys_write(fd, buf, count);
+}
+```
+
+对于 read 来讲，里面调用 [vfs_read](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/read_write.c#L447)->[__vfs_read](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/read_write.c#L422). 对于 write 来讲，里面调用 [vfs_write](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/read_write.c#L543)->[__vfs_write](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/read_write.c#L491).
+
+
+之前讲过，每一个打开的文件，都有一个 struct file 结构. 这里面有一个 struct file_operations f_op，用于定义对这个文件做的操作. __vfs_read 会调用相应文件系统的 file_operations 里面的 read 操作，__vfs_write 会调用相应文件系统 file_operations 里的 write 操作.
+
+对于ext4, f_op就是ext4_file_operations. 由于 ext4 没有定义 read 和 write 函数，于是会调用 ext4_file_read_iter 和 ext4_file_write_iter. ext4_file_read_iter 会调用 [generic_file_read_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L2257)，ext4_file_write_iter 会调用 [ext4_buffered_write_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L255).
+
+ext4_file_read_iter 和 ext4_file_write_iter有相似的逻辑，就是要区分是否用缓存.
+
+缓存其实就是内存中的一块空间. 因为内存比硬盘快得多，Linux 为了改进性能，有时候会选择不直接操作硬盘，而是读写都在内存中，然后批量读取或者写入硬盘. 一旦能够命中内存，读写效率就会大幅度提高.
+
+因此，根据是否使用内存做缓存，就可以把文件的 I/O 操作分为两种类型:
+1. 缓存 I/O. 大多数文件系统的默认 I/O 操作都是缓存 I/O. 对于读操作来讲，操作系统会先检查，内核的缓冲区有没有需要的数据. 如果已经缓存了，那就直接从缓存中返回；否则从磁盘中读取，然后缓存在操作系统的缓存中. 对于写操作来讲，操作系统会先将数据从用户空间复制到内核空间的缓存中. 这时对用户程序来说，写操作就已经完成. 至于什么时候再写到磁盘中由操作系统决定，除非显式地调用了 sync 同步命令.
+2. 直接 IO, 就是应用程序直接访问磁盘数据，而不经过内核缓冲区，从而减少了在内核缓存和用户程序之间数据复制.
+
+如果在读的逻辑 ext4_file_read_iter 里面，发现设置了 IOCB_DIRECT，则会调用 address_space 的 direct_IO 的函数，将直接从硬盘中读取数据.
+
+同样，对于缓存来讲，也需要文件和内存页进行关联，这就要用到 address_space. address_space 的相关操作定义在 struct address_space_operations 结构中. 对于 ext4 文件系统来讲， address_space 的操作定义在 [ext4_aops](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/inode.c#L3605)，direct_IO 对应的函数是 [noop_direct_IO]().
+
+> address_space，它主要用于在内存映射的时候将文件和内存页产生关联.
