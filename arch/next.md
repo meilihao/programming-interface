@@ -25,6 +25,8 @@
 - Aliyun的`X-Dragon架构`
   参考:
   - [从 VMWare 到阿里神龙，虚拟化技术 40 年演进史](https://blog.csdn.net/csdnnews/article/details/105548972)
+  - [突破性能极限，阿里云神龙最新ASPLOS论文解读](https://www.sohu.com/a/380803236_115128)
+  - [NBJL 2020论文导读13： High-density Multi-tenant Bare-metal Cloud](https://nbjl.nankai.edu.cn/2020/0407/c12124a268844/page.htm)
 
   ![](/misc/img/arch/25c7936befd17a4230afacb6bae45164fcc35ef2.png)
 
@@ -32,7 +34,11 @@
 
   ![](/misc/img/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
 
-  `X-Dragon架构`性能未损失原因: 将原先跑在cpu上的Hypervisior offload到了`X-Dragon架构`上. cpu是vm共享还是独享未知, 有可能都支持???
+  `X-Dragon架构`性能未损失原因: 将原先跑在cpu上的Hypervisior offload到了`X-Dragon架构`上.
+
+  在阿里云神龙高密裸金属架构中，每个裸金属实例都运行在一个单独设计的计算子板上，该计算子板带有专有的 CPU 和内存模块. BM-Hive为每个计算子板配备了硬件/软件混合 virtio I/O 系统，使客户实例能够直接访问阿里云网络和存储服务. BM-Hive 可在单个物理服务器中托管多达 16 个裸金属实例，显著提高裸金属服务器的实例密度. 此外，BM-Hive 在硬件级别严格隔离每个裸金属实例，以提高安全性和隔离性.
+
+  神龙裸金属BM-Hive由于采用了计算子板直接运行实例，避免了任何传统CPU/内存虚拟化的开销. 因为当前虚拟化的基本原理决定了CPU必须要在vCPU环境与物理CPU环境下来回切换（VM-Exit）, 频繁的切换会导致严重的VM性能问题.
 
 ### 指令集
 AVX 512指令集强化的向量和浮点计算
