@@ -1302,7 +1302,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 
 之前讲过，每一个打开的文件，都有一个 struct file 结构. 这里面有一个 struct file_operations f_op，用于定义对这个文件做的操作. __vfs_read 会调用相应文件系统的 file_operations 里面的 read 操作，__vfs_write 会调用相应文件系统 file_operations 里的 write 操作.
 
-对于ext4, f_op就是ext4_file_operations. 由于 ext4 没有定义 read 和 write 函数，于是会调用 ext4_file_read_iter 和 ext4_file_write_iter. ext4_file_read_iter 会调用 [generic_file_read_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L2257)，ext4_file_write_iter 会调用 [ext4_buffered_write_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L255).
+对于ext4, f_op就是ext4_file_operations. 由于 ext4 没有定义 read 和 write 函数，于是会调用 [ext4_file_read_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L114) 和 [ext4_file_write_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L641). ext4_file_read_iter 会调用 [generic_file_read_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L2257)->[generic_file_buffered_read](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L1991)，ext4_file_write_iter 会调用 [ext4_buffered_write_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L255) ->[generic_perform_write](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L3258).
 
 ext4_file_read_iter 和 ext4_file_write_iter有相似的逻辑，就是要区分是否用缓存.
 
@@ -1312,8 +1312,86 @@ ext4_file_read_iter 和 ext4_file_write_iter有相似的逻辑，就是要区分
 1. 缓存 I/O. 大多数文件系统的默认 I/O 操作都是缓存 I/O. 对于读操作来讲，操作系统会先检查，内核的缓冲区有没有需要的数据. 如果已经缓存了，那就直接从缓存中返回；否则从磁盘中读取，然后缓存在操作系统的缓存中. 对于写操作来讲，操作系统会先将数据从用户空间复制到内核空间的缓存中. 这时对用户程序来说，写操作就已经完成. 至于什么时候再写到磁盘中由操作系统决定，除非显式地调用了 sync 同步命令.
 2. 直接 IO, 就是应用程序直接访问磁盘数据，而不经过内核缓冲区，从而减少了在内核缓存和用户程序之间数据复制.
 
-如果在读的逻辑 ext4_file_read_iter 里面，发现设置了 IOCB_DIRECT，则会调用 address_space 的 direct_IO 的函数，将直接从硬盘中读取数据.
+如果在读的逻辑 ext4_file_read_iter 里面，发现设置了 IOCB_DIRECT，则会调用 [ext4_dio_read_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L52) 的函数，将直接从硬盘中读取数据. 类似的ext4_file_write_iter是走[ext4_dio_write_iter](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L450).
 
-同样，对于缓存来讲，也需要文件和内存页进行关联，这就要用到 address_space. address_space 的相关操作定义在 struct address_space_operations 结构中. 对于 ext4 文件系统来讲， address_space 的操作定义在 [ext4_aops](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/inode.c#L3605)，direct_IO 对应的函数是 [noop_direct_IO]().
+> 以前ext4 direct io的ext4_direct_IO已被删除 on 378f32bab3714f04c4e0c3aee4129f6703805550.
 
-> address_space，它主要用于在内存映射的时候将文件和内存页产生关联.
+ext4_dio_write_iter最终会调到[iomap_dio_rw](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/iomap/direct-io.c#L406)，这就跨过了缓存层，到了通用块层，最终到了文件系统的设备驱动层.
+
+### 带缓存的写入操作
+generic_perform_write函数里，是一个 while 循环. 需要找出这次写入影响的所有的页，然后依次写入. 对于每一个循环，主要做四件事情：
+1. 对于每一页，先调用 [address_space_operations](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/inode.c#L3605) 的 write_begin 做一些准备
+1. 调用 [iov_iter_copy_from_user_atomic](https://elixir.bootlin.com/linux/v5.8-rc3/source/lib/iov_iter.c#L987)，将写入的内容从用户态拷贝到内核态的页中
+1. 调用 address_space 的 write_end 完成写操作
+1. 调用 [balance_dirty_pages_ratelimited](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/page-writeback.c#L1877)，看脏页是否太多，需要写回硬盘. 所谓脏页，就是写入到缓存，但是还没有写入到硬盘的页面.
+
+> address_space主要用于在内存映射的时候将文件和内存页产生关联.
+
+第一步，对于 ext4 来讲，调用的是 ext4_write_begin. ext4 是一种日志文件系统，是为了防止突然断电的时候的数据丢失，引入了日志**（Journal）**模式. 日志文件系统比非日志文件系统多了一个 Journal 区域. 文件在 ext4 中分两部分存储，一部分是文件的元数据，另一部分是数据. 元数据和数据的操作日志 Journal 也是分开管理的. 可以在挂载 ext4 的时候，选择 Journal 模式. 这种模式在将数据写入文件系统前，必须等待元数据和数据的日志已经落盘才能发挥作用. 这样性能比较差，但是最安全.
+
+另一种模式是 order 模式. 这个模式不记录数据的日志，只记录元数据的日志，但是在写元数据的日志前，必须先确保数据已经落盘. 这个折中，是默认模式.
+
+还有一种模式是 writeback，不记录数据的日志，仅记录元数据的日志，并且不保证数据比元数据先落盘. 这个性能最好，但是最不安全. 在 ext4_write_begin，能看到对于 ext4_journal_start 的调用，就是在做日志相关的工作. 在 ext4_write_begin 中，还做了另外一件重要的事情，就是调用 [grab_cache_page_write_begin](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L3240)，来得到应该写入的缓存页.
+
+在内核中，缓存以页为单位放在内存里面，那如何知道，一个文件的哪些数据已经被放到缓存中了呢？每一个打开的文件都有一个 struct file 结构，每个 struct file 结构都有一个 struct [address_space](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L447) 用于关联文件和内存，就是在这个结构里面，有一棵树，用于保存所有与这个文件相关的的缓存页. 查找的时候，往往需要根据文件中的偏移量找出相应的页面，而基数树 radix tree 这种数据结构能够快速根据一个长整型查找到其相应的对象，因而这里缓存页就放在 radix 基数树里面.
+
+pagecache_get_page 就是根据 pgoff_t index 这个长整型，在这棵树里面查找缓存页，如果找不到就会创建一个缓存页.
+
+第二步，调用 iov_iter_copy_from_user_atomic. 先将分配好的页面调用 kmap_atomic 映射到内核里面的一个虚拟地址，然后将用户态的数据拷贝到内核态的页面的虚拟地址中，调用 kunmap_atomic 把内核里面的映射删除.
+
+第三步，调用 ext4_write_end 完成写入. 这里面会调用 ext4_journal_stop 完成日志的写入，会调用 block_write_end->__block_commit_write->mark_buffer_dirty，将修改过的缓存标记为脏页. 可以看出，其实所谓的完成写入，并没有真正写入硬盘，仅仅是写入缓存后，标记为脏页.
+
+但是这里有一个问题，数据很危险，一旦宕机就没有了，所以需要一种机制，将写入的页面真正写到硬盘中，称为回写（Write Back）
+
+第四步，调用 balance_dirty_pages_ratelimited，是回写脏页的一个很好的时机.
+
+在 balance_dirty_pages_ratelimited 里面，发现脏页的数目超过了规定的数目，就调用 [balance_dirty_pages](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/page-writeback.c#L1555)->[wb_start_background_writeback](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/fs-writeback.c#L1107)，启动一个背后线程开始回写.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/fs-writeback.c#L152
+static void wb_wakeup(struct bdi_writeback *wb)
+{
+	spin_lock_bh(&wb->work_lock);
+	if (test_bit(WB_registered, &wb->state))
+		mod_delayed_work(bdi_wq, &wb->dwork, 0);
+	spin_unlock_bh(&wb->work_lock);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/backing-dev.c#L35
+struct workqueue_struct *bdi_wq;
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/workqueue.h#L255
+#define __INIT_DELAYED_WORK(_work, _func, _tflags)			\
+	do {								\
+		INIT_WORK(&(_work)->work, (_func));			\
+		__init_timer(&(_work)->timer,				\
+			     delayed_work_timer_fn,			\
+			     (_tflags) | TIMER_IRQSAFE);		\
+	} while (0)
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/workqueue.h#L271
+#define INIT_DELAYED_WORK(_work, _func)					\
+	__INIT_DELAYED_WORK(_work, _func, 0)
+```
+
+通过上面的代码可以看出，bdi_wq 是一个全局变量，所有回写的任务都挂在这个队列上. mod_delayed_work 函数负责将一个回写任务 bdi_writeback 挂在这个队列上. bdi_writeback 有个成员变量 struct delayed_work dwork，bdi_writeback 就是以 delayed_work 的身份挂到队列上的，并且把 delay 设置为 0，意思就是一刻不等，马上执行.
+
+这里的 bdi 的意思是 backing device info，用于描述后端存储相关的信息, 每个块设备都会有这样一个结构，并且在初始化块设备的时候，调用 bdi_init 初始化这个结构，在初始化 bdi 的时候，也会调用 [wb_init](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/backing-dev.c#L283) 初始化 bdi_writeback.
+
+wb_init里面最重要的是 INIT_DELAYED_WORK. 其实就是初始化一个 timer，也即定时器，到时候就执行 wb_workfn 这个函数.
+
+接下来的调用链为：wb_workfn->wb_do_writeback->wb_writeback->writeback_sb_inodes->__writeback_single_inode->do_writepages，写入页面到硬盘.
+
+在调用 write 的最后，当发现缓存的数据太多的时候，会触发回写，这仅仅是回写的一种场景. 另外还有几种场景也会触发回写：
+- 用户主动调用 sync，将缓存刷到硬盘上去，最终会调用 wakeup_flusher_threads，同步脏页
+- 当内存十分紧张，以至于无法分配页面的时候，会调用 free_more_memory，最终会调用 wakeup_flusher_threads，释放脏页
+- 脏页已经更新了较长时间，时间上超过了 timer，需要及时回写，保持内存和磁盘上数据一致性
+
+### 带缓存的读操作
+读取比写入总体而言简单一些，主要涉及预读的问题.
+
+在 generic_file_buffered_read 函数中，需要先找到 page cache 里面是否有缓存页. 如果没有找到，不但读取这一页，还要进行预读，这需要在 page_cache_sync_readahead 函数中实现. 预读完了以后，再试一把查找缓存页，应该能找到了. 如果第一次找缓存页就找到了，还是要判断，是不是应该继续预读；如果需要，就调用 page_cache_async_readahead 发起一个异步预读. 最后，copy_page_to_iter 会将内容从内核缓存页拷贝到用户内存空间.
+
+## 总结
+在系统调用层的read 和 write, 在 VFS 层调用的是 vfs_read 和 vfs_write 并且调用 file_operation. 在 ext4 层调用的是 ext4_file_read_iter 和 ext4_file_write_iter.
+
+接下来就是分叉, 需要区分缓存 I/O 和直接 I/O. 直接 I/O 读写的流程是一样的，调用 iomap_dio_rw，再往下就调用块设备层了. 缓存 I/O 读写的流程不一样. 对于读，从块设备读取到缓存中，然后从缓存中拷贝到用户态. 对于写，从用户态拷贝到缓存，设置缓存页为脏，然后启动一个线程写入块设备.
