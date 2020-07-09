@@ -1,4 +1,6 @@
 # io
+![io抽象层次](/misc/img/io/80e152fe768e3cb4c84be62ad8d6d07f.jpg)
+
 ## 用设备控制器屏蔽设备差异
 计算机系统里, CPU 并不直接和设备打交道，而是通过设备控制器（Device Control Unit）的组件中转.
 
@@ -67,3 +69,133 @@ os用设备驱动程序来对接各个设备控制器.
 ![](/misc/img/io/6234738aac8d5897449e1a541d557090.jpg)
 
 有了文件系统接口之后，不但可以通过文件系统的命令行操作设备，也可以通过程序，调用 read、write 函数，像读写文件一样操作设备. 但是有些任务只使用读写很难完成，例如检查特定于设备的功能和属性，超出了通用文件系统的限制. 所以，对于设备来讲，还有一种接口称为 ioctl，表示输入输出控制接口，是用于配置和修改特定设备属性的通用接口.
+
+# 字符设备
+罗技鼠标, 驱动代码在 [drivers/input/mouse/logibm.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/mouse/logibm.c).
+打印机，驱动代码在 [drivers/char/lp.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c).
+
+logibm.c 里面定义了 logibm_open, logibm_close 用于处理打开和关闭的，定义了 logibm_interrupt 用来响应中断的.
+
+lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L785)用于操作设备文件. 而在 logibm.c 里面，找不到这样的结构，是因为鼠标属于众多输入设备的一种，而输入设备的操作被统一定义在 [drivers/input/input.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c) 里面就, 是[input_devices_proc_ops](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L1220)，logibm.c 只是定义了一些自己独有的操作.
+
+> drivers/input/input.c#input_devices_fileops deleted on 97a32539b9568bb653683349e5a76d02ff3c3e2c for `"proc: convert everything to "struct proc_ops"`
+
+## 打开字符设备
+![](/misc/img/io/2e29767e84b299324ea7fc524a3dcee6.jpeg)
+
+要使用一个字符设备，首先要把它的内核模块，通过 insmod 加载进内核. 这个时候，先调用的就是 module_init 调用的初始化函数.
+
+[lp_init_module](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L1080) -> [lp_init](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L1019) -> [register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L2690) -> [__register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/char_dev.c#L268)->[cdev_add](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/char_dev.c#L479)
+
+字符设备驱动的内核模块加载的时候，最重要的一件事情就是，注册这个字符设备. 注册的方式是调用 __register_chrdev_region，注册字符设备的主次设备号和名称，然后分配一个 struct cdev 结构，将 cdev 的 ops 成员变量指向这个模块声明的 file_operations. 然后，cdev_add 会将这个字符设备添加到内核中一个叫作 struct kobj_map *cdev_map 的结构，来统一管理所有字符设备. 
+
+其中，MKDEV(cd->major, baseminor) 表示将主设备号和次设备号生成一个 dev_t 的整数，然后将这个整数 dev_t 和 cdev 关联起来.
+
+在 logibm.c 的 logibm_init 找不到注册字符设备，这是因为logibm.c是通过 input.c 注册的, 这就相当于 input.c 对多个输入字符设备进行统一的管理. 调用链是: 在 logibm_init 中调用 [input_register_device](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L2153) 加入到input.c的[input_dev_list](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L37)->[input_attach_handler](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L1022)-> `connect()` 即[evdev_connect](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/evdev.c#L1337) -> [input_register_handle](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L2378).
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L37
+	list_for_each_entry(handler, &input_handler_list, node)
+		input_attach_handler(dev, handler);
+```
+
+在内核启动的时候，input handler是已经注册了的，然后logibm.c的input_dev注册进来后遍历input_handler_list by list_for_each_entry()查找有没有一个合适的handler.
+
+> input_dev和input_handler是一个多对一的关系.
+
+内核模块加载完毕后，接下来要通过 mknod 在 /dev 下面创建一个设备文件，只有有了这个设备文件，才能通过文件系统的接口，对这个设备文件进行操作.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3611
+SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, umode_t, mode,
+		unsigned int, dev)
+{
+	return do_mknodat(dfd, filename, mode, dev);
+}
+
+SYSCALL_DEFINE3(mknod, const char __user *, filename, umode_t, mode, unsigned, dev)
+{
+	return do_mknodat(AT_FDCWD, filename, mode, dev);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3567
+long do_mknodat(int dfd, const char __user *filename, umode_t mode,
+		unsigned int dev)
+{
+	struct dentry *dentry;
+	struct path path;
+	int error;
+	unsigned int lookup_flags = 0;
+
+	error = may_mknod(mode);
+	if (error)
+		return error;
+retry:
+	dentry = user_path_create(dfd, filename, &path, lookup_flags);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	if (!IS_POSIXACL(path.dentry->d_inode))
+		mode &= ~current_umask();
+	error = security_path_mknod(&path, dentry, mode, dev);
+	if (error)
+		goto out;
+	switch (mode & S_IFMT) {
+		case 0: case S_IFREG:
+			error = vfs_create(path.dentry->d_inode,dentry,mode,true);
+			if (!error)
+				ima_post_path_mknod(dentry);
+			break;
+		case S_IFCHR: case S_IFBLK:
+			error = vfs_mknod(path.dentry->d_inode,dentry,mode,
+					new_decode_dev(dev));
+			break;
+		case S_IFIFO: case S_IFSOCK:
+			error = vfs_mknod(path.dentry->d_inode,dentry,mode,0);
+			break;
+	}
+out:
+	done_path_create(&path, dentry);
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
+	return error;
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3520
+int vfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
+{
+	bool is_whiteout = S_ISCHR(mode) && dev == WHITEOUT_DEV;
+	int error = may_create(dir, dentry);
+
+	if (error)
+		return error;
+
+	if ((S_ISCHR(mode) || S_ISBLK(mode)) && !is_whiteout &&
+	    !capable(CAP_MKNOD))
+		return -EPERM;
+
+	if (!dir->i_op->mknod)
+		return -EPERM;
+
+	error = devcgroup_inode_mknod(mode, dev);
+	if (error)
+		return error;
+
+	error = security_inode_mknod(dir, dentry, mode, dev);
+	if (error)
+		return error;
+
+	error = dir->i_op->mknod(dir, dentry, mode, dev);
+	if (!error)
+		fsnotify_create(dir, dentry);
+	return error;
+}
+EXPORT_SYMBOL(vfs_mknod);
+```
+
+在do_mkdirat里看到，在文件系统上，顺着路径找到 /dev/xxx 所在的文件夹，然后为这个新创建的设备文件创建一个 dentry. 这是维护文件和 inode 之间的关联关系的结构.
+
+接下来，如果是字符文件 S_IFCHR 或者设备文件 S_IFBLK，就调用 vfs_mkno -> 调用对应的文件系统的 inode_operations.
+
+通过`sudo mount |grep "/dev"`发现`/dev`挂载的是devtmpfs.
+
