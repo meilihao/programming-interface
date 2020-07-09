@@ -30,7 +30,7 @@ os用设备驱动程序来对接各个设备控制器.
 
 设备控制器不属于操作系统的一部分，但是设备驱动程序属于操作系统的一部分. 操作系统的内核代码可以像调用本地代码一样调用驱动程序的代码，而驱动程序的代码需要发出特殊的面向设备控制器的指令，才能操作设备控制器. 设备驱动程序中是一些面向特殊设备控制器的代码, 不同的设备不同. 但是对于操作系统其它部分的代码而言，设备驱动程序应该有统一的接口.
 
-设备做完了事情会通过中断来通知操作系统，而os有一个统一的流程来处理中断，使得不同设备的中断使用统一的流程. 一般的流程是，一个设备驱动程序初始化的时候，要先注册一个该设备的中断处理函数. 而中断的时候，触发的函数是 [handle_irq](https://elixir.bootlin.com/linux/v5.8-rc3/source/arch/x86/kernel/irq.c#L226), 这个函数是中断处理的统一入口. 在这个函数里面，可以找到设备驱动程序注册的中断处理函数 Handler，然后执行它进行中断处理.
+设备做完了事情会通过中断来通知操作系统，而os有一个统一的流程来处理中断，使得不同设备的中断使用统一的流程. 一般的流程是，一个设备驱动程序初始化的时候，要先注册一个该设备的中断处理函数. 而中断的时候，触发的函数是 [handle_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irq.c#L226), 这个函数是中断处理的统一入口. 在这个函数里面，可以找到设备驱动程序注册的中断处理函数 Handler，然后执行它进行中断处理.
 
 ![](/misc/img/io/aa9d074d9819f0eb513e11014a5772c0.jpg)
 
@@ -73,12 +73,12 @@ os用设备驱动程序来对接各个设备控制器.
 # 字符设备
 ![](/misc/img/io/fba61fe95e0d2746235b1070eb4c18cd.jpeg)
 
-罗技鼠标, 驱动代码在 [drivers/input/mouse/logibm.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/mouse/logibm.c).
-打印机，驱动代码在 [drivers/char/lp.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c).
+罗技鼠标, 驱动代码在 [drivers/input/mouse/logibm.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/mouse/logibm.c).
+打印机，驱动代码在 [drivers/char/lp.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c).
 
 logibm.c 里面定义了 logibm_open, logibm_close 用于处理打开和关闭的，定义了 logibm_interrupt 用来响应中断的.
 
-lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L785)用于操作设备文件. 而在 logibm.c 里面，找不到这样的结构，是因为鼠标属于众多输入设备的一种，而输入设备的操作被统一定义在 [drivers/input/input.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c) 里面就, 是[input_devices_proc_ops](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L1220)，logibm.c 只是定义了一些自己独有的操作.
+lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c#L785)用于操作设备文件. 而在 logibm.c 里面，找不到这样的结构，是因为鼠标属于众多输入设备的一种，而输入设备的操作被统一定义在 [drivers/input/input.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c) 里面就, 是[input_devices_proc_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L1220)，logibm.c 只是定义了一些自己独有的操作.
 
 > drivers/input/input.c#input_devices_fileops deleted on 97a32539b9568bb653683349e5a76d02ff3c3e2c for `"proc: convert everything to "struct proc_ops"`
 
@@ -87,15 +87,15 @@ lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com
 
 要使用一个字符设备，首先要把它的内核模块，通过 insmod 加载进内核. 这个时候，先调用的就是 module_init 调用的初始化函数.
 
-[lp_init_module](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L1080) -> [lp_init](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c#L1019) -> [register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L2690) -> [__register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/char_dev.c#L268)->[cdev_add](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/char_dev.c#L479)
+[lp_init_module](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c#L1080) -> [lp_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c#L1019) -> [register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/fs.h#L2690) -> [__register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/char_dev.c#L268)->[cdev_add](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/char_dev.c#L479)
 
 字符设备驱动的内核模块加载的时候，最重要的一件事情就是，注册这个字符设备. 注册的方式是调用 __register_chrdev_region，注册字符设备的主次设备号和名称，然后分配一个 struct cdev 结构，将 cdev 的 ops 成员变量指向这个模块声明的 file_operations. 然后，cdev_add 会将这个字符设备添加到内核中一个叫作 struct kobj_map *cdev_map 的结构，来统一管理所有字符设备. 
 
 其中，MKDEV(cd->major, baseminor) 表示将主设备号和次设备号生成一个 dev_t 的整数，然后将这个整数 dev_t 和 cdev 关联起来.
 
-在 logibm.c 的 logibm_init 找不到注册字符设备，这是因为logibm.c是通过 input.c 注册的, 这就相当于 input.c 对多个输入字符设备进行统一的管理. 调用链是: 在 logibm_init 中调用 [input_register_device](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L2153) 加入到input.c的[input_dev_list](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L37)->[input_attach_handler](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L1022)-> `connect()` 即[evdev_connect](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/evdev.c#L1337) -> [input_register_handle](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L2378).
+在 logibm.c 的 logibm_init 找不到注册字符设备，这是因为logibm.c是通过 input.c 注册的, 这就相当于 input.c 对多个输入字符设备进行统一的管理. 调用链是: 在 logibm_init 中调用 [input_register_device](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L2153) 加入到input.c的[input_dev_list](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L37)->[input_attach_handler](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L1022)-> `connect()` 即[evdev_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/evdev.c#L1337) -> [input_register_handle](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L2378).
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/input.c#L37
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/input.c#L37
 	list_for_each_entry(handler, &input_handler_list, node)
 		input_attach_handler(dev, handler);
 ```
@@ -106,7 +106,7 @@ lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com
 
 内核模块加载完毕后，接下来要通过 mknod 在 /dev 下面创建一个设备文件，只有有了这个设备文件，才能通过文件系统的接口，对这个设备文件进行操作.
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3611
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/namei.c#L3611
 SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, umode_t, mode,
 		unsigned int, dev)
 {
@@ -118,7 +118,7 @@ SYSCALL_DEFINE3(mknod, const char __user *, filename, umode_t, mode, unsigned, d
 	return do_mknodat(AT_FDCWD, filename, mode, dev);
 }
 
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3567
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/namei.c#L3567
 long do_mknodat(int dfd, const char __user *filename, umode_t mode,
 		unsigned int dev)
 {
@@ -163,7 +163,7 @@ out:
 	return error;
 }
 
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L3520
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/namei.c#L3520
 int vfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	bool is_whiteout = S_ISCHR(mode) && dev == WHITEOUT_DEV;
@@ -202,7 +202,7 @@ EXPORT_SYMBOL(vfs_mknod);
 通过`sudo mount |grep "/dev"`发现`/dev`挂载的是devtmpfs.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/base/devtmpfs.c#L66
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/devtmpfs.c#L66
 static struct file_system_type internal_fs_type = {
 	.name = "devtmpfs",
 #ifdef CONFIG_TMPFS
@@ -306,3 +306,438 @@ ioctl 中会调用 [do_vfs_ioctl](https://elixir.bootlin.com/linux/v5.8-rc4/sour
 由于这里是设备驱动程序，所以调用的是 vfs_ioctl.
 
 这里面调用的是 struct file 里 file_operations 的 unlocked_ioctl 函数. 之前初始化设备驱动的时候，已经将 file_operations 指向设备驱动的 file_operations 了, 这里调用的是设备驱动的 unlocked_ioctl. 对于打印机程序来讲，调用的是 lp_ioctl. 可以看出来，它里面就是 switch 语句，它会根据不同的 cmd，做不同的操作.
+
+## 中断通知
+鼠标就是通过中断，将自己的位置和按键信息，传递给设备驱动程序.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/mouse/logibm.c#L61
+static irqreturn_t logibm_interrupt(int irq, void *dev_id)
+{
+	char dx, dy;
+	unsigned char buttons;
+
+	outb(LOGIBM_READ_X_LOW, LOGIBM_CONTROL_PORT);
+	dx = (inb(LOGIBM_DATA_PORT) & 0xf);
+	outb(LOGIBM_READ_X_HIGH, LOGIBM_CONTROL_PORT);
+	dx |= (inb(LOGIBM_DATA_PORT) & 0xf) << 4;
+	outb(LOGIBM_READ_Y_LOW, LOGIBM_CONTROL_PORT);
+	dy = (inb(LOGIBM_DATA_PORT) & 0xf);
+	outb(LOGIBM_READ_Y_HIGH, LOGIBM_CONTROL_PORT);
+	buttons = inb(LOGIBM_DATA_PORT);
+	dy |= (buttons & 0xf) << 4;
+	buttons = ~buttons >> 5;
+
+	input_report_rel(logibm_dev, REL_X, dx);
+	input_report_rel(logibm_dev, REL_Y, dy);
+	input_report_key(logibm_dev, BTN_RIGHT,  buttons & 1);
+	input_report_key(logibm_dev, BTN_MIDDLE, buttons & 2);
+	input_report_key(logibm_dev, BTN_LEFT,   buttons & 4);
+	input_sync(logibm_dev);
+
+	outb(LOGIBM_ENABLE_IRQ, LOGIBM_CONTROL_PORT);
+	return IRQ_HANDLED;
+}
+
+static int logibm_open(struct input_dev *dev)
+{
+	if (request_irq(logibm_irq, logibm_interrupt, 0, "logibm", NULL)) {
+		printk(KERN_ERR "logibm.c: Can't allocate irq %d\n", logibm_irq);
+		return -EBUSY;
+	}
+	outb(LOGIBM_ENABLE_IRQ, LOGIBM_CONTROL_PORT);
+	return 0;
+}
+```
+
+要处理中断，需要有一个中断处理函数. 定义如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/interrupt.h#L92
+typedef irqreturn_t (*irq_handler_t)(int, void *);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/irqreturn.h#L9:4
+/**
+ * enum irqreturn
+ * @IRQ_NONE		interrupt was not from this device or was not handled
+ * @IRQ_HANDLED		interrupt was handled by this device
+ * @IRQ_WAKE_THREAD	handler requests to wake the handler thread
+ */
+enum irqreturn {
+	IRQ_NONE		= (0 << 0),
+	IRQ_HANDLED		= (1 << 0),
+	IRQ_WAKE_THREAD		= (1 << 1),
+};
+```
+
+其中，irq 是一个整数，是中断信号. dev_id 是一个 void * 的通用指针，主要用于区分同一个中断处理函数对于不同设备的处理.
+
+这里的返回值有三种：
+- IRQ_NONE 表示不是我的中断，不归我管
+- IRQ_HANDLED 表示处理完了的中断
+- IRQ_WAKE_THREAD 表示有一个进程正在等待这个中断，中断处理完了，应该唤醒它
+
+上面的例子中，logibm_interrupt 这个中断处理函数，先是获取了 x 和 y 的移动坐标，以及左中右的按键，上报上去，然后返回 IRQ_HANDLED，这表示处理完毕.
+
+其实，写一个真正生产用的中断处理程序还是很复杂的. 当一个中断信号 A 触发后，正在处理的过程中，这个中断信号 A 是应该暂时关闭的，这样是为了防止再来一个中断信号 A，在当前的中断信号 A 的处理过程中插一杠子. 但是，这个暂时关闭的时间应该多长呢？
+
+如果太短了，应该原子化处理完毕的没有处理完毕，又被另一个中断信号 A 中断了，很多操作就不正确了；如果太长了，一直关闭着，新的中断信号 A 进不来，系统就显得很慢. 所以，很多中断处理程序将整个中断要做的事情分成两部分，称为上半部和下半部，或者成为关键处理部分和延迟处理部分. 在中断处理函数中，仅仅处理关键部分，完成了就将中断信号打开，使得新的中断可以进来，需要比较长时间处理的部分，也即延迟部分，往往通过工作队列等方式慢慢处理. 可参考《Linux Device Drivers》这本书. 有了中断处理函数，接下来要调用 request_irq 来注册这个中断处理函数. [request_irq](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/interrupt.h#L157) 有这样几个参数：
+- unsigned int irq 是中断信号
+- irq_handler_t handler 是中断处理函数
+- unsigned long flags 是一些标识位
+- const char *name 是设备名称
+- void *dev 这个通用指针应该和中断处理函数的 void *dev 相对应.
+
+[request_irq](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/interrupt.h#L157) -> [request_threaded_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/manage.c#L1969)
+
+对于每一个中断，都有一个对中断的描述结构 [struct irq_desc](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/irqdesc.h#L56). 它有一个重要的成员变量是 [struct irqaction](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/interrupt.h#L110)，用于表示处理这个中断的动作. 如果仔细看这个结构，会发现，它里面有 next 指针，也就是说，这是一个链表，对于这个中断的所有处理动作，都串在这个链表上.
+
+每一个中断处理动作的结构 struct irqaction，都有以下成员：
+1. 中断处理函数 handler
+1. void *dev_id 为设备 id
+1. irq 为中断信号
+1. 如果中断处理函数在单独的线程运行，则有 thread_fn 是线程的执行函数，thread 是线程的 task_struct.
+
+在 request_threaded_irq 函数中，irq_to_desc 根据中断信号查找中断描述结构. 一般情况下，所有的 [struct irq_desc](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/irqdesc.h#L56) 都放在一个[数组](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/irqdesc.c#L550)里面，直接按下标查找就可以了. 如果配置了 CONFIG_SPARSE_IRQ，那中断号是不连续的，就不适合用数组保存了，此时可以放在[一棵基数树](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/irqdesc.c#L344)上. 这种结构对于从某个整型 key 找到 value 速度很快，中断信号 irq 是这个整数. 通过它，很快就能定位到对应的 struct irq_desc.
+
+为什么中断信号会有稀疏，也就是不连续的情况呢？这里需要说明一下，这里的 irq 并不是真正的、物理的中断信号，而是一个抽象的、虚拟的中断信号. 因为物理的中断信号和硬件关联比较大，中断控制器也是各种各样的. 作为内核，不可能写程序的时候，适配各种各样的硬件中断控制器，因而就需要有一层中断抽象层. 这里虚拟中断信号到中断描述结构的映射，就是抽象中断层的主要逻辑.
+
+下面介绍真正中断响应的时候，会涉及物理中断信号. 可以想象，如果只有一个 CPU，一个中断控制器，则基本能够保证从物理中断信号到虚拟中断信号的映射是线性的，这样用数组表示就没啥问题，但是如果有多个 CPU，多个中断控制器，每个中断控制器各有各的物理中断信号，就没办法保证虚拟中断信号是连续的，所以就要用到基数树了.
+
+接下来，request_threaded_irq 函数分配了一个 struct irqaction，并且初始化它，接着调用 [__setup_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/manage.c#L1326). 在这个函数里面，如果 struct irq_desc 里面已经有 struct irqaction 了，就将新的 struct irqaction 挂在链表的末端. 如果设定了以单独的线程运行中断处理函数，[setup_irq_thread](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/manage.c#L1271) 就会创建这个内核线程，[wake_up_process](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/manage.c#L1645) 会唤醒它.
+
+至此为止，request_irq 完成了它的使命. 总结来说，它就是根据中断信号 irq，找到基数树上对应的 irq_desc，然后将新的 irqaction 挂在链表上.
+
+真正中断的发生还是要从硬件开始, 这里面有四个层次:
+1. 第一个层次是外部设备给中断控制器发送物理中断信号
+1. 第二个层次是中断控制器将物理中断信号转换成为中断向量 interrupt vector，发给各个 CPU
+1. 第三个层次是每个 CPU 都会有一个中断向量表，根据 interrupt vector 调用一个 IRQ 处理函数. 注意这里的 IRQ 处理函数还不是上面指定的 irq_handler_t，到这一层还是 CPU 硬件的要求
+1. 第四个层次是在 IRQ 处理函数中，将 interrupt vector 转化为抽象中断层的中断信号 irq，调用中断信号 irq 对应的中断描述结构里面的 irq_handler_t
+
+![](/misc/img/io/dd492efdcf956cb22ce3d51592cdc113.png)
+
+从 CPU 收到中断向量开始分析, x86 CPU 收到的中断向量定义在文件 [arch/x86/include/asm/irq_vectors.h](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/irq_vectors.h)中.
+
+通过这些注释，可以看出，CPU 能够处理的中断总共 256 个，用宏 NR_VECTOR 或者 FIRST_SYSTEM_VECTOR 表示.
+
+为了处理中断，CPU 硬件要求每一个 CPU 都有一个中断向量表，通过 [load_idt](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/desc.h#L111) 加载，里面记录着每一个中断对应的处理方法，这个中断向量表定义在文件 [arch/x86/kernel/idt.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/idt.c#L161) 中.
+
+对于一个 CPU 可以处理的中断被分为几个部分，[第一部分 0 到 31 的前 32 位](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/irq_vectors.h#L18)是系统陷入或者系统异常，这些错误无法屏蔽，一定要处理.
+
+这些中断的处理函数在系统初始化的时候，在 start_kernel 函数中调用 [trap_init()](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/traps.c#L1079)来设置.
+
+在 trap_init 中 会通过[idt_setup_traps](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/idt.c#L241) 最终调用[idt_setup_from_table](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/idt.c#L196) 其实就是将每个中断都设置了中断处理函数，放在中断向量表 idt_table 中.
+
+> idt_table的 前 32 个中断定义在 [arch/x86/include/asm/trapnr.h](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/trapnr.h) 文件中.
+> trap_init() 原先会调用大量的 set_intr_gate, 后被移入[idt_setup_traps](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/idt.c#L241) on b70543a0b2b680f8953b6917a83b9203b20d7abd for "x86/idt: Move regular trap init to tables"
+
+trap_init 结束后，中断向量表中已经填好了前 32 位(不一定每位都设置)，外加一位 32 位系统调用IA32_SYSCALL_VECTOR，其他的都是用于设备中断.
+
+在 start_kernel 调用完毕 trap_init 之后，还会调用 [init_IRQ()的`x86_init.irqs.intr_init()`](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irqinit.c#L70) 来初始化其他的设备中断，最终会调用到 [native_init_IRQ](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irqinit.c#L90).
+
+这样任何一个中断向量到达任何一个 CPU，最终都会走到 [common_interrupt](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irq.c#L239).
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/idtentry.h#L196
+#define DEFINE_IDTENTRY_IRQ(func)					\
+static __always_inline void __##func(struct pt_regs *regs, u8 vector);	\
+									\
+__visible noinstr void func(struct pt_regs *regs,			\
+			    unsigned long error_code)			\
+{									\
+	bool rcu_exit = idtentry_enter_cond_rcu(regs);			\
+									\
+	instrumentation_begin();					\
+	irq_enter_rcu();						\
+	kvm_set_cpu_l1tf_flush_l1d();					\
+	__##func (regs, (u8)error_code);				\
+	irq_exit_rcu();							\
+	instrumentation_end();						\
+	idtentry_exit_cond_rcu(regs, rcu_exit);				\
+}									\
+									\
+static __always_inline void __##func(struct pt_regs *regs, u8 vector)
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/idtentry.h#L420
+/* Entries for common/spurious (device) interrupts */
+#define DECLARE_IDTENTRY_IRQ(vector, func)				\
+	idtentry_irq vector func
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/idtentry.h#L420
+/* Device interrupts common/spurious */
+DECLARE_IDTENTRY_IRQ(X86_TRAP_OTHER,	common_interrupt);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irq.c#L239
+/*
+ * common_interrupt() handles all normal device IRQ's (the special SMP
+ * cross-CPU interrupts have their own entry points).
+ */
+DEFINE_IDTENTRY_IRQ(common_interrupt)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+	struct irq_desc *desc;
+
+	/* entry code tells RCU that we're not quiescent.  Check it. */
+	RCU_LOCKDEP_WARN(!rcu_is_watching(), "IRQ failed to wake up RCU");
+
+	desc = __this_cpu_read(vector_irq[vector]); // ???vector is where from
+	if (likely(!IS_ERR_OR_NULL(desc))) {
+		handle_irq(desc, regs);
+	} else {
+		ack_APIC_irq();
+
+		if (desc == VECTOR_UNUSED) {
+			pr_emerg_ratelimited("%s: %d.%u No irq handler for vector\n",
+					     __func__, smp_processor_id(),
+					     vector);
+		} else {
+			__this_cpu_write(vector_irq[vector], VECTOR_UNUSED);
+		}
+	}
+
+	set_irq_regs(old_regs);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/entry/entry_64.S
+/*
+ * Interrupt entry/exit.
+ *
+ + The interrupt stubs push (vector) onto the stack, which is the error_code
+ * position of idtentry exceptions, and jump to one of the two idtentry points
+ * (common/spurious).
+ *
+ * common_interrupt is a hotpath, align it to a cache line
+ */
+.macro idtentry_irq vector cfunc
+	.p2align CONFIG_X86_L1_CACHE_SHIFT
+	idtentry \vector asm_\cfunc \cfunc has_error_code=1
+.endm
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/entry/entry_64.S#L348
+/**
+ * idtentry - Macro to generate entry stubs for simple IDT entries
+ * @vector:		Vector number
+ * @asmsym:		ASM symbol for the entry point
+ * @cfunc:		C function to be called
+ * @has_error_code:	Hardware pushed error code on stack
+ *
+ * The macro emits code to set up the kernel context for straight forward
+ * and simple IDT entries. No IST stack, no paranoid entry checks.
+ */
+.macro idtentry vector asmsym cfunc has_error_code:req
+SYM_CODE_START(\asmsym)
+	UNWIND_HINT_IRET_REGS offset=\has_error_code*8
+	ASM_CLAC
+
+	.if \has_error_code == 0
+		pushq	$-1			/* ORIG_RAX: no syscall to restart */
+	.endif
+
+	.if \vector == X86_TRAP_BP
+		/*
+		 * If coming from kernel space, create a 6-word gap to allow the
+		 * int3 handler to emulate a call instruction.
+		 */
+		testb	$3, CS-ORIG_RAX(%rsp)
+		jnz	.Lfrom_usermode_no_gap_\@
+		.rept	6
+		pushq	5*8(%rsp)
+		.endr
+		UNWIND_HINT_IRET_REGS offset=8
+.Lfrom_usermode_no_gap_\@:
+	.endif
+
+	idtentry_body \cfunc \has_error_code
+
+_ASM_NOKPROBE(\asmsym)
+SYM_CODE_END(\asmsym)
+.endm
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/entry/entry_64.S#L321
+/**
+ * idtentry_body - Macro to emit code calling the C function
+ * @cfunc:		C function to be called
+ * @has_error_code:	Hardware pushed error code on stack
+ */
+.macro idtentry_body cfunc has_error_code:req
+
+	call	error_entry
+	UNWIND_HINT_REGS
+
+	movq	%rsp, %rdi			/* pt_regs pointer into 1st argument*/
+
+	.if \has_error_code == 1
+		movq	ORIG_RAX(%rsp), %rsi	/* get error code into 2nd argument*/
+		movq	$-1, ORIG_RAX(%rsp)	/* no syscall to restart */
+	.endif
+
+	call	\cfunc
+
+	jmp	error_return
+.endm
+```
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/apic/vector.c#L732
+static struct irq_desc *__setup_vector_irq(int vector)
+{
+	int isairq = vector - ISA_IRQ_VECTOR(0);
+
+	/* Check whether the irq is in the legacy space */
+	if (isairq < 0 || isairq >= nr_legacy_irqs())
+		return VECTOR_UNUSED;
+	/* Check whether the irq is handled by the IOAPIC */
+	if (test_bit(isairq, &io_apic_irqs))
+		return VECTOR_UNUSED;
+	return irq_to_desc(isairq);
+}
+
+/* Online the local APIC infrastructure and initialize the vectors */
+void lapic_online(void)
+{
+	unsigned int vector;
+
+	lockdep_assert_held(&vector_lock);
+
+	/* Online the vector matrix array for this CPU */
+	irq_matrix_online(vector_matrix);
+
+	/*
+	 * The interrupt affinity logic never targets interrupts to offline
+	 * CPUs. The exception are the legacy PIC interrupts. In general
+	 * they are only targeted to CPU0, but depending on the platform
+	 * they can be distributed to any online CPU in hardware. The
+	 * kernel has no influence on that. So all active legacy vectors
+	 * must be installed on all CPUs. All non legacy interrupts can be
+	 * cleared.
+	 */
+	for (vector = 0; vector < NR_VECTORS; vector++)
+		this_cpu_write(vector_irq[vector], __setup_vector_irq(vector));
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/hw_irq.h
+typedef struct irq_desc* vector_irq_t[NR_VECTORS];
+DECLARE_PER_CPU(vector_irq_t, vector_irq);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/apic/io_apic.c#L2014
+static void lapic_register_intr(int irq)
+{
+	irq_clear_status_flags(irq, IRQ_LEVEL);
+	irq_set_chip_and_handler_name(irq, &lapic_chip, handle_edge_irq,
+				      "edge");
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/chip.c#L984
+static void
+__irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
+		     int is_chained, const char *name)
+{
+	if (!handle) {
+		handle = handle_bad_irq;
+	} else {
+		struct irq_data *irq_data = &desc->irq_data;
+#ifdef CONFIG_IRQ_DOMAIN_HIERARCHY
+		/*
+		 * With hierarchical domains we might run into a
+		 * situation where the outermost chip is not yet set
+		 * up, but the inner chips are there.  Instead of
+		 * bailing we install the handler, but obviously we
+		 * cannot enable/startup the interrupt at this point.
+		 */
+		while (irq_data) {
+			if (irq_data->chip != &no_irq_chip)
+				break;
+			/*
+			 * Bail out if the outer chip is not set up
+			 * and the interrupt supposed to be started
+			 * right away.
+			 */
+			if (WARN_ON(is_chained))
+				return;
+			/* Try the parent */
+			irq_data = irq_data->parent_data;
+		}
+#endif
+		if (WARN_ON(!irq_data || irq_data->chip == &no_irq_chip))
+			return;
+	}
+
+	/* Uninstall? */
+	if (handle == handle_bad_irq) {
+		if (desc->irq_data.chip != &no_irq_chip)
+			mask_ack_irq(desc);
+		irq_state_set_disabled(desc);
+		if (is_chained)
+			desc->action = NULL;
+		desc->depth = 1;
+	}
+	desc->handle_irq = handle;
+	desc->name = name;
+
+	if (handle != handle_bad_irq && is_chained) {
+		unsigned int type = irqd_get_trigger_type(&desc->irq_data);
+
+		/*
+		 * We're about to start this interrupt immediately,
+		 * hence the need to set the trigger configuration.
+		 * But the .set_type callback may have overridden the
+		 * flow handler, ignoring that we're dealing with a
+		 * chained interrupt. Reset it immediately because we
+		 * do know better.
+		 */
+		if (type != IRQ_TYPE_NONE) {
+			__irq_set_trigger(desc, type);
+			desc->handle_irq = handle;
+		}
+
+		irq_settings_set_noprobe(desc);
+		irq_settings_set_norequest(desc);
+		irq_settings_set_nothread(desc);
+		desc->action = &chained_action;
+		irq_activate_and_startup(desc, IRQ_RESEND);
+	}
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/chip.c#L1086
+void
+irq_set_chip_and_handler_name(unsigned int irq, struct irq_chip *chip,
+			      irq_flow_handler_t handle, const char *name)
+{
+	irq_set_chip(irq, chip);
+	__irq_set_handler(irq, handle, 0, name);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/chip.c#L1054
+void
+__irq_set_handler(unsigned int irq, irq_flow_handler_t handle, int is_chained,
+		  const char *name)
+{
+	unsigned long flags;
+	struct irq_desc *desc = irq_get_desc_buslock(irq, &flags, 0);
+
+	if (!desc)
+		return;
+
+	__irq_do_set_handler(desc, handle, is_chained, name);
+	irq_put_desc_busunlock(desc, flags);
+}
+EXPORT_SYMBOL_GPL(__irq_set_handler);
+```
+
+中断控制器发送给每个 CPU 的中断向量都是每个 CPU 局部的，而抽象中断处理层的虚拟中断信号 irq 以及它对应的中断描述结构 irq_desc 是全局的，也即这个 CPU 的 200 号的中断向量和另一个 CPU 的 200 号中断向量对应的虚拟中断信号 irq 和中断描述结构 irq_desc 可能不一样，这就需要一个映射关系. 这个映射关系放在 PerCPU 变量 vector_irq 里面.
+
+在系统初始化的时候，我们会调用 lapic_online，将虚拟中断信号 irq 分配到某个 CPU 上的中断向量.
+
+> do_IRQ已被[common_interrupt](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irq.c#L239)替换
+
+[handle_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kernel/irq.c#L226)->`run_on_irqstack_cond/__handle_irq`-> `desc->handle_irq(desc)` in `__irq_do_set_handler` -> [handle_edge_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/chip.c#L786) -> [handle_irq_event](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/handle.c#L205) -> [handle_irq_event_percpu](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/handle.c#L191) -> [__handle_irq_event_percpu](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/irq/handle.c#L137).
+
+__handle_irq_event_percpu 里面调用了 irq_desc 里每个 hander，这些 hander 是在所有 action 列表中注册的，这才是设置的那个中断处理函数. 如果返回值是 IRQ_HANDLED，就说明处理完毕；如果返回值是 IRQ_WAKE_THREAD 就唤醒线程. 至此，中断的整个过程就结束了.
+
+![](/msic/img/io/26bde4fa2279f66098856c5b2b6d308f.png)
+
+通用中断子系统实现了以下这些标准流控回调函数，这些函数都定义在kernel/irq/chip.c中：
+- handle_simple_irq 用于简易流控处理
+- handle_level_irq 用于电平触发中断的流控处理
+- handle_edge_irq 用于边沿触发中断的流控处理
+- handle_fasteoi_irq 用于需要响应eoi的中断控制器
+- handle_percpu_irq 用于只在单一cpu响应的中断
+- handle_nested_irq 用于处理使用线程的嵌套中断
