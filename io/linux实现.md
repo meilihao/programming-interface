@@ -71,6 +71,8 @@ os用设备驱动程序来对接各个设备控制器.
 有了文件系统接口之后，不但可以通过文件系统的命令行操作设备，也可以通过程序，调用 read、write 函数，像读写文件一样操作设备. 但是有些任务只使用读写很难完成，例如检查特定于设备的功能和属性，超出了通用文件系统的限制. 所以，对于设备来讲，还有一种接口称为 ioctl，表示输入输出控制接口，是用于配置和修改特定设备属性的通用接口.
 
 # 字符设备
+![](/misc/img/io/fba61fe95e0d2746235b1070eb4c18cd.jpeg)
+
 罗技鼠标, 驱动代码在 [drivers/input/mouse/logibm.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/input/mouse/logibm.c).
 打印机，驱动代码在 [drivers/char/lp.c](https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/char/lp.c).
 
@@ -199,3 +201,108 @@ EXPORT_SYMBOL(vfs_mknod);
 
 通过`sudo mount |grep "/dev"`发现`/dev`挂载的是devtmpfs.
 
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc3/source/drivers/base/devtmpfs.c#L66
+static struct file_system_type internal_fs_type = {
+	.name = "devtmpfs",
+#ifdef CONFIG_TMPFS
+	.init_fs_context = shmem_init_fs_context,
+	.parameters	= shmem_fs_parameters,
+#else
+	.init_fs_context = ramfs_init_fs_context,
+	.parameters	= ramfs_fs_parameters,
+#endif
+	.kill_sb = kill_litter_super,
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3774
+static const struct inode_operations shmem_dir_inode_operations = {
+#ifdef CONFIG_TMPFS
+	.create		= shmem_create,
+	.lookup		= simple_lookup,
+	.link		= shmem_link,
+	.unlink		= shmem_unlink,
+	.symlink	= shmem_symlink,
+	.mkdir		= shmem_mkdir,
+	.rmdir		= shmem_rmdir,
+	.mknod		= shmem_mknod,
+	.rename		= shmem_rename2,
+	.tmpfile	= shmem_tmpfile,
+#endif
+#ifdef CONFIG_TMPFS_XATTR
+	.listxattr	= shmem_listxattr,
+#endif
+#ifdef CONFIG_TMPFS_POSIX_ACL
+	.setattr	= shmem_setattr,
+	.set_acl	= simple_set_acl,
+#endif
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ramfs/inode.c#L150
+
+static const struct inode_operations ramfs_dir_inode_operations = {
+	.create		= ramfs_create,
+	.lookup		= simple_lookup,
+	.link		= simple_link,
+	.unlink		= simple_unlink,
+	.symlink	= ramfs_symlink,
+	.mkdir		= ramfs_mkdir,
+	.rmdir		= simple_rmdir,
+	.mknod		= ramfs_mknod,
+	.rename		= simple_rename,
+};
+```
+
+这里可以看出，devtmpfs 在挂载的时候，有两种模式，一种是 ramfs，一种是 shmem 都是基于内存的文件系统.
+
+> ramfs是Linux下一种基于RAM做存储的文件系统. 由于ramfs的实现就相当于把RAM作为最后一层的存储，所以在ramfs中不会使用swap.
+> shmem也是Linux下的一个文件系统，它将所有的文件都保存在虚拟内存中，umount tmpfs后所有的数据也会丢失，tmpfs就是ramfs的衍生品. tmpfs使用了虚拟内存的机制，它会进行swap，但是它有一个相比ramfs的好处：mount时指定的size参数是起作用的，这样就能保证系统的安全，而不是像ramfs那样，一不留心因为写入数据太大吃光系统所有内存导致系统被hang住.
+
+这两个 mknod 虽然实现不同，但是都会调用到同一个函数 [init_special_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/inode.c#L2110).
+
+显然这个文件是个特殊文件，inode 也是特殊的. 这里这个 inode 可以关联字符设备、块设备、FIFO 文件、Socket.
+
+这里的 inode 的 file_operations 指向一个 def_chr_fops.
+
+另外，inode 的 i_rdev 指向这个设备的 dev_t. 通过这个 dev_t，可以找到之前刚加载的字符设备 cdev.
+
+到目前为止，只是创建了 /dev 下面的一个文件，并且和相应的设备号关联起来. 但是，还没有打开这个 /dev 下面的设备文件.
+
+打开文件的进程的 task_struct 里，有一个数组代表它打开的文件，下标就是文件描述符 fd，每一个打开的文件都有一个 struct file 结构，会指向一个 dentry 项. dentry 可以用来关联 inode. 这个 dentry 就是上面 mknod 的时候创建的. 在进程里面调用 open 函数，最终会调用到这个特殊的 inode 的 open 函数，也就是 [chrdev_open](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/char_dev.c#L373).
+
+在chrdev_open里面，首先看这个 inode 的 i_cdev，是否已经关联到 cdev. 如果第一次打开，当然没有. 没有没关系，inode 里面有 i_rdev 呀，也就是有 dev_t. 可以通过它在 cdev_map 中找 cdev. 找到后就将 inode 的 i_cdev，关联到找到的 cdev new.
+
+找到 cdev 就好办了. cdev 里面有 file_operations，这是设备驱动程序自己定义的, 可以通过它来操作设备驱动程序，把它付给 struct file 里面的 file_operations. 这样以后操作文件描述符，就是直接操作设备了. 最后，需要调用设备驱动程序的 file_operations 的 open 函数，真正打开设备. 对于打印机，调用的是 lp_open. 对于鼠标调用的是 input_proc_devices_open，最终会调用到 logibm_open.
+
+## 写入设备
+![打印机驱动写入的过程](/misc/img/fs/9bd3cd8a8705dbf69f889ba3b2b5c2e2.jpeg)
+
+写入一个字符设备，就是用文件系统的标准接口 write，参数文件描述符 fd，在内核里面调用的 sys_write，在 sys_write 里面根据文件描述符 fd 得到 struct file 结构, 接下来再调用 vfs_write.
+
+在 __vfs_write 里面，会调用 struct file 结构里的 file_operations 的 write 函数. 之前打开字符设备的时候，已经将 struct file 结构里面的 file_operations 指向了设备驱动程序的 file_operations 结构，所以这里的 write 函数最终会调用到 lp_write.
+
+这个设备驱动程序的写入函数的实现还是比较典型的, 先是调用 copy_from_user 将数据从用户态拷贝到内核态的缓存中，然后调用 parport_write 写入外部设备. 这里还有一个 schedule 函数，也即写入的过程中，给其他线程抢占 CPU 的机会. 然后，如果 count 还是大于 0，也就是数据还没有写完，那就接着 copy_from_user，接着 parport_write，直到写完为止.
+
+## 使用 IOCTL 控制设备
+调用 ioctl 可执行一些特殊的 I/O 操作.
+![](/misc/img/fs/c3498dad4f15712529354e0fa123c31d.jpeg)
+
+[ioctl](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ioctl.c#L760)也是一个系统调用.
+
+其中，fd 是这个设备的文件描述符，cmd 是传给这个设备的命令，arg 是命令的参数. 其中，对于命令和命令的参数，使用 ioctl 系统调用的用户和驱动程序的开发人员约定好行为即可.
+
+其实 cmd 看起来是一个 int，其实他的组成比较复杂，它由几部分组成：
+1. 最低八位为 NR，是命令号
+1. 然后八位是 TYPE，是类型
+1. 然后十四位是参数的大小；
+1. 最高两位是 DIR，是方向，表示写入、读出，还是读写
+
+由于组成比较复杂，[有一些宏](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/asm-generic/ioctl.h#L85)是专门用于组成这个 cmd 值的.
+
+在用户程序中，可以通过[上面的“Used to create numbers”这些宏](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/asm-generic/ioctl.h#L85)，根据参数生成 cmd，在驱动程序中，可以通过[下面的“used to decode ioctl numbers”这些宏](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/asm-generic/ioctl.h#L94)，解析 cmd 后，执行指令.
+
+ioctl 中会调用 [do_vfs_ioctl](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ioctl.c#L667)，这里面对于已经定义好的 cmd，进行相应的处理. 如果不是默认定义好的 cmd，则执行默认操作. 对于普通文件，调用 file_ioctl；对于其他文件调用 vfs_ioctl.
+
+由于这里是设备驱动程序，所以调用的是 vfs_ioctl.
+
+这里面调用的是 struct file 里 file_operations 的 unlocked_ioctl 函数. 之前初始化设备驱动的时候，已经将 file_operations 指向设备驱动的 file_operations 了, 这里调用的是设备驱动的 unlocked_ioctl. 对于打印机程序来讲，调用的是 lp_ioctl. 可以看出来，它里面就是 switch 语句，它会根据不同的 cmd，做不同的操作.
