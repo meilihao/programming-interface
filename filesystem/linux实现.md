@@ -1,4 +1,6 @@
 # fs
+> ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
+
 ```c
 // from `man 2 stat`
 int stat(const char *pathname, struct stat *statbuf);
