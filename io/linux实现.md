@@ -741,3 +741,155 @@ __handle_irq_event_percpu 里面调用了 irq_desc 里每个 hander，这些 han
 - handle_fasteoi_irq 用于需要响应eoi的中断控制器
 - handle_percpu_irq 用于只在单一cpu响应的中断
 - handle_nested_irq 用于处理使用线程的嵌套中断
+
+## 块设备
+块设备涉及三种文件系统.
+
+当插入一个usb盘时, mknod 还是会创建在 /dev 路径下面，这一点和字符设备一样. /dev 路径下面是 devtmpfs 文件系统. 这是块设备遇到的第一个文件系统. kernel会为这个块设备文件，分配一个特殊的 inode，这一点和字符设备也是一样的. 只不过字符设备走 S_ISCHR 这个分支 by [init_special_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/inode.c#L2110)，对应 inode 的 file_operations 是 def_chr_fops；而块设备走 S_ISBLK 这个分支，对应的 inode 的 file_operations 是 def_blk_fops, 且inode 里面的 i_rdev 被设置成了块设备的设备号 dev_t.
+
+特殊 inode 的默认 file_operations 是 [def_blk_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L2150)，就像字符设备一样，有打开、读写这个块设备文件，但是常规操作不会这样做, 而会将这个块设备文件 mount 到一个文件夹下面.
+
+> 打开这个块设备的操作 blkdev_open, 它里面调用的是 blkdev_get 打开这个块设备.
+
+接下来，要调用 mount，将这个块设备文件挂载到一个文件夹下面. 如果这个块设备原来被格式化为一种文件系统的格式，例如 ext4，那调用的就是 ext4 `struct file_system_type [ext4_fs_type](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/super.c#L6262)`相应的 mount 操作. 这是块设备遇到的第二个文件系统，也是向这个块设备读写文件，需要基于文件系统.
+
+在将一个硬盘的块设备 mount 成为 ext4 的时候，会调用 [ext4_mount](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/super.c#L6200)->[mount_bdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/super.c#L1363).
+
+mount_bdev 主要做了两件大事情:
+1. blkdev_get_by_path 根据 /dev/xxx 这个名字，找到相应的设备并打开它
+1. sget 根据打开的设备文件，填充 ext4 文件系统的 super_block，从而以此为基础，建立一整套文件系统的体系.
+
+一旦这套体系建立起来以后，对于文件的读写都是通过 ext4 文件系统这个体系进行的，创建的 inode 结构也是指向 ext4 文件系统的.
+
+mount_bdev 做的第一件大事情，通过 [blkdev_get_by_path](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L1780)，根据设备名 /dev/xxx，得到 struct block_device *bdev.
+
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L1780
+/**
+ * blkdev_get_by_path - open a block device by name
+ * @path: path to the block device to open
+ * @mode: FMODE_* mask
+ * @holder: exclusive holder identifier
+ *
+ * Open the blockdevice described by the device file at @path.  @mode
+ * and @holder are identical to blkdev_get().
+ *
+ * On success, the returned block_device has reference count of one.
+ *
+ * CONTEXT:
+ * Might sleep.
+ *
+ * RETURNS:
+ * Pointer to block_device on success, ERR_PTR(-errno) on failure.
+ */
+struct block_device *blkdev_get_by_path(const char *path, fmode_t mode,
+					void *holder)
+{
+	struct block_device *bdev;
+	int err;
+
+	bdev = lookup_bdev(path);
+	if (IS_ERR(bdev))
+		return bdev;
+
+	err = blkdev_get(bdev, mode, holder);
+	if (err)
+		return ERR_PTR(err);
+
+	if ((mode & FMODE_WRITE) && bdev_read_only(bdev)) {
+		blkdev_put(bdev, mode);
+		return ERR_PTR(-EACCES);
+	}
+
+	return bdev;
+}
+EXPORT_SYMBOL(blkdev_get_by_path);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L2176
+/**
+ * lookup_bdev  - lookup a struct block_device by name
+ * @pathname:	special file representing the block device
+ *
+ * Get a reference to the blockdevice at @pathname in the current
+ * namespace if possible and return it.  Return ERR_PTR(error)
+ * otherwise.
+ */
+struct block_device *lookup_bdev(const char *pathname)
+{
+	struct block_device *bdev;
+	struct inode *inode;
+	struct path path;
+	int error;
+
+	if (!pathname || !*pathname)
+		return ERR_PTR(-EINVAL);
+
+	error = kern_path(pathname, LOOKUP_FOLLOW, &path);
+	if (error)
+		return ERR_PTR(error);
+
+	inode = d_backing_inode(path.dentry);
+	error = -ENOTBLK;
+	if (!S_ISBLK(inode->i_mode))
+		goto fail;
+	error = -EACCES;
+	if (!may_open_dev(&path))
+		goto fail;
+	error = -ENOMEM;
+	bdev = bd_acquire(inode);
+	if (!bdev)
+		goto fail;
+out:
+	path_put(&path);
+	return bdev;
+fail:
+	bdev = ERR_PTR(error);
+	goto out;
+}
+EXPORT_SYMBOL(lookup_bdev);
+```
+
+blkdev_get_by_path 干了两件事情:
+1. lookup_bdev 根据设备路径 /dev/xxx 得到 block_device
+1, 打开这个设备，调用 blkdev_get. 上面分析过 def_blk_fops 的默认打开设备函数 blkdev_open，它也是调用 blkdev_get 的. 块设备的打开往往不是直接调用设备文件的打开函数，而是调用 mount 来打开的.
+
+lookup_bdev 这里的 pathname 是设备的文件名，例如 /dev/xxx. 这个文件是在 devtmpfs 文件系统中的，kern_path 可以在这个文件系统里面，一直找到它对应的 dentry. 接下来，d_backing_inode 会获得 inode. 这个 inode 就是那个 init_special_inode 生成的特殊 inode.
+
+接下来，bd_acquire 通过这个特殊的 inode，找到 struct block_device.
+
+[bd_acquire](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L946) 中最主要的就是调用 [bdget](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L881)，它的参数是特殊 inode 的 i_rdev. 这里面在 mknod 的时候，放的是设备号 dev_t.
+
+在 bdget 中，就遇到了第三个文件系统，bdev 伪文件系统. bdget 函数根据传进来的 dev_t，在 [blockdev_superblock](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L837) 这个文件系统里面找到 inode. 这里注意，这个 inode 已经不是 devtmpfs 文件系统的 inode 了. blockdev_superblock 的初始化在整个系统初始化的时候，会调用 [bdev_cache_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L837) 进行初始化.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L837
+static struct file_system_type bd_type = {
+	.name		= "bdev",
+	.init_fs_context = bd_init_fs_context,
+	.kill_sb	= kill_anon_super,
+};
+
+struct super_block *blockdev_superblock __read_mostly;
+EXPORT_SYMBOL_GPL(blockdev_superblock);
+
+void __init bdev_cache_init(void)
+{
+	int err;
+	static struct vfsmount *bd_mnt;
+
+	bdev_cachep = kmem_cache_create("bdev_cache", sizeof(struct bdev_inode),
+			0, (SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|
+				SLAB_MEM_SPREAD|SLAB_ACCOUNT|SLAB_PANIC),
+			init_once);
+	err = register_filesystem(&bd_type);
+	if (err)
+		panic("Cannot register bdev pseudo-fs");
+	bd_mnt = kern_mount(&bd_type);
+	if (IS_ERR(bd_mnt))
+		panic("Cannot create bdev pseudo-fs");
+	blockdev_superblock = bd_mnt->mnt_sb;   /* For writeback */
+}
+```
+
+所有表示块设备的 inode 都保存在伪文件系统 bdev 中，这些对用户层不可见，主要为了方便块设备的管理. Linux 将块设备的 block_device 和 bdev 文件系统的块设备的 inode，通过 [struct bdev_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L837) 进行关联. 所以，在 bdget 中，BDEV_I 就是通过 bdev 文件系统的 inode，获得整个 struct bdev_inode 结构的地址，然后取成员 bdev，得到 block_device.
