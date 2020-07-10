@@ -743,6 +743,9 @@ __handle_irq_event_percpu 里面调用了 irq_desc 里每个 hander，这些 han
 - handle_nested_irq 用于处理使用线程的嵌套中断
 
 ## 块设备
+参考:
+- [块层介绍 第二篇: request层](https://blog.csdn.net/juS3Ve/article/details/79224068)
+
 块设备涉及三种文件系统.
 
 当插入一个usb盘时, mknod 还是会创建在 /dev 路径下面，这一点和字符设备一样. /dev 路径下面是 devtmpfs 文件系统. 这是块设备遇到的第一个文件系统. kernel会为这个块设备文件，分配一个特殊的 inode，这一点和字符设备也是一样的. 只不过字符设备走 S_ISCHR 这个分支 by [init_special_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/inode.c#L2110)，对应 inode 的 file_operations 是 def_chr_fops；而块设备走 S_ISBLK 这个分支，对应的 inode 的 file_operations 是 def_blk_fops, 且inode 里面的 i_rdev 被设置成了块设备的设备号 dev_t.
@@ -893,3 +896,492 @@ void __init bdev_cache_init(void)
 ```
 
 所有表示块设备的 inode 都保存在伪文件系统 bdev 中，这些对用户层不可见，主要为了方便块设备的管理. Linux 将块设备的 block_device 和 bdev 文件系统的块设备的 inode，通过 [struct bdev_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L837) 进行关联. 所以，在 bdget 中，BDEV_I 就是通过 bdev 文件系统的 inode，获得整个 struct bdev_inode 结构的地址，然后取成员 bdev，得到 block_device.
+
+绕了一大圈，终于通过设备文件 /dev/xxx，获得了设备的结构 [block_device](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/fs.h#L475). 有点儿绕, 再捋一下, 设备文件 /dev/xxx 在 devtmpfs 文件系统中，找到 devtmpfs 文件系统中的 inode，里面有 dev_t. 可以通过 dev_t，在伪文件系统 bdev 中找到对应的 inode，然后根据 struct bdev_inode 找到关联的 block_device.
+
+接下来，blkdev_get_by_path 开始做第二件事情，在找到 block_device 之后，要调用 blkdev_get 打开这个设备. blkdev_get 会调用 [__blkdev_get](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L1550).
+
+[block_device](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/fs.h#L475)和其他几个结构有着千丝万缕的联系，比较复杂. 这是因为块设备本身就比较复杂.
+
+比方说，有一个磁盘 /dev/sda，既可以把它整个格式化成一个文件系统，也可以把它分成多个分区 /dev/sda1、 /dev/sda2，然后把每个分区格式化成不同的文件系统. 如果访问某个分区的设备文件 /dev/sda2，就应该能知道它是哪个磁盘设备的. 按说它们的驱动应该是一样的. 如果访问整个磁盘的设备文件 /dev/sda，也应该能知道它分了几个区域，所以就有了下图这个复杂的关系结构.
+
+![](/misc/img/io/85f4d83e7ebf2aadf7ffcd5fd393b176.png)
+
+struct gendisk 是用来描述整个设备的，因而上面的例子中，gendisk 只有一个实例，指向 /dev/sda. 它的定义如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/genhd.h#L170
+struct gendisk {
+	/* major, first_minor and minors are input parameters only,
+	 * don't use directly.  Use disk_devt() and disk_max_parts().
+	 */
+	int major;			/* major number of driver */
+	int first_minor;
+	int minors;                     /* maximum number of minors, =1 for
+                                         * disks that can't be partitioned. */
+
+	char disk_name[DISK_NAME_LEN];	/* name of major driver */
+
+	unsigned short events;		/* supported events */
+	unsigned short event_flags;	/* flags related to event processing */
+
+	/* Array of pointers to partitions indexed by partno.
+	 * Protected with matching bdev lock but stat and other
+	 * non-critical accesses use RCU.  Always access through
+	 * helpers.
+	 */
+	struct disk_part_tbl __rcu *part_tbl;
+	struct hd_struct part0;
+
+	const struct block_device_operations *fops;
+	struct request_queue *queue;
+	void *private_data;
+
+	int flags;
+	struct rw_semaphore lookup_sem;
+	struct kobject *slave_dir;
+
+	struct timer_rand_state *random;
+	atomic_t sync_io;		/* RAID */
+	struct disk_events *ev;
+#ifdef  CONFIG_BLK_DEV_INTEGRITY
+	struct kobject integrity_kobj;
+#endif	/* CONFIG_BLK_DEV_INTEGRITY */
+#if IS_ENABLED(CONFIG_CDROM)
+	struct cdrom_device_info *cdi;
+#endif
+	int node_id;
+	struct badblocks *bb;
+	struct lockdep_map lockdep_map;
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/genhd.h#L54
+struct hd_struct {
+	sector_t start_sect;
+	/*
+	 * nr_sects is protected by sequence counter. One might extend a
+	 * partition while IO is happening to it and update of nr_sects
+	 * can be non-atomic on 32bit machines with 64bit sector_t.
+	 */
+	sector_t nr_sects;
+#if BITS_PER_LONG==32 && defined(CONFIG_SMP)
+	seqcount_t nr_sects_seq;
+#endif
+	unsigned long stamp;
+	struct disk_stats __percpu *dkstats;
+	struct percpu_ref ref;
+
+	sector_t alignment_offset;
+	unsigned int discard_alignment;
+	struct device __dev;
+	struct kobject *holder_dir;
+	int policy, partno;
+	struct partition_meta_info *info;
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+	int make_it_fail;
+#endif
+	struct rcu_work rcu_work;
+};
+```
+
+这里 major 是主设备号，first_minor 表示第一个分区的从设备号，minors 表示分区的数目.
+
+disk_name 给出了磁盘块设备的名称.
+
+struct disk_part_tbl 结构里是一个 struct hd_struct 的数组，用于表示各个分区. struct block_device_operations fops 指向对于这个块设备的各种操作. struct request_queue queue 是表示在这个块设备上的请求队列. struct hd_struct 是用来表示某个分区的，比如有两个 hd_struct 的实例，分别指向 /dev/sda1、 /dev/sda2.
+
+在 hd_struct 中，比较重要的成员变量保存了如下的信息：从磁盘的哪个扇区开始，到哪个扇区结束.
+
+而 block_device 既可以表示整个块设备，也可以表示某个分区，比如block_device 有三个实例，分别指向 /dev/sda1、/dev/sda2、/dev/sda.
+
+block_device 的成员变量 bd_disk，指向的 gendisk 就是整个块设备. 这三个实例都指向同一个 gendisk. bd_part 指向的某个分区的 hd_struct，bd_contains 指向的是整个块设备的 block_device.
+
+此时再来看打开设备文件的[__blkdev_get](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L1550)代码，就会清晰很多.
+
+在 __blkdev_get 函数中，先调用 [get_gendisk](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L1079)，根据 block_device 获取 gendisk.
+
+可以想象这里面有两种情况: 第一种情况是，block_device 是指向整个磁盘设备的. 这个时候，只需要根据 dev_t，在 bdev_map 中将对应的 gendisk 拿出来就好.
+
+bdev_map 是干什么的呢？任何一个字符设备初始化的时候，都需要调用 __register_chrdev_region，注册这个字符设备. 对于块设备也是类似的，每一个块设备驱动初始化的时候，都会调用 add_disk 注册一个 gendisk. 这里需要说明一下，gen 的意思是 general 通用的意思，也就是说，所有的块设备，不仅仅是硬盘 disk，都会用一个 gendisk 来表示，然后通过调用链 [add_disk](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/genhd.h#L294)->device_add_disk->blk_register_region，将 dev_t 和一个 gendisk 关联起来，保存在 bdev_map 中.
+
+get_gendisk 要处理的第二种情况是，block_device 是指向某个分区的. 这个时候要先得到 hd_struct，然后通过 hd_struct，找到对应的整个设备的 gendisk，并且把 partno 设置为分区号.
+
+再回到 __blkdev_get 函数中，得到 gendisk. 接下来可以分两种情况:
+1. 如果 partno 为 0，也就是说，打开的是整个设备而不是分区，那就调用 disk_get_part，获取 gendisk 中的分区数组，然后调用 block_device_operations 里面的 open 函数打开设备.
+1. 如果 partno 不为 0，也就是说打开的是分区，那就获取整个设备的 block_device，赋值给变量 struct block_device *whole，然后调用递归 __blkdev_get，打开 whole 代表的整个设备，将 bd_contains 设置为变量 whole. block_device_operations 就是在驱动层了. 例如在 drivers/scsi/sd.c 里面，也就是 MODULE_DESCRIPTION(“SCSI disk (sd) driver”) 中，就有这样的定义.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/sd.c#L1834
+static const struct block_device_operations sd_fops = {
+	.owner			= THIS_MODULE,
+	.open			= sd_open,
+	.release		= sd_release,
+	.ioctl			= sd_ioctl,
+	.getgeo			= sd_getgeo,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl		= sd_compat_ioctl,
+#endif
+	.check_events		= sd_check_events,
+	.revalidate_disk	= sd_revalidate_disk,
+	.unlock_native_capacity	= sd_unlock_native_capacity,
+	.report_zones		= sd_zbc_report_zones,
+	.pr_ops			= &sd_pr_ops,
+};
+```
+
+在驱动层打开了磁盘设备之后，可以看到，在这个过程中，block_device 相应的成员变量该填的都填上了，这才完成了 mount_bdev 的第一件大事，通过 blkdev_get_by_path 得到 block_device.
+
+接下来就是第二件大事情，要通过 sget，将 block_device 塞进 superblock 里面. 注意，调用 [sget](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/super.c#L576) 的时候，有一个参数是一个函数 [set_bdev_super](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/super.c#L1253). 这里面将 block_device 设置进了 super_block. 而 [sget 要做的，就是分配一个 super_block，然后调用 set_bdev_super 这个 callback 函数](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/super.c#L1390). 这里的 super_block 是 ext4 文件系统的 super_block.
+
+好了，到此为止，mount 中一个块设备的过程就结束了. 设备打开了，形成了 block_device 结构，并且塞到了 super_block 中. 有了 ext4 文件系统的 super_block 之后，接下来对于文件的读写过程，就和文件系统那一章的过程一摸一样了. 只要不涉及真正写入设备的代码，super_block 中的这个 block_device 就没啥用处. 这也是为什么文件系统那一章，我们丝毫感觉不到它的存在，但是一旦到了底层，就到了 block_device 起作用的时候了.
+
+![](/msic/img/io/6290b73283063f99d6eb728c26339620.png)
+
+### 直接 I/O 如何访问块设备
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L61
+static void iomap_dio_submit_bio(struct iomap_dio *dio, struct iomap *iomap,
+		struct bio *bio, loff_t pos)
+{
+	atomic_inc(&dio->ref);
+
+	if (dio->iocb->ki_flags & IOCB_HIPRI)
+		bio_set_polled(bio, dio->iocb);
+
+	dio->submit.last_queue = bdev_get_queue(iomap->bdev);
+	if (dio->dops && dio->dops->submit_io)
+		dio->submit.cookie = dio->dops->submit_io(
+				file_inode(dio->iocb->ki_filp),
+				iomap, bio, pos);
+	else
+		dio->submit.cookie = submit_bio(bio);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L1223
+/**
+ * submit_bio - submit a bio to the block device layer for I/O
+ * @bio: The &struct bio which describes the I/O
+ *
+ * submit_bio() is used to submit I/O requests to block devices.  It is passed a
+ * fully set up &struct bio that describes the I/O that needs to be done.  The
+ * bio will be send to the device described by the bi_disk and bi_partno fields.
+ *
+ * The success/failure status of the request, along with notification of
+ * completion, is delivered asynchronously through the ->bi_end_io() callback
+ * in @bio.  The bio must NOT be touched by thecaller until ->bi_end_io() has
+ * been called.
+ */
+blk_qc_t submit_bio(struct bio *bio)
+{
+	if (blkcg_punt_bio_submit(bio))
+		return BLK_QC_T_NONE;
+
+	/*
+	 * If it's a regular read/write or a barrier with data attached,
+	 * go through the normal accounting stuff before submission.
+	 */
+	if (bio_has_data(bio)) {
+		unsigned int count;
+
+		if (unlikely(bio_op(bio) == REQ_OP_WRITE_SAME))
+			count = queue_logical_block_size(bio->bi_disk->queue) >> 9;
+		else
+			count = bio_sectors(bio);
+
+		if (op_is_write(bio_op(bio))) {
+			count_vm_events(PGPGOUT, count);
+		} else {
+			task_io_account_read(bio->bi_iter.bi_size);
+			count_vm_events(PGPGIN, count);
+		}
+
+		if (unlikely(block_dump)) {
+			char b[BDEVNAME_SIZE];
+			printk(KERN_DEBUG "%s(%d): %s block %Lu on %s (%u sectors)\n",
+			current->comm, task_pid_nr(current),
+				op_is_write(bio_op(bio)) ? "WRITE" : "READ",
+				(unsigned long long)bio->bi_iter.bi_sector,
+				bio_devname(bio, b), count);
+		}
+	}
+
+	/*
+	 * If we're reading data that is part of the userspace workingset, count
+	 * submission time as memory stall.  When the device is congested, or
+	 * the submitting cgroup IO-throttled, submission can be a significant
+	 * part of overall IO time.
+	 */
+	if (unlikely(bio_op(bio) == REQ_OP_READ &&
+	    bio_flagged(bio, BIO_WORKINGSET))) {
+		unsigned long pflags;
+		blk_qc_t ret;
+
+		psi_memstall_enter(&pflags);
+		ret = generic_make_request(bio);
+		psi_memstall_leave(&pflags);
+
+		return ret;
+	}
+
+	return generic_make_request(bio);
+}
+EXPORT_SYMBOL(submit_bio);
+```
+
+[iomap_dio_rw](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L406) -> [iomap_apply(inode, pos, count, flags, ops, dio,
+iomap_dio_actor)](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L501) -> [actor(inode, pos, length, data, &iomap,srcmap.type != IOMAP_HOLE ? &srcmap : &iomap)](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/apply.c#L80) -> [iomap_dio_actor](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L372) -> [iomap_dio_bio_actor](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L203) -> [iomap_dio_zero](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L183)/iomap_dio_submit_bio，进而调用 submit_bio 向块设备层提交数据. 其中，参数 struct bio 是将数据传给块设备的通用传输对象.
+
+### 缓存 I/O 如何访问块设备
+参考[/filesystem/linux实现.md#带缓存的写入操作]()中的[ext4_buffered_write_iter](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/file.c#L255) ->[generic_perform_write](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L3258) -> [do_writepages](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/page-writeback.c#L2346) -> [mapping->a_ops->writepages(mapping, wbc);](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/page-writeback.c#L2354), 最后是[ext4_writepages](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/inode.c#L2624)，往设备层写入数据.
+
+ext4_writepages里比较重要的一个数据结构是 [struct mpage_da_data](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/inode.c#L1522), 这里面有文件的 inode、要写入的页的偏移量，还有一个重要的 [struct ext4_io_submit](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/ext4.h#L234)，里面有通用传输对象 bio.
+
+在 ext4_writepages 中，[mpage_prepare_extent_to_map](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/inode.c#L2536) 用于初始化这个 struct mpage_da_data 结构, 接下来的调用链为：mpage_prepare_extent_to_map->[mpage_process_page_bufs](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/inode.c#L2167)->[mpage_submit_page](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/inode.c#L2055)->[ext4_bio_write_page](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/page-io.c#L436)->[io_submit_add_bh](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/page-io.c#L414). 在 io_submit_add_bh 中，此时的 bio 还是空的，因而要调用 [io_submit_init_bio](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/page-io.c#L395)，初始化 bio.
+
+回到 ext4_writepages 中, 在 bio 初始化完之后，就要调用 [ext4_io_submit](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/page-io.c#L373)，提交 I/O. 在这里又是调用 submit_bio，向块设备层传输数据.
+
+### 如何向块设备层提交请求？
+既然不管是直接 I/O，还是缓存 I/O，最后都到了 submit_bio 里面，那就来重点分析一下它. submit_bio 会调用 [generic_make_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L1100), 代码如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L1100
+/**
+ * generic_make_request - re-submit a bio to the block device layer for I/O
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level drivers by stacking block drivers.  All file
+ * systems and other upper level users of the block layer should use
+ * submit_bio() instead.
+ */
+blk_qc_t generic_make_request(struct bio *bio)
+{
+	/*
+	 * bio_list_on_stack[0] contains bios submitted by the current
+	 * make_request_fn.
+	 * bio_list_on_stack[1] contains bios that were submitted before
+	 * the current make_request_fn, but that haven't been processed
+	 * yet.
+	 */
+	struct bio_list bio_list_on_stack[2];
+	blk_qc_t ret = BLK_QC_T_NONE;
+
+	if (!generic_make_request_checks(bio))
+		goto out;
+
+	/*
+	 * We only want one ->make_request_fn to be active at a time, else
+	 * stack usage with stacked devices could be a problem.  So use
+	 * current->bio_list to keep a list of requests submited by a
+	 * make_request_fn function.  current->bio_list is also used as a
+	 * flag to say if generic_make_request is currently active in this
+	 * task or not.  If it is NULL, then no make_request is active.  If
+	 * it is non-NULL, then a make_request is active, and new requests
+	 * should be added at the tail
+	 */
+	if (current->bio_list) {
+		bio_list_add(&current->bio_list[0], bio);
+		goto out;
+	}
+
+	/* following loop may be a bit non-obvious, and so deserves some
+	 * explanation.
+	 * Before entering the loop, bio->bi_next is NULL (as all callers
+	 * ensure that) so we have a list with a single bio.
+	 * We pretend that we have just taken it off a longer list, so
+	 * we assign bio_list to a pointer to the bio_list_on_stack,
+	 * thus initialising the bio_list of new bios to be
+	 * added.  ->make_request() may indeed add some more bios
+	 * through a recursive call to generic_make_request.  If it
+	 * did, we find a non-NULL value in bio_list and re-enter the loop
+	 * from the top.  In this case we really did just take the bio
+	 * of the top of the list (no pretending) and so remove it from
+	 * bio_list, and call into ->make_request() again.
+	 */
+	BUG_ON(bio->bi_next);
+	bio_list_init(&bio_list_on_stack[0]);
+	current->bio_list = bio_list_on_stack;
+	do {
+		struct request_queue *q = bio->bi_disk->queue;
+
+		if (likely(bio_queue_enter(bio) == 0)) {
+			struct bio_list lower, same;
+
+			/* Create a fresh bio_list for all subordinate requests */
+			bio_list_on_stack[1] = bio_list_on_stack[0];
+			bio_list_init(&bio_list_on_stack[0]);
+			ret = do_make_request(bio);
+
+			/* sort new bios into those for a lower level
+			 * and those for the same level
+			 */
+			bio_list_init(&lower);
+			bio_list_init(&same);
+			while ((bio = bio_list_pop(&bio_list_on_stack[0])) != NULL)
+				if (q == bio->bi_disk->queue)
+					bio_list_add(&same, bio);
+				else
+					bio_list_add(&lower, bio);
+			/* now assemble so we handle the lowest level first */
+			bio_list_merge(&bio_list_on_stack[0], &lower);
+			bio_list_merge(&bio_list_on_stack[0], &same);
+			bio_list_merge(&bio_list_on_stack[0], &bio_list_on_stack[1]);
+		}
+		bio = bio_list_pop(&bio_list_on_stack[0]);
+	} while (bio);
+	current->bio_list = NULL; /* deactivate */
+
+out:
+	return ret;
+}
+EXPORT_SYMBOL(generic_make_request);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L1077
+static blk_qc_t do_make_request(struct bio *bio)
+{
+	struct request_queue *q = bio->bi_disk->queue;
+	blk_qc_t ret = BLK_QC_T_NONE;
+
+	if (blk_crypto_bio_prep(&bio)) {
+		if (!q->make_request_fn)
+			return blk_mq_make_request(q, bio);
+		ret = q->make_request_fn(q, bio);
+	}
+	blk_queue_exit(q);
+	return ret;
+}
+```
+
+这里的逻辑有点复杂，先来看大的逻辑, 在 do-while 中，先是获取一个请求队列 request_queue，然后调用 [do_make_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L1077) 函数, 用于处理 request.
+
+![](/misc/img/io/c9f6a08075ba4eae3314523fa258363c.png)
+
+### 块设备队列结构
+参考:
+- [Multi-queue 架构分析](https://www.sohu.com/a/395091887_467784)
+- [Linux存储IO栈（4）-- SCSI子系统之概述](https://blog.csdn.net/haleycomet/article/details/52596355?locationNum=14&fps=1)
+
+**Linux 5.8 已经完全切到multi-queue架构，因此single-queue下的IO调度算法在最新内核可能已经销声匿迹了.**
+
+如果再来看 struct block_device 结构和 struct gendisk 结构，就会发现，每个块设备都有一个请求队列 [struct request_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/blkdev.h#L397)，用于处理上层发来的请求. 在每个块设备的驱动程序初始化的时候，会生成一个 request_queue.
+
+> (struct request_queue).(*request_fn) deleted in a1ce35fa49852db60fc6e268038530be533c5b15 for "block: remove dead elevator code"
+
+在请求队列 request_queue 上，首先是有一个链表 list_head，保存请求 [request](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/blkdev.h#L131).
+
+每个 request 包括一个链表的 [struct bio](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/blk_types.h#L157)，有指针指向一头一尾.
+
+在 bio 中，bi_next 是链表中的下一项，struct bio_vec 指向一组页面.
+
+![](/misc/img/io/3c473d163b6e90985d7301f115ab660e.jpeg)
+
+在请求队列 request_queue 上，还有1个重要的函数，一个是 make_request_fn 函数，用于生成 request.
+
+### 块设备的初始化
+以 scsi 驱动为例, 在初始化设备驱动的时候，会调用 [scsi_alloc_sdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_scan.c#L215) -> [scsi_mq_alloc_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1860), 该函数中主要进行设备队列的初始化 -> [blk_mq_init_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2906), 根据set信息进行与该设备队列相关的信息参数初始化.
+
+**因为8cf7961dab42c9177a556b719c15f5b9449c24d1 scsi request_queue可不设置make_request_fn**.
+
+[blk_mq_init_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2906)->[blk_mq_init_queue_data](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2884)->[blk_mq_init_allocated_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3057), 在 blk_mq_init_allocated_queue 中，会初始化 I/O 的电梯算法[`elevator_init_mq(q)`](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3111).
+
+> blk_mq_init_sq_queue是Create a new request queue with only one hw_queue即single-queue(from kernel 4.20). 不推荐使用, 可用`blk_mq_alloc_tag_set () + blk_mq_init_queue ()`替代, example可参考[linux内核之块设备驱动图解](https://my.oschina.net/fileoptions/blog/951759).
+
+[elevator_init_mq](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L530) 中会根据名称来指定电梯算法，如果没有选择，那就默认使用 [mq-deadline](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/mq-deadline.c#L774).
+
+> blk_queue_make_request() deleted in 3d745ea5b095a3985129e162900b7e6c22518a9d for "block: simplify queue allocation"
+> blk_mq_init_allocated_queue中的`q->make_request_fn = blk_mq_make_request`deleted in 8cf7961dab42c9177a556b719c15f5b9449c24d1 for "block: bypass ->make_request_fn for blk-mq drivers".
+> [blk_alloc_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L585) 可把 make_request_fn 设置为 make_request
+
+#### 电梯算法
+参考:
+- [如何选择IO调度器](https://blog.csdn.net/keocce/article/details/106016416)
+
+它有很多种类型，定义为 [elevator_type](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/elevator.h#L66). 下面来逐一说一下:
+1. [(struct request_queue).elevator == NULL](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L787) : 调度算法是最简单的 IO 调度算法
+
+    它将 IO 请求放入到一个 FIFO 队列中，然后逐个执行这些 IO 请求
+1. [struct elevator_type mq_deadline](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/mq-deadline.c#L774) 算法
+
+    要保证每个 IO 请求在一定的时间内一定要被服务到，以此来避免某个请求饥饿. 为了完成这个目标，算法中引入了两类队列，一类队列用来对请求按起始扇区序号进行排序，通过红黑树来组织，称为 sort_list，按照此队列传输性能会比较高；另一类队列对请求按它们的生成时间进行排序，由链表来组织，称为 fifo_list，并且每一个请求都有一个期限值
+1. [struct elevator_type iosched_bfq_mq](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/bfq-iosched.c#L6788), 全称是Budget Fair Queuing (BFQ), base on CFQ 完全公平调度算法. 
+
+    它不会为磁盘分配每个时间段固定的时间片，而是为该过程分配以扇区数衡量的“预算”，并使用启发式方法, 可能更适合于旋转驱动器和慢速SSD. 在其默认配置中，它专注于提供最低的延迟而不是实现最大的吞吐量.
+1. [struct elevator_type kyber_sched](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/kyber-iosched.c#L1010)
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L49
+static LIST_HEAD(elv_list);
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L530
+int elv_register(struct elevator_type *e)
+{
+	/* create icq_cache if requested */
+	if (e->icq_size) {
+		if (WARN_ON(e->icq_size < sizeof(struct io_cq)) ||
+		    WARN_ON(e->icq_align < __alignof__(struct io_cq)))
+			return -EINVAL;
+
+		snprintf(e->icq_cache_name, sizeof(e->icq_cache_name),
+			 "%s_io_cq", e->elevator_name);
+		e->icq_cache = kmem_cache_create(e->icq_cache_name, e->icq_size,
+						 e->icq_align, 0, NULL);
+		if (!e->icq_cache)
+			return -ENOMEM;
+	}
+
+	/* register, don't allow duplicate names */
+	spin_lock(&elv_list_lock);
+	if (elevator_find(e->elevator_name, 0)) {
+		spin_unlock(&elv_list_lock);
+		kmem_cache_destroy(e->icq_cache);
+		return -EBUSY;
+	}
+	list_add_tail(&e->list, &elv_list);
+	spin_unlock(&elv_list_lock);
+
+	printk(KERN_INFO "io scheduler %s registered\n", e->elevator_name);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(elv_register);
+```
+
+所有的elevator_type都注册在elv_list中.
+
+```bash
+# cat  /sys/block/nvme0n1/queue/scheduler
+[none] mq-deadline # 当前我电脑支持的算法. `[]`表示正在使用的算法
+# echo none >/sys/block/nvme0n1/queue/scheduler # 切换算法
+```
+
+### 请求提交与调度
+接下来，回到 generic_make_request 函数中, 调用do_make_request, scsi的话就是调用了[blk_mq_make_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2023).
+
+至此，解析完了 generic_make_request 中最重要的两大逻辑：获取一个请求队列 request_queue 和`blk_mq_make_request或调用这个队列的 make_request_fn 函数`.
+
+其实，generic_make_request 其他部分也很令人困惑, 感觉里面有特别多的 struct bio_list，倒腾过来，倒腾过去的. 这是因为，很多块设备是有层次的.
+
+比如，用两块硬盘组成 RAID，两个 RAID 盘组成 LVM，然后就可以在 LVM 上创建一个块设备给用户用，我们称接近用户的块设备为高层次的块设备，接近底层的块设备为低层次（lower）的块设备. 这样，generic_make_request 把 I/O 请求发送给高层次的块设备的时候，会调用高层块设备的 make_request_fn，高层块设备又要调用 generic_make_request，将请求发送给低层次的块设备. 虽然块设备的层次不会太多，但是对于代码 generic_make_request 来讲，这可是递归的调用，一不小心，就会递归过深，无法正常退出，而且内核栈的大小又非常有限，所以要比较小心.
+
+这里你是否理解了 struct bio_list bio_list_on_stack[2]的名字为什么叫 stack 呢？其实，将栈的操作变成对于队列的操作，队列不在栈里面，会大很多. 每次 generic_make_request 被当前任务调用的时候，将 current->bio_list 设置为 bio_list_on_stack，并在 generic_make_request 的一开始就判断 current->bio_list 是否为空. 如果不为空，说明已经在 generic_make_request 的调用里面了，就不必调用 make_request_fn 进行递归了，直接把请求加入到 bio_list 里面就可以了，这就实现了递归的及时退出. 如果 current->bio_list 为空，那就将 current->bio_list 设置为 bio_list_on_stack 后，进入 do-while 循环，做 generic_make_request 的两大逻辑. 但是，当前的队列调用 make_request_fn 的时候，在 make_request_fn 的具体实现中，会生成新的 bio. 调用更底层的块设备，也会生成新的 bio，都会放在 bio_list_on_stack 的队列中，是一个边处理还边创建的过程.
+
+bio_list_on_stack[1] = bio_list_on_stack[0]这一句在 make_request_fn 之前，将之前队列里面遗留没有处理的保存下来，接着 bio_list_init 将 bio_list_on_stack[0]设置为空，然后调用 make_request_fn，在 make_request_fn 里面如果有新的 bio 生成，都会加到 bio_list_on_stack[0]这个队列里面来.
+
+make_request_fn 执行完毕后，可以想象 bio_list_on_stack[0]可能又多了一些 bio 了，接下来的循环中调用 bio_list_pop 将 bio_list_on_stack[0]积攒的 bio 拿出来，分别放在两个队列 lower 和 same 中，顾名思义，lower 就是更低层次的块设备的 bio，same 是同层次的块设备的 bio.
+
+接下来将 lower、same 以及 bio_list_on_stack[1] 都取出来，放在 bio_list_on_stack[0]统一进行处理. 当然应该 lower 优先了，因为只有底层的块设备的 I/O 做完了，上层的块设备的 I/O 才能做完. 到这里，generic_make_request 的逻辑才算解析完毕. 对于写入的数据来讲，其实仅仅是将 bio 请求放在请求队列上，设备驱动程序还要往设备里面写.
+
+### 请求的处理
+
+[blk_mq_dispatch_rq_list()](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L1210)的主体是一个do while循环, 通过`q->mq_ops->queue_rq(hctx, &bd)`直接将请求放入驱动程序的队列中, 这里是scsi驱动的队列.
+
+[blk_mq_init_allocated_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3057)中调用了`q->mq_ops = set->ops`, 即[scsi_mq_setup_tags](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1872)设置的 blk_mq_tag_set 与 [blk_mq_init_allocated_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3057)的 request_queue 关联了起来.
+
+[scsi_add_host](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/scsi/scsi_host.h#L746)->[scsi_add_host_with_dma](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/hosts.c#L208)->[scsi_mq_setup_tags](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1872)设置了`tag_set->ops = &scsi_mq_ops/&scsi_mq_ops_no_commit`.
+
+因此`q->mq_ops->queue_rq`<=>[struct blk_mq_ops scsi_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1842).queue_rq即[scsi_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1622)封装更加底层的指令，给设备控制器下指令，实施真正的 I/O 操作.
+
+### scsi
+scsi低层驱动是面向主机适配器的，低层驱动被加载时，需要添加主机适配器. 主机适配器添加有两种方式：1.在PCI子系统扫描挂载驱动时添加；2.手动方式添加. 所有基于硬件PCI接口的主机适配器都采用第一种方式. 添加主机适配器包括两个步骤：
+1. 分别主机适配器数据结构scsi_host_alloc
+2. 将主机适配器添加到系统scsi_add_host
+
+可参考aha1542适配器的代码[aha1542_hw_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/aha1542.c#L729).

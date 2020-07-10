@@ -1321,7 +1321,7 @@ ext4_file_read_iter 和 ext4_file_write_iter有相似的逻辑，就是要区分
 ext4_dio_write_iter最终会调到[iomap_dio_rw](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/iomap/direct-io.c#L406)，这就跨过了缓存层，到了通用块层，最终到了文件系统的设备驱动层.
 
 ### 带缓存的写入操作
-generic_perform_write函数里，是一个 while 循环. 需要找出这次写入影响的所有的页，然后依次写入. 对于每一个循环，主要做四件事情：
+[ext4_buffered_write_iter](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/file.c#L255) ->[generic_perform_write](https://elixir.bootlin.com/linux/v5.8-rc3/source/mm/filemap.c#L3258), generic_perform_write函数里，是一个 while 循环. 需要找出这次写入影响的所有的页，然后依次写入. 对于每一个循环，主要做四件事情：
 1. 对于每一页，先调用 [address_space_operations](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/inode.c#L3605) 的 write_begin 做一些准备
 1. 调用 [iov_iter_copy_from_user_atomic](https://elixir.bootlin.com/linux/v5.8-rc3/source/lib/iov_iter.c#L987)，将写入的内容从用户态拷贝到内核态的页中
 1. 调用 address_space 的 write_end 完成写操作
@@ -1341,7 +1341,7 @@ pagecache_get_page 就是根据 pgoff_t index 这个长整型，在这棵树里�
 
 第二步，调用 iov_iter_copy_from_user_atomic. 先将分配好的页面调用 kmap_atomic 映射到内核里面的一个虚拟地址，然后将用户态的数据拷贝到内核态的页面的虚拟地址中，调用 kunmap_atomic 把内核里面的映射删除.
 
-第三步，调用 ext4_write_end 完成写入. 这里面会调用 ext4_journal_stop 完成日志的写入，会调用 block_write_end->__block_commit_write->mark_buffer_dirty，将修改过的缓存标记为脏页. 可以看出，其实所谓的完成写入，并没有真正写入硬盘，仅仅是写入缓存后，标记为脏页.
+第三步，调用 ext4_write_end 完成写入. 这里面会调用 ext4_journal_stop 完成日志的写入，会调用 block_write_end->__block_commit_write->mark_buffer_dirty，将修改过的缓存标记为脏页. 可以看出，其实所谓的完成写入，并没有真正写入硬盘，仅仅是写入缓存后，标记为脏页. 写操作由一个 timer 触发，那个时候，才调用 wb_workfn 往硬盘写入页面.
 
 但是这里有一个问题，数据很危险，一旦宕机就没有了，所以需要一种机制，将写入的页面真正写到硬盘中，称为回写（Write Back）
 
@@ -1381,7 +1381,7 @@ struct workqueue_struct *bdi_wq;
 
 wb_init里面最重要的是 INIT_DELAYED_WORK. 其实就是初始化一个 timer，也即定时器，到时候就执行 wb_workfn 这个函数.
 
-接下来的调用链为：wb_workfn->wb_do_writeback->wb_writeback->writeback_sb_inodes->__writeback_single_inode->do_writepages，写入页面到硬盘.
+接下来的调用链为：[wb_workfn](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/fs-writeback.c#L2060)->[wb_do_writeback](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/fs-writeback.c#L2029)->[wb_writeback](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/fs-writeback.c#L1837)->[writeback_sb_inodes](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/fs-writeback.c#L1624)->[__writeback_single_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/fs-writeback.c#L1441)->[do_writepages](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/page-writeback.c#L2346) -> [mapping->a_ops->writepages(mapping, wbc);](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/page-writeback.c#L2354)，在 do_writepages 中，要调用 mapping->a_ops->writepages，但实际调用的是 ext4_writepages，往设备层写入数据.
 
 在调用 write 的最后，当发现缓存的数据太多的时候，会触发回写，这仅仅是回写的一种场景. 另外还有几种场景也会触发回写：
 - 用户主动调用 sync，将缓存刷到硬盘上去，最终会调用 wakeup_flusher_threads，同步脏页
