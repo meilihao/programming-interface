@@ -2,6 +2,7 @@
 参考:
 - [Linux 系统调用权威指南(2016)](http://arthurchiao.art/blog/system-call-definitive-guide-zh/) 翻译自[The Definitive Guide to Linux System Calls](https://blog.packagecloud.io/eng/2016/04/05/the-definitive-guide-to-linux-system-calls/)
 - [Linux系统分析实验（二）：Linux内核5.0系统调用处理过程](https://www.zybuluo.com/windmelon/note/1428811)
+- [为 Linux 添加系统调用](https://blog.gloriousdays.pw/2017/11/25/add-linux-system-call/)
 
 OS向程序提供的内核服务接口, 调用过程: 用户态 - 系统调用 - 保存寄存器 - 内核态执行系统调用 - 恢复寄存器 - 返回用户态，然后接着运行.
 
