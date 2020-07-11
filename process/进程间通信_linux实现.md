@@ -241,6 +241,169 @@ do_mknodat先是通过 user_path_create 对于这个管道文件创建一个 den
 
 对于共享内存，需要指定一个大小 size，这个一般要申请多大呢？一个最佳实践是，将多个进程需要共享的数据放在一个 struct 里面，然后这里的 size 就应该是这个 struct 的大小. 这样每一个进程得到这块内存后，只要强制将类型转换为这个 struct 类型，就能够访问里面的共享数据了.
 
+### 创建共享内存
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L726
+long ksys_shmget(key_t key, size_t size, int shmflg)
+{
+	struct ipc_namespace *ns;
+	static const struct ipc_ops shm_ops = {
+		.getnew = newseg,
+		.associate = security_shm_associate,
+		.more_checks = shm_more_checks,
+	};
+	struct ipc_params shm_params;
+
+	ns = current->nsproxy->ipc_ns;
+
+	shm_params.key = key;
+	shm_params.flg = shmflg;
+	shm_params.u.size = size;
+
+	return ipcget(ns, &shm_ids(ns), &shm_ops, &shm_params);
+}
+
+SYSCALL_DEFINE3(shmget, key_t, key, size_t, size, int, shmflg)
+{
+	return ksys_shmget(key, size, shmflg);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/util.c#L639
+/**
+ * ipcget - Common sys_*get() code
+ * @ns: namespace
+ * @ids: ipc identifier set
+ * @ops: operations to be called on ipc object creation, permission checks
+ *       and further checks
+ * @params: the parameters needed by the previous operations.
+ *
+ * Common routine called by sys_msgget(), sys_semget() and sys_shmget().
+ */
+int ipcget(struct ipc_namespace *ns, struct ipc_ids *ids,
+			const struct ipc_ops *ops, struct ipc_params *params)
+{
+	if (params->key == IPC_PRIVATE)
+		return ipcget_new(ns, ids, ops, params);
+	else
+		return ipcget_public(ns, ids, ops, params);
+}
+```
+
+这里面调用了抽象的 ipcget, 参数分别为共享内存对应的 shm_ids、对应的操作 shm_ops 以及对应的参数 shm_params.
+
+如果 params->key 设置为 IPC_PRIVATE 则永远创建新的，如果不是的话，就会调用 [ipcget_public](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/util.c#L396).
+
+在 ipcget_public 中，会按照 key，去查找 struct kern_ipc_perm. 如果没有找到，那就看是否设置了 IPC_CREAT；如果设置了，就创建一个新的. 如果找到了，就将对应的 id 返回.
+
+按照参数 shm_ops，会调用 [newseg](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L600) 创建新的共享内存.
+
+newseg 函数的第一步，通过 kvmalloc 在直接映射区分配一个 struct shmid_kernel 结构. 这个结构就是用来描述共享内存的. 这个结构最开始就是上面说的 struct kern_ipc_perm 结构. 接下来就是填充这个 struct shmid_kernel 结构，例如 key、权限等.
+
+newseg 函数的第二步，共享内存需要和文件进行关联. 这是因为虚拟地址空间可以和物理内存关联，但是物理内存是某个进程独享的. 虚拟地址空间也可以映射到一个文件，文件是可以跨进程共享的. 而共享内存需要跨进程共享，也应该借鉴文件映射的思路. 只不过不应该映射一个硬盘上的文件，而是映射到一个内存文件系统上的文件. mm/shmem.c 里面就定义了这样一个基于内存的文件系统. 这里一定要注意区分 shmem 和 shm 的区别，前者是一个文件系统，后者是进程通信机制. 在系统初始化的时候，[shmem_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3860) 注册了 shmem 文件系统 shmem_fs_type，并且挂在到了 shm_mnt 下面.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3849
+static struct file_system_type shmem_fs_type = {
+	.owner		= THIS_MODULE,
+	.name		= "tmpfs",
+	.init_fs_context = shmem_init_fs_context,
+#ifdef CONFIG_TMPFS
+	.parameters	= shmem_fs_parameters,
+#endif
+	.kill_sb	= kill_litter_super,
+	.fs_flags	= FS_USERNS_MOUNT,
+};
+
+int __init shmem_init(void)
+{
+	int error;
+
+	shmem_init_inodecache();
+
+	error = register_filesystem(&shmem_fs_type);
+	if (error) {
+		pr_err("Could not register tmpfs\n");
+		goto out2;
+	}
+
+	shm_mnt = kern_mount(&shmem_fs_type);
+	if (IS_ERR(shm_mnt)) {
+		error = PTR_ERR(shm_mnt);
+		pr_err("Could not kern_mount tmpfs\n");
+		goto out1;
+	}
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (has_transparent_hugepage() && shmem_huge > SHMEM_HUGE_DENY)
+		SHMEM_SB(shm_mnt->mnt_sb)->huge = shmem_huge;
+	else
+		shmem_huge = 0; /* just in case it was patched */
+#endif
+	return 0;
+
+out1:
+	unregister_filesystem(&shmem_fs_type);
+out2:
+	shmem_destroy_inodecache();
+	shm_mnt = ERR_PTR(error);
+	return error;
+}
+```
+
+接下来，newseg 函数会调用 [shmem_kernel_file_setup](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L4098)，其实就是在 shmem 文件系统里面创建一个文件.
+
+__shmem_file_setup 会创建新的 shmem 文件对应的 dentry 和 inode，并将它们两个关联起来，然后分配一个 struct file 结构，来表示新的 shmem 文件，并且指向独特的 [shmem_file_operations](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3751).
+
+shmem_file_setup -> [__shmem_file_setup](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L4055)会创建新的 shmem 文件对应的 dentry 和 inode，并将它们两个关联起来，然后分配一个 struct file 结构，来表示新的 shmem 文件，并且指向独特的 shmem_file_operations.
+
+newseg 函数的第三步，通过 ipc_addid 将新创建的 struct shmid_kernel 结构挂到 shm_ids 里面的基数树上，并返回相应的 id，并且将 struct shmid_kernel 挂到当前进程的 sysvshm 队列中.
+
+至此，共享内存的创建就完成了.
+
+### 将共享内存映射到虚拟地址空间
+从上面的代码解析中，共享内存的数据结构 struct shmid_kernel，是通过它的成员 struct file *shm_file，来管理内存文件系统 shmem 上的内存文件的. 无论这个共享内存是否被映射，shm_file 都是存在的. 接下来，要将共享内存映射到虚拟地址空间中. 调用的是 shmat，对应的系统调用如下：
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L600
+SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg)
+{
+	unsigned long ret;
+	long err;
+
+	err = do_shmat(shmid, shmaddr, shmflg, &ret, SHMLBA);
+	if (err)
+		return err;
+	force_successful_syscall_return();
+	return (long)ret;
+}
+```
+
+在[do_shmat函数](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L1418)里面，shm_obtain_object_check 会通过共享内存的 id，在基数树中找到对应的 struct shmid_kernel 结构，通过它找到 shmem 上的内存文件.
+
+接下来，要分配一个 struct shm_file_data，来表示这个内存文件. 将 shmem 中指向内存文件的 shm_file 赋值给 struct shm_file_data 中的 file 成员.
+
+然后，创建了一个 struct file，指向的也是 shmem 中的内存文件.
+
+为什么要再创建一个呢？这两个的功能不同，shmem 中 shm_file 用于管理内存文件，是一个中立的，独立于任何一个进程的角色. 而新创建的 struct file 是专门用于做内存映射的，就像一个硬盘上的文件要映射到虚拟地址空间中的时候，需要在 vm_area_struct 里面有一个 struct file *vm_file 指向硬盘上的文件，现在变成内存文件了，但是这个结构还是不能少.
+
+新创建的 struct file 的 private_data，指向 struct shm_file_data，这样内存映射那部分的数据结构，就能够通过它来访问内存文件了. 新创建的 struct file 的 file_operations 也发生了变化，变成了 [shm_file_operations](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L554).
+
+接下来，do_mmap_pgoff 函数 会分配一个 vm_area_struct 指向虚拟地址空间中没有分配的区域，它的 vm_file 指向这个内存文件，然后它会调用 shm_file_operations 的 mmap 函数，也即 shm_mmap 进行映射.
+
+shm_mmap 中调用了 shm_file_data 中的 file 的 mmap 函数，这次调用的是 shmem_file_operations 的 mmap，也即 shmem_mmap.
+
+这里面，vm_area_struct 的 vm_ops 指向 shmem_vm_ops. 等从 call mmap 中返回之后，shm_file_data 的 vm_ops 指向了 [shmem_vm_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3823)，而 vm_area_struct 的 vm_ops 改为指向 [shm_vm_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L581).
+
+shm_vm_ops 和 shmem_vm_ops里面最关键的就是 fault 函数，也即访问虚拟内存的时候，访问不到应该怎么办. 当访问不到的时候，先调用 vm_area_struct 的 vm_ops，也即 shm_vm_ops 的 fault 函数 shm_fault, 然后它会转而调用 shm_file_data 的 vm_ops，也即 shmem_vm_ops 的 fault 函数 [shmem_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L1968).
+
+虽然基于内存的文件系统，已经为这个内存文件分配了 inode，但是内存也却是一点儿都没分配，只有在发生缺页异常的时候才进行分配.
+
+shmem_fault 会调用 shmem_getpage_gfp 在 page cache 和 swap 中找一个空闲页，如果找不到就通过 shmem_alloc_and_acct_page 分配一个新的页，它最终会调用内存管理系统的 alloc_page_vma 在物理内存中分配一个页.
+
+至此，共享内存才真的映射到了虚拟地址空间中，进程可以像访问本地内存一样访问共享内存.
+
+![](/misc/img/process/20e8f4e69d47b7469f374bc9fbcf7251.png)
+
 ## 信号量
 信号量和共享内存往往要配合使用. 信号量其实是一个计数器，主要用于实现进程间的互斥与同步，而不是用于存储进程间通信数据. **信号量以集合的形式存在的**.
 
@@ -267,6 +430,194 @@ struct sembuf {
 ```
 
 ![](/misc/img/process/469552bffe601d594c432d4fad97490b.png)
+
+### 信号量的内核机制
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L600
+long ksys_semget(key_t key, int nsems, int semflg)
+{
+	struct ipc_namespace *ns;
+	static const struct ipc_ops sem_ops = {
+		.getnew = newary,
+		.associate = security_sem_associate,
+		.more_checks = sem_more_checks,
+	};
+	struct ipc_params sem_params;
+
+	ns = current->nsproxy->ipc_ns;
+
+	if (nsems < 0 || nsems > ns->sc_semmsl)
+		return -EINVAL;
+
+	sem_params.key = key;
+	sem_params.flg = semflg;
+	sem_params.u.nsems = nsems;
+
+	return ipcget(ns, &sem_ids(ns), &sem_ops, &sem_params);
+}
+
+SYSCALL_DEFINE3(semget, key_t, key, int, nsems, int, semflg)
+{
+	return ksys_semget(key, nsems, semflg);
+}
+```
+
+解析过了共享内存，再看信号量，就顺畅很多了. 这里同样调用了抽象的 ipcget，参数分别为信号量对应的 sem_ids、对应的操作 sem_ops 以及对应的参数 sem_params.
+
+ipcget 的代码已经解析过了. 如果 key 设置为 IPC_PRIVATE 则永远创建新的；如果不是的话，就会调用 ipcget_public.
+
+在 ipcget_public 中，能会按照 key，去查找 struct kern_ipc_perm. 如果没有找到，那就看看是否设置了 IPC_CREAT. 如果设置了，就创建一个新的; 如果找到了，就将对应的 id 返回.
+
+这里重点看，如何按照参数 sem_ops，创建新的信号量会调用 [newary](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L528).
+
+newary 函数的第一步，通过 kvmalloc 在直接映射区分配一个 [struct sem_array](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L114) 结构. 这个结构是用来描述信号量的，这个结构最开始就是 struct kern_ipc_perm 结构. 接下来就是填充这个 struct sem_array 结构，例如 key、权限等. struct sem_array 里有多个信号量，放在 struct sem sems[]数组里面，在 [struct sem](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L95) 里面有当前的信号量的数值 semval.
+
+struct sem_array 和 struct sem 各有一个链表 struct list_head pending_alter，分别表示对于整个信号量数组的修改和对于某个信号量的修改.
+
+newary 函数的第二步，就是初始化这些链表.
+
+newary 函数的第三步，通过 ipc_addid 将新创建的 struct sem_array 结构，挂到 sem_ids 里面的基数树上，并返回相应的 id.
+
+信号量创建的过程到此结束，接下来, 来看，如何通过 semctl 对信号量数组进行初始化.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L1649
+static long ksys_semctl(int semid, int semnum, int cmd, unsigned long arg, int version)
+{
+	struct ipc_namespace *ns;
+	void __user *p = (void __user *)arg;
+	struct semid64_ds semid64;
+	int err;
+
+	if (semid < 0)
+		return -EINVAL;
+
+	ns = current->nsproxy->ipc_ns;
+
+	switch (cmd) {
+	case IPC_INFO:
+	case SEM_INFO:
+		return semctl_info(ns, semid, cmd, p);
+	case IPC_STAT:
+	case SEM_STAT:
+	case SEM_STAT_ANY:
+		err = semctl_stat(ns, semid, cmd, &semid64);
+		if (err < 0)
+			return err;
+		if (copy_semid_to_user(p, &semid64, version))
+			err = -EFAULT;
+		return err;
+	case GETALL:
+	case GETVAL:
+	case GETPID:
+	case GETNCNT:
+	case GETZCNT:
+	case SETALL:
+		return semctl_main(ns, semid, semnum, cmd, p);
+	case SETVAL: {
+		int val;
+#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)
+		/* big-endian 64bit */
+		val = arg >> 32;
+#else
+		/* 32bit or little-endian 64bit */
+		val = arg;
+#endif
+		return semctl_setval(ns, semid, semnum, val);
+	}
+	case IPC_SET:
+		if (copy_semid_from_user(&semid64, p, version))
+			return -EFAULT;
+		/* fall through */
+	case IPC_RMID:
+		return semctl_down(ns, semid, cmd, &semid64);
+	default:
+		return -EINVAL;
+	}
+}
+
+SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
+{
+	return ksys_semctl(semid, semnum, cmd, arg, IPC_64);
+}
+```
+
+这里重点看，case SETALL 操作调用的 [semctl_main](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L1402) 函数，以及 case SETVAL 操作调用的 [semctl_setval](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L1340) 函数.
+
+对于 SETALL 操作来讲，传进来的参数为 union semun 里面的 unsigned short *array，会设置整个信号量集合.
+
+在 semctl_main 函数中，先是通过 sem_obtain_object_check，根据信号量集合的 id 在基数树里面找到 struct sem_array 对象，发现如果是 SETALL 操作，就将用户的参数中的 unsigned short *array 通过 copy_from_user 拷贝到内核里面的 sem_io 数组，然后是一个循环，对于信号量集合里面的每一个信号量，设置 semval，以及修改这个信号量值的 pid.
+
+对于 SETVAL 操作来讲，传进来的参数 union semun 里面的 int val，仅仅会设置某个信号量.
+
+在 semctl_setval 函数中，我们先是通过 sem_obtain_object_check，根据信号量集合的 id 在基数树里面找到 struct sem_array 对象，对于 SETVAL 操作，直接根据参数中的 val 设置 semval，以及修改这个信号量值的 pid.
+
+至此，信号量数组初始化完毕.
+
+接下来看 P 操作和 V 操作. 无论是 P 操作，还是 V 操作都是调用 semop 系统调用.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L2275
+SYSCALL_DEFINE3(semop, int, semid, struct sembuf __user *, tsops,
+		unsigned, nsops)
+{
+	return do_semtimedop(semid, tsops, nsops, NULL);
+}
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L2235
+long ksys_semtimedop(int semid, struct sembuf __user *tsops,
+		     unsigned int nsops, const struct __kernel_timespec __user *timeout)
+{
+	if (timeout) {
+		struct timespec64 ts;
+		if (get_timespec64(&ts, timeout))
+			return -EFAULT;
+		return do_semtimedop(semid, tsops, nsops, &ts);
+	}
+	return do_semtimedop(semid, tsops, nsops, NULL);
+}
+
+SYSCALL_DEFINE4(semtimedop, int, semid, struct sembuf __user *, tsops,
+		unsigned int, nsops, const struct __kernel_timespec __user *, timeout)
+{
+	return ksys_semtimedop(semid, tsops, nsops, timeout);
+}
+```
+
+semop 会调用 [do_semtimedop](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L2275)，这是一个非常复杂的函数.
+
+do_semtimedop 做的第一件事情，就是将用户的参数，例如，对于信号量的操作 struct sembuf，拷贝到内核里面来. 另外，如果是 P 操作，很可能让进程进入等待状态，是否要为这个等待状态设置一个超时，timeout 也是一个参数，会把它变成时钟的滴答数目.
+
+do_semtimedop 做的第二件事情，是通过 sem_obtain_object_check，根据信号量集合的 id，获得 struct sem_array，然后，创建一个 struct sem_queue 表示当前的信号量操作. 为什么叫 queue 呢？因为这个操作可能马上就能完成，也可能因为无法获取信号量不能完成，不能完成的话就只好排列到队列上，等待信号量满足条件的时候. semtimedop 会调用 [perform_atomic_semop](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L644) 在实施信号量操作.
+
+在 perform_atomic_semop 函数中，对于所有信号量操作都进行两次循环. 在第一次循环中，如果发现计算出的 result 小于 0，则说明必须等待，于是跳到 would_block 中，设置 q->blocking = sop 表示这个 queue 是 block 在这个操作上，然后如果需要等待，则返回 1. 如果第一次循环中发现无需等待，则第二个循环实施所有的信号量操作，将信号量的值设置为新的值，并且返回 0.
+
+接下来，回到 do_semtimedop，来看它干的第三件事情，就是如果需要等待，应该怎么办？
+
+如果需要等待，则要区分刚才的对于信号量的操作，是对一个信号量的，还是对于整个信号量集合的. 如果是对于一个信号量的，那就将 queue 挂到这个信号量的 pending_alter 中；如果是对于整个信号量集合的，那就将 queue 挂到整个信号量集合的 pending_alter 中.
+
+接下来的 do-while 循环，就是要开始等待了. 如果等待没有时间限制，则调用 schedule 让出 CPU；如果等待有时间限制，则调用 schedule_timeout 让出 CPU，过一段时间还回来. 当回来的时候，判断是否等待超时，如果没有等待超时则进入下一轮循环，再次等待，如果超时则退出循环，返回错误. 在让出 CPU 的时候，设置进程的状态为 TASK_INTERRUPTIBLE，并且循环的结束会通过 signal_pending 查看是否收到过信号，这说明这个等待信号量的进程是可以被信号中断的，也即一个等待信号量的进程是可以通过 kill 杀掉的.
+
+再来看，do_semtimedop 要做的第四件事情，如果不需要等待，应该怎么办？
+
+如果不需要等待，就说明对于信号量的操作完成了，也改变了信号量的值. 接下来，就是一个标准流程. 通过 DEFINE_WAKE_Q(wake_q) 声明一个 wake_q，调用 [do_smart_update](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L1026)，看这次对于信号量的值的改变，可以影响并可以激活等待队列中的哪些 struct sem_queue，然后把它们都放在 wake_q 里面，调用 wake_up_q 唤醒这些进程. 其实，所有的对于信号量的值的修改都会涉及这三个操作，如果你回过头去仔细看 SETALL 和 SETVAL 操作，在设置完毕信号量之后，也是这三个操作.
+
+来看 do_smart_update 是如何实现的. do_smart_update 会调用 [update_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L946).
+
+update_queue 会依次循环整个信号量集合的等待队列 pending_alter，或者某个信号量的等待队列. 试图在信号量的值变了的情况下，再次尝试 perform_atomic_semop 进行信号量操作. 如果不成功，则尝试队列中的下一个；如果尝试成功，则调用 unlink_queue 从队列上取下来，然后调用 wake_up_sem_queue_prepare，将 q->sleeper 加到 wake_q 上去. q->sleeper 是一个 task_struct，是等待在这个信号量操作上的进程.
+
+接下来，wake_up_q 就依次唤醒 wake_q 上的所有 task_struct，调用的是 wake_up_process 方法.
+
+至此，对于信号量的主流操作都解析完毕了.
+
+其实还有一点需要强调一下，信号量是一个整个 Linux 可见的全局资源，而不像在线程同步中的都是某个进程独占的资源，好处是可以跨进程通信，坏处就是如果一个进程通过 P 操作拿到了一个信号量，但是不幸异常退出了，如果没有来得及归还这个信号量，可能所有其他的进程都阻塞了.
+
+那怎么办呢？Linux 有一种机制叫 SEM_UNDO，也即每一个 semop 操作都会保存一个反向 struct sem_undo 操作，当因为某个进程异常退出的时候，这个进程做的所有的操作都会回退，从而保证其他进程可以正常工作. 如果写的程序里面的 semaphore_p 函数和 semaphore_v 函数，都把 sem_flg 设置为 SEM_UNDO，就是这个作用.
+
+等待队列上的每一个 [struct sem_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L130)，都有一个 [struct sem_undo](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/sem.c#L146)，以此来表示这次操作的反向操作.
+
+在进程的 task_struct 里面对于信号量有一个成员 struct sysv_sem，里面是一个 struct sem_undo_list，将这个进程所有的 semop 所带来的 undo 操作都串起来.
+
+![](/misc/img/process/6028c83b0aa00e65916988911aa01b7c.png)
 
 ## 信号
 信号没有特别复杂的数据结构，就是用一个代号一样的唯一数字id. 在 Linux 操作系统中，为了响应各种各样的事件，也是定义了几十种的信号，分别代表不同的意义. 信号之间依靠它们的值来区分. 信号可以在任何时候发送给某一进程，进程需要为这个信号配置信号处理函数. 当某个信号发生的时候，就默认执行这个函数就可以了.
@@ -983,166 +1334,3 @@ static inline struct shmid_kernel *shm_obtain_object(struct ipc_namespace *ns, i
 通过这种机制，就可以将信号量、消息队列、共享内存抽象为 ipc 类型进行统一处理. 这有点儿面向对象编程中抽象类和实现类的意思. C++ 中类的实现机制，其实也是这么干的.
 
 ![](/misc/img/process/082b742753d862cfeae520fb02aa41af.png)
-
-## 创建共享内存
-```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L726
-long ksys_shmget(key_t key, size_t size, int shmflg)
-{
-	struct ipc_namespace *ns;
-	static const struct ipc_ops shm_ops = {
-		.getnew = newseg,
-		.associate = security_shm_associate,
-		.more_checks = shm_more_checks,
-	};
-	struct ipc_params shm_params;
-
-	ns = current->nsproxy->ipc_ns;
-
-	shm_params.key = key;
-	shm_params.flg = shmflg;
-	shm_params.u.size = size;
-
-	return ipcget(ns, &shm_ids(ns), &shm_ops, &shm_params);
-}
-
-SYSCALL_DEFINE3(shmget, key_t, key, size_t, size, int, shmflg)
-{
-	return ksys_shmget(key, size, shmflg);
-}
-
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/util.c#L639
-/**
- * ipcget - Common sys_*get() code
- * @ns: namespace
- * @ids: ipc identifier set
- * @ops: operations to be called on ipc object creation, permission checks
- *       and further checks
- * @params: the parameters needed by the previous operations.
- *
- * Common routine called by sys_msgget(), sys_semget() and sys_shmget().
- */
-int ipcget(struct ipc_namespace *ns, struct ipc_ids *ids,
-			const struct ipc_ops *ops, struct ipc_params *params)
-{
-	if (params->key == IPC_PRIVATE)
-		return ipcget_new(ns, ids, ops, params);
-	else
-		return ipcget_public(ns, ids, ops, params);
-}
-```
-
-这里面调用了抽象的 ipcget, 参数分别为共享内存对应的 shm_ids、对应的操作 shm_ops 以及对应的参数 shm_params.
-
-如果 params->key 设置为 IPC_PRIVATE 则永远创建新的，如果不是的话，就会调用 [ipcget_public](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/util.c#L396).
-
-在 ipcget_public 中，会按照 key，去查找 struct kern_ipc_perm. 如果没有找到，那就看是否设置了 IPC_CREAT；如果设置了，就创建一个新的. 如果找到了，就将对应的 id 返回.
-
-按照参数 shm_ops，会调用 [newseg](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L600) 创建新的共享内存.
-
-newseg 函数的第一步，通过 kvmalloc 在直接映射区分配一个 struct shmid_kernel 结构. 这个结构就是用来描述共享内存的. 这个结构最开始就是上面说的 struct kern_ipc_perm 结构. 接下来就是填充这个 struct shmid_kernel 结构，例如 key、权限等.
-
-newseg 函数的第二步，共享内存需要和文件进行关联. 这是因为虚拟地址空间可以和物理内存关联，但是物理内存是某个进程独享的. 虚拟地址空间也可以映射到一个文件，文件是可以跨进程共享的. 而共享内存需要跨进程共享，也应该借鉴文件映射的思路. 只不过不应该映射一个硬盘上的文件，而是映射到一个内存文件系统上的文件. mm/shmem.c 里面就定义了这样一个基于内存的文件系统. 这里一定要注意区分 shmem 和 shm 的区别，前者是一个文件系统，后者是进程通信机制. 在系统初始化的时候，[shmem_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3860) 注册了 shmem 文件系统 shmem_fs_type，并且挂在到了 shm_mnt 下面.
-
-```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3849
-static struct file_system_type shmem_fs_type = {
-	.owner		= THIS_MODULE,
-	.name		= "tmpfs",
-	.init_fs_context = shmem_init_fs_context,
-#ifdef CONFIG_TMPFS
-	.parameters	= shmem_fs_parameters,
-#endif
-	.kill_sb	= kill_litter_super,
-	.fs_flags	= FS_USERNS_MOUNT,
-};
-
-int __init shmem_init(void)
-{
-	int error;
-
-	shmem_init_inodecache();
-
-	error = register_filesystem(&shmem_fs_type);
-	if (error) {
-		pr_err("Could not register tmpfs\n");
-		goto out2;
-	}
-
-	shm_mnt = kern_mount(&shmem_fs_type);
-	if (IS_ERR(shm_mnt)) {
-		error = PTR_ERR(shm_mnt);
-		pr_err("Could not kern_mount tmpfs\n");
-		goto out1;
-	}
-
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	if (has_transparent_hugepage() && shmem_huge > SHMEM_HUGE_DENY)
-		SHMEM_SB(shm_mnt->mnt_sb)->huge = shmem_huge;
-	else
-		shmem_huge = 0; /* just in case it was patched */
-#endif
-	return 0;
-
-out1:
-	unregister_filesystem(&shmem_fs_type);
-out2:
-	shmem_destroy_inodecache();
-	shm_mnt = ERR_PTR(error);
-	return error;
-}
-```
-
-接下来，newseg 函数会调用 [shmem_kernel_file_setup](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L4098)，其实就是在 shmem 文件系统里面创建一个文件.
-
-__shmem_file_setup 会创建新的 shmem 文件对应的 dentry 和 inode，并将它们两个关联起来，然后分配一个 struct file 结构，来表示新的 shmem 文件，并且指向独特的 [shmem_file_operations](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3751).
-
-shmem_file_setup -> [__shmem_file_setup](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L4055)会创建新的 shmem 文件对应的 dentry 和 inode，并将它们两个关联起来，然后分配一个 struct file 结构，来表示新的 shmem 文件，并且指向独特的 shmem_file_operations.
-
-newseg 函数的第三步，通过 ipc_addid 将新创建的 struct shmid_kernel 结构挂到 shm_ids 里面的基数树上，并返回相应的 id，并且将 struct shmid_kernel 挂到当前进程的 sysvshm 队列中.
-
-至此，共享内存的创建就完成了.
-
-## 将共享内存映射到虚拟地址空间
-从上面的代码解析中，共享内存的数据结构 struct shmid_kernel，是通过它的成员 struct file *shm_file，来管理内存文件系统 shmem 上的内存文件的. 无论这个共享内存是否被映射，shm_file 都是存在的. 接下来，要将共享内存映射到虚拟地址空间中. 调用的是 shmat，对应的系统调用如下：
-
-```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L600
-SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg)
-{
-	unsigned long ret;
-	long err;
-
-	err = do_shmat(shmid, shmaddr, shmflg, &ret, SHMLBA);
-	if (err)
-		return err;
-	force_successful_syscall_return();
-	return (long)ret;
-}
-```
-
-在[do_shmat函数](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L1418)里面，shm_obtain_object_check 会通过共享内存的 id，在基数树中找到对应的 struct shmid_kernel 结构，通过它找到 shmem 上的内存文件.
-
-接下来，要分配一个 struct shm_file_data，来表示这个内存文件. 将 shmem 中指向内存文件的 shm_file 赋值给 struct shm_file_data 中的 file 成员.
-
-然后，创建了一个 struct file，指向的也是 shmem 中的内存文件.
-
-为什么要再创建一个呢？这两个的功能不同，shmem 中 shm_file 用于管理内存文件，是一个中立的，独立于任何一个进程的角色. 而新创建的 struct file 是专门用于做内存映射的，就像一个硬盘上的文件要映射到虚拟地址空间中的时候，需要在 vm_area_struct 里面有一个 struct file *vm_file 指向硬盘上的文件，现在变成内存文件了，但是这个结构还是不能少.
-
-新创建的 struct file 的 private_data，指向 struct shm_file_data，这样内存映射那部分的数据结构，就能够通过它来访问内存文件了. 新创建的 struct file 的 file_operations 也发生了变化，变成了 [shm_file_operations](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L554).
-
-接下来，do_mmap_pgoff 函数 会分配一个 vm_area_struct 指向虚拟地址空间中没有分配的区域，它的 vm_file 指向这个内存文件，然后它会调用 shm_file_operations 的 mmap 函数，也即 shm_mmap 进行映射.
-
-shm_mmap 中调用了 shm_file_data 中的 file 的 mmap 函数，这次调用的是 shmem_file_operations 的 mmap，也即 shmem_mmap.
-
-这里面，vm_area_struct 的 vm_ops 指向 shmem_vm_ops. 等从 call mmap 中返回之后，shm_file_data 的 vm_ops 指向了 [shmem_vm_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L3823)，而 vm_area_struct 的 vm_ops 改为指向 [shm_vm_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/ipc/shm.c#L581).
-
-shm_vm_ops 和 shmem_vm_ops里面最关键的就是 fault 函数，也即访问虚拟内存的时候，访问不到应该怎么办. 当访问不到的时候，先调用 vm_area_struct 的 vm_ops，也即 shm_vm_ops 的 fault 函数 shm_fault, 然后它会转而调用 shm_file_data 的 vm_ops，也即 shmem_vm_ops 的 fault 函数 [shmem_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/shmem.c#L1968).
-
-虽然基于内存的文件系统，已经为这个内存文件分配了 inode，但是内存也却是一点儿都没分配，只有在发生缺页异常的时候才进行分配.
-
-shmem_fault 会调用 shmem_getpage_gfp 在 page cache 和 swap 中找一个空闲页，如果找不到就通过 shmem_alloc_and_acct_page 分配一个新的页，它最终会调用内存管理系统的 alloc_page_vma 在物理内存中分配一个页.
-
-至此，共享内存才真的映射到了虚拟地址空间中，进程可以像访问本地内存一样访问共享内存.
-
-![](/misc/img/process/20e8f4e69d47b7469f374bc9fbcf7251.png)
