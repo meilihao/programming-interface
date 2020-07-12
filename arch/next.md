@@ -53,6 +53,7 @@ AVX 512指令集强化的向量和浮点计算
 - [RDMA](https://yq.aliyun.com/articles/394912)
 - [RDMA学习路线总结](https://my.oschina.net/SysuHuyh5LoveHqq/blog/842767)
 - [借助RDMA功能的互连实现您企业软件定义的数据中心基础设施的效率最大化](https://yq.aliyun.com/articles/137416)
+- [UCloud高性能RoCE网络设计](http://blog.ucloud.cn/archives/4364)
 
 DPDK思路:
 - 网络层：硬件中断->放弃中断流程
@@ -75,7 +76,9 @@ DPDK思路:
 > [全用户态网络开发套件 F-Stack 架构分析](https://cloud.tencent.com/developer/article/1005218)
 
 RDMA思路:
-网卡硬件收发包并进行协议栈封装/解析，然后将数据存放到指定内存地址，而不需要CPU干预
+网卡硬件收发包并进行协议栈封装/解析，然后将数据存放到指定内存地址，而不需要CPU干预. 即消除主机CPU 中不必要的频繁数据传输，减少通信对CPU的占用, RDMA就是由此来优化通信性能.
+
+RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 
 核心技术：协议栈硬件offload
 
