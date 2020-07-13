@@ -252,6 +252,8 @@ Socket 系统调用会调用 sock_create 创建一个 struct socket 结构，然
   #define PF_XDP		AF_XDP
   #define PF_MAX		AF_MAX
   ```
+
+> netlink相关的协议在[这里](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/linux/netlink.h#L9). netlink[支持实现自定义协议](https://www.cnblogs.com/wenqiang/p/6306727.html), 有公司就基于netlink自定义协议实现了cdp功能.
   
 1. type，也即 Socket 的类型. 类型是比较少的
 1. protocol，是协议. 协议数目是比较多的，也就是说，多个协议会属于同一种类型. 常用的 Socket 类型有三种，分别是 SOCK_STREAM、SOCK_DGRAM 和 SOCK_RAW
