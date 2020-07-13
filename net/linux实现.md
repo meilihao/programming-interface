@@ -1202,10 +1202,135 @@ static struct net_protocol udp_protocol = {
 };
 ```
 
-在系统初始化的时候，网络协议栈的初始化调用的是 inet_init，它会调用 inet_add_protocol，将 TCP 协议对应的处理函数 tcp_protocol、UDP 协议对应的处理函数 udp_protocol，放到 inet_protos 数组中. 在上面的网络包的接收过程中，会取出 TCP 协议对应的处理函数 tcp_protocol，然后调用 handler 函数，也即 tcp_v4_rcv 函数.
+在系统初始化的时候，网络协议栈的初始化调用的是 inet_init，它会调用 inet_add_protocol，将 TCP 协议对应的处理函数 tcp_protocol、UDP 协议对应的处理函数 udp_protocol，放到 inet_protos 数组中. 在上面的网络包的接收过程中，会取出 TCP 协议对应的处理函数 tcp_protocol，然后调用 handler 函数，也即 [tcp_v4_rcv](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L1873) 函数.
+
+## 网络协议栈的 TCP 层
+从 tcp_v4_rcv 函数开始, 处理逻辑就从 IP 层到了 TCP 层.
+
+在 tcp_v4_rcv 中，得到 TCP 的头之后，就可以开始处理 TCP 层的事情. 因为 TCP 层是分状态的，状态被维护在数据结构 struct sock 里面，因而要根据 IP 地址以及 TCP 头里面的内容，在 tcp_hashinfo 中找到这个包对应的 struct sock，从而得到这个包对应的连接的状态.
+
+接下来，就根据不同的状态做不同的处理，例如，tcp_v4_rcv代码中的 TCP_LISTEN、TCP_NEW_SYN_RECV 状态属于连接建立过程中. 这个在分析三次握手的时候学过了. 再如，TCP_TIME_WAIT 状态是连接结束的时候的状态，这个暂时可以不用看.
+
+接下来，来分析最主流的网络包的接收过程，这里面涉及三个队列：
+- backlog 队列
+- prequeue 队列
+- sk_receive_queue 队列
+
+为什么接收网络包的过程，需要在这三个队列里面倒腾过来、倒腾过去呢？这是因为，同样一个网络包要在三个主体之间交接.
+
+第一个主体是软中断的处理过程. 如果没忘记的话，在执行 tcp_v4_rcv 函数的时候，依然处于软中断的处理逻辑里，所以必然会占用这个软中断.
+
+第二个主体就是用户态进程. 如果用户态触发系统调用 read 读取网络包，也要从队列里面找.
+
+第三个主体就是内核协议栈. 哪怕用户进程没有调用 read，读取网络包，当网络包来的时候，也得有一个地方收着呀.
+
+这时候，就能够了解上面代码中 sock_owned_by_user 的意思了，其实就是说，当前这个 sock 是不是正有一个用户态进程等着读数据呢，如果没有，内核协议栈也调用 tcp_add_backlog，暂存在 backlog 队列中，并且抓紧离开软中断的处理过程.
+
+如果有一个用户态进程等待读取数据呢？就先调用 tcp_prequeue，也即赶紧放入 prequeue 队列，并且离开软中断的处理过程. 在这个函数里面，会看到对于 sysctl_tcp_low_latency 的判断，也即是不是要低时延地处理网络包.
+
+如果把 sysctl_tcp_low_latency 设置为 0，那就要放在 prequeue 队列中暂存，这样不用等待网络包处理完毕，就可以离开软中断的处理过程，但是会造成比较长的时延. 如果把 sysctl_tcp_low_latency 设置为 1，还是调用 [tcp_v4_do_rcv](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L1613).
+
+在 tcp_v4_do_rcv 中，分两种情况，一种情况是连接已经建立，处于 TCP_ESTABLISHED 状态，调用 [tcp_rcv_established](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L5588). 另一种情况，就是其他的状态，调用 [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L6183).
+
+![](/misc/img/net/385ff4a348dfd2f64feb0d7ba81e2bc6.png)
+
+在 tcp_rcv_state_process 中，如果对着 TCP 的状态图进行比对，能看到，对于 TCP 所有状态的处理，其中和连接建立相关的状态，已经分析过，所以重点关注连接状态下的工作模式.
+
+在连接状态下，会调用 tcp_rcv_established. 在这个函数里面，会调用 [tcp_data_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L4797)，将其放入 sk_receive_queue 队列进行处理.
+
+在 tcp_data_queue 中，对于收到的网络包，要分情况进行处理.
+
+第一种情况，seq == tp->rcv_nxt，说明来的网络包正是我服务端期望的下一个网络包. 这个时候判断 sock_owned_by_user，也即用户进程也是正在等待读取，这种情况下，就直接 skb_copy_datagram_msg，将网络包拷贝给用户进程就可以了.
+
+如果用户进程没有正在等待读取，或者因为内存原因没有能够拷贝成功，tcp_queue_rcv 里面还是将网络包放入 sk_receive_queue 队列.
+
+接下来，tcp_rcv_nxt_update 将 tp->rcv_nxt 设置为 end_seq，也即当前的网络包接收成功后，更新下一个期待的网络包.
+
+这个时候，还会判断一下另一个队列，out_of_order_queue，也看看乱序队列的情况，看看乱序队列里面的包，会不会因为这个新的网络包的到来，也能放入到 sk_receive_queue 队列中.
+
+例如，客户端发送的网络包序号为 5、6、7、8、9. 在 5 还没有到达的时候，服务端的 rcv_nxt 应该是 5，也即期望下一个网络包是 5. 但是由于中间网络通路的问题，5、6 还没到达服务端，7、8 已经到达了服务端了，这就出现了乱序.
+
+乱序的包不能进入 sk_receive_queue 队列. 因为一旦进入到这个队列，意味着可以发送给用户进程. 然而，按照 TCP 的定义，用户进程应该是按顺序收到包的，没有排好序，就不能给用户进程. 所以，7、8 不能进入 sk_receive_queue 队列，只能暂时放在 out_of_order_queue 乱序队列中.
+
+当 5、6 到达的时候，5、6 先进入 sk_receive_queue 队列. 这个时候再来看 out_of_order_queue 乱序队列中的 7、8，发现能够接上. 于是，7、8 也能进入 sk_receive_queue 队列了. [tcp_ofo_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L4506) 函数就是做这个事情的.
+
+至此第一种情况处理完毕.
+
+第二种情况，end_seq 不大于 rcv_nxt，也即服务端期望网络包 5. 但是，来了一个网络包 3，怎样才会出现这种情况呢？肯定是服务端早就收到了网络包 3，但是 ACK 没有到达客户端，中途丢了，那客户端就认为网络包 3 没有发送成功，于是又发送了一遍，这种情况下，要赶紧给客户端再发送一次 ACK，表示早就收到了.
+
+第三种情况，seq 不小于 rcv_nxt + tcp_receive_window. 这说明客户端发送得太猛了. 本来 seq 肯定应该在接收窗口里面的，这样服务端才来得及处理，结果现在超出了接收窗口，说明客户端一下子把服务端给塞满了.
+
+这种情况下，服务端不能再接收数据包了，只能发送 ACK 了，在 ACK 中会将接收窗口为 0 的情况告知客户端，客户端就知道不能再发送了. 这个时候双方只能交互窗口探测数据包，直到服务端因为用户进程把数据读走了，空出接收窗口，才能在 ACK 里面再次告诉客户端，又有窗口了，又能发送数据包了.
+
+第四种情况，seq 小于 rcv_nxt，但是 end_seq 大于 rcv_nxt，这说明从 seq 到 rcv_nxt 这部分网络包原来的 ACK 客户端没有收到，所以重新发送了一次，从 rcv_nxt 到 end_seq 时新发送的，可以放入 sk_receive_queue 队列.
+
+当前四种情况都排除掉了，说明网络包一定是一个乱序包了. 这里有点儿难理解，还是用上面那个乱序的例子仔细分析一下 rcv_nxt=5.
+
+假设 tcp_receive_window 也是 5，也即超过 10 服务端就接收不了了. 当前来的这个网络包既不在 rcv_nxt 之前（不是 3 这种），也不在 rcv_nxt + tcp_receive_window 之后（不是 11 这种），说明这正在我们期望的接收窗口里面，但是又不是 rcv_nxt（不是我们马上期望的网络包 5），这正是上面的例子中网络包 7、8 的情况.
+
+对于网络包 7、8，只好调用 tcp_data_queue_ofo 进入 out_of_order_queue 乱序队列，但是没有关系，当网络包 5、6 到来的时候，会走第一种情况，把 7、8 拿出来放到 sk_receive_queue 队列中.
+
+至此，网络协议栈的处理过程就结束了.
+
+## Socket 层
+当接收的网络包进入各种队列之后，接下来就要等待用户进程去读取它们了.
+
+读取一个 socket，就像读取一个文件一样，读取 socket 的文件描述符，通过 read 系统调用.
+
+read 系统调用对于一个文件描述符的操作，大致过程都是类似的，最终它会调用到用来表示一个打开文件的结构 stuct file 指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L149
+/*
+ *	Socket files have a set of 'special' operations as well as the generic file ones. These don't appear
+ *	in the operation structures but are done directly via the socketcall() multiplexor.
+ */
+
+static const struct file_operations socket_file_ops = {
+	.owner =	THIS_MODULE,
+	.llseek =	no_llseek,
+	.read_iter =	sock_read_iter,
+	.write_iter =	sock_write_iter,
+	.poll =		sock_poll,
+	.unlocked_ioctl = sock_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = compat_sock_ioctl,
+#endif
+	.mmap =		sock_mmap,
+	.release =	sock_close,
+	.fasync =	sock_fasync,
+	.sendpage =	sock_sendpage,
+	.splice_write = generic_splice_sendpage,
+	.splice_read =	sock_splice_read,
+	.show_fdinfo =	sock_show_fdinfo,
+};
+```
+
+按照文件系统的读取流程，调用的是 [sock_read_iter](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L960).
+
+在 sock_read_iter 中，通过 VFS 中的 struct file，将创建好的 socket 结构拿出来，然后调用 [sock_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L900)，sock_recvmsg 会调用 [sock_recvmsg_nosec](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L883).
+
+sock_recvmsg_nosec里调用了 socket 的 ops 的 recvmsg，根据 [inet_stream_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1015) 的定义，这里调用的是 [inet_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L835).
+
+在inet_recvmsg里面，从 socket 结构，可以得到更底层的 sock 结构，然后调用 sk_prot 的 recvmsg 方法, 根据 tcp_prot 的定义，调用的是 [tcp_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L2015).
+
+tcp_recvmsg 这个函数比较长，里面逻辑也很复杂，好在里面有一段注释概括了这里面的逻辑. 注释里面提到了三个队列，receive_queue 队列、prequeue 队列和 backlog 队列. 这里面，需要把前一个队列处理完毕，才处理后一个队列.
+
+tcp_recvmsg 的整个逻辑也是这样执行的：这里面有一个 while 循环，不断地读取网络包.
+
+这里，会先处理 sk_receive_queue 队列. 如果找到了网络包，就跳到 found_ok_skb 这里. 这里会调用 skb_copy_datagram_msg，将网络包拷贝到用户进程中，然后直接进入下一层循环.
+
+直到 sk_receive_queue 队列处理完毕，才到了 sysctl_tcp_low_latency 判断. 如果不需要低时延，则会有 prequeue 队列. 于是，就跳到 do_prequeue 这里，调用 tcp_prequeue_process 进行处理.
+
+如果 sysctl_tcp_low_latency 设置为 1，也即没有 prequeue 队列，或者 prequeue 队列为空，则需要处理 backlog 队列，在 release_sock 函数中处理.
+
+[release_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/sock.c#L3062) 会调用 [__release_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/sock.c#L2534)，这里面会依次处理队列中的网络包.
+
+最后，哪里都没有网络包，只好调用 sk_wait_data，继续等待在哪里，等待网络包的到来.
+
+至此，网络包的接收过程到此结束.
 
 ## 总结
-![](/misc/img/net/a51af8ada1135101e252271626669337.png)
+![](/misc/img/net/20df32a842495d0f629ca5da53e47152.png)
 
 接收网络包的过程:
 1. 硬件网卡接收到网络包之后，通过 DMA 技术，将网络包放入 Ring Buffer
@@ -1215,4 +1340,13 @@ static struct net_protocol udp_protocol = {
 1. NET_RX_SOFTIRQ 软中断处理函数 net_rx_action，net_rx_action 会调用 napi_poll，进而调用 ixgb_clean_rx_irq，从 Ring Buffer 中读取数据到内核 struct sk_buff
 1. 调用 netif_receive_skb 进入内核网络协议栈，进行一些关于 VLAN 的二层逻辑处理后，调用 ip_rcv 进入三层 IP 层
 1. 在 IP 层，会处理 iptables 规则，然后调用 ip_local_deliver，交给更上层 TCP 层
-1. 在 TCP 层调用 tcp_v4_rcv
+1. 在 TCP 层调用 tcp_v4_rcv，这里面有三个队列需要处理，如果当前的 Socket 不是正在被读；取，则放入 backlog 队列，如果正在被读取，不需要很实时的话，则放入 prequeue 队列，其他情况调用 tcp_v4_do_rcv
+1. 在 tcp_v4_do_rcv 中，如果是处于 TCP_ESTABLISHED 状态，调用 tcp_rcv_established，其他的状态，调用 tcp_rcv_state_process
+1. 在 tcp_rcv_established 中，调用 tcp_data_queue，如果序列号能够接的上，则放入 sk_receive_queue 队列；如果序列号接不上，则暂时放入 out_of_order_queue 队列，等序列号能够接上的时候，再放入 sk_receive_queue 队列.
+
+至此内核接收网络包的过程到此结束，接下来就是用户态读取网络包的过程，这个过程分成几个层次:
+- VFS 层：read 系统调用找到 struct file，根据里面的 file_operations 的定义，调用 sock_read_iter 函数
+- sock_read_iter 函数调用 sock_recvmsg 函数
+- Socket 层：从 struct file 里面的 private_data 得到 struct socket，根据里面 ops 的定义，调用 inet_recvmsg 函数
+- Sock 层：从 struct socket 里面的 sk 得到 struct sock，根据里面 sk_prot 的定义，调用 tcp_recvmsg 函数
+- TCP 层：tcp_recvmsg 函数会依次读取 receive_queue 队列、prequeue 队列和 backlog 队列
