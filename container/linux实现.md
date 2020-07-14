@@ -337,3 +337,150 @@ register_pernet_device 函数注册了一个 loopback_net_ops，在这里面，�
 这就是为什么上面的实验中，创建出的新的 network namespace 里面有一个 lo 网络设备的原因.
 
 ![/misc/img/container/56bb9502b58628ff3d1bee83b6f53cd7.png]
+
+## cgroup
+cgroup 全称是 control group，顾名思义，它是用来做“控制”的, 即控制资源的使用. 当前最新版本是cgroup v2(`grep cgroup /proc/filesystems`时会看到cgroup2).
+
+首先，cgroup 定义了下面的一系列子系统，每个子系统用于控制某一类资源:
+- CPU 子系统，主要限制进程的 CPU 使用率
+- cpuacct 子系统，可以统计 cgroup 中的进程的 CPU 使用报告
+- cpuset 子系统，可以为 cgroup 中的进程分配单独的 CPU 节点或者内存节点
+- memory 子系统，可以限制进程的 Memory 使用量
+- blkio 子系统，可以限制进程的块设备 IO
+- devices 子系统，可以控制进程能够访问某些设备
+- net_cls 子系统，可以标记 cgroups 中进程的网络数据包，然后可以使用 tc 模块（traffic control）对数据包进行控制
+- freezer 子系统，可以挂起或者恢复 cgroup 中的进程
+
+这里面最常用的是对于 CPU 和内存的控制, 所以下面就详细来说它.
+
+在 Linux 上，为了操作 cgroup，有一个专门的 cgroup 文件系统，运行 `mount -t cgroup` 命令可以查看. 可以看到cgroup 文件系统均挂载到 /sys/fs/cgroup 下，通过该命令可以看到可以用 cgroup 控制哪些资源.
+
+```bash
+$ mount -t cgroup
+cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,name=systemd)
+cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
+cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
+cgroup on /sys/fs/cgroup/devices type cgroup (rw,nosuid,nodev,noexec,relatime,devices)
+cgroup on /sys/fs/cgroup/perf_event type cgroup (rw,nosuid,nodev,noexec,relatime,perf_event)
+cgroup on /sys/fs/cgroup/cpuset type cgroup (rw,nosuid,nodev,noexec,relatime,cpuset)
+cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (rw,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
+cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
+cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
+```
+
+![cgroup 对于 Docker 资源的控制，在用户态的表现](/misc/img/container/1c762a6283429ff3587a7fc370fc090f.png)
+
+## cgroup的内核实现
+参考:
+- [云计算时代，容器底层 cgroup 的代码实现分析](https://www.xujun.org/note-113352.html)
+
+在系统初始化的时候，cgroup 也会进行初始化: 在 [start_kernel](https://elixir.bootlin.com/linux/v5.8-rc4/source/init/main.c#L830) 中，[cgroup_init_early](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5633) 和 [cgroup_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5672) 都会进行初始化.
+
+在 cgroup_init_early 和 cgroup_init 中均会有for_each_subsys的循环:
+```c
+	for_each_subsys(ss, i) {
+		...
+	}
+
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup-internal.h#L164
+/**
+ * for_each_subsys - iterate all enabled cgroup subsystems
+ * @ss: the iteration cursor
+ * @ssid: the index of @ss, CGROUP_SUBSYS_COUNT after reaching the end
+ */
+#define for_each_subsys(ss, ssid)					\
+	for ((ssid) = 0; (ssid) < CGROUP_SUBSYS_COUNT &&		\
+	     (((ss) = cgroup_subsys[ssid]) || true); (ssid)++)
+```
+
+for_each_subsys 会在 cgroup_subsys 数组中进行循环. 这个 cgroup_subsys 数组是如何形成的呢？
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L121
+/* generate an array of cgroup subsystem pointers */
+#define SUBSYS(_x) [_x ## _cgrp_id] = &_x ## _cgrp_subsys,
+struct cgroup_subsys *cgroup_subsys[] = {
+#include <linux/cgroup_subsys.h>
+};
+#undef SUBSYS
+```
+
+SUBSYS 这个宏定义了这个 cgroup_subsys 数组，数组中的项定义在 [cgroup_subsys.h](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h) 头文件中
+
+根据 SUBSYS 的定义，SUBSYS(cpu) 其实是[cpu_cgrp_id] = &cpu_cgrp_subsys，而 SUBSYS(memory) 其实是[memory_cgrp_id] = &memory_cgrp_subsys.
+
+因此能够找到 cpu_cgrp_subsys 和 memory_cgrp_subsys 的定义.
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015
+struct cgroup_subsys cpu_cgrp_subsys = {
+	.css_alloc	= cpu_cgroup_css_alloc,
+	.css_online	= cpu_cgroup_css_online,
+	.css_released	= cpu_cgroup_css_released,
+	.css_free	= cpu_cgroup_css_free,
+	.css_extra_stat_show = cpu_extra_stat_show,
+	.fork		= cpu_cgroup_fork,
+	.can_attach	= cpu_cgroup_can_attach,
+	.attach		= cpu_cgroup_attach,
+	.legacy_cftypes	= cpu_legacy_files,
+	.dfl_cftypes	= cpu_files,
+	.early_init	= true,
+	.threaded	= true,
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/memcontrol.c#L6255
+struct cgroup_subsys memory_cgrp_subsys = {
+	.css_alloc = mem_cgroup_css_alloc,
+	.css_online = mem_cgroup_css_online,
+	.css_offline = mem_cgroup_css_offline,
+	.css_released = mem_cgroup_css_released,
+	.css_free = mem_cgroup_css_free,
+	.css_reset = mem_cgroup_css_reset,
+	.can_attach = mem_cgroup_can_attach,
+	.cancel_attach = mem_cgroup_cancel_attach,
+	.post_attach = mem_cgroup_move_task,
+	.bind = mem_cgroup_bind,
+	.dfl_cftypes = memory_files,
+	.legacy_cftypes = mem_cgroup_legacy_files,
+	.early_init = 0,
+};
+```
+
+在 for_each_subsys 的循环里面，cgroup_subsys[]数组中的每一个 cgroup_subsys，都会调用 [cgroup_init_subsys](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5574)，对于 cgroup_subsys 对于初始化.
+
+cgroup_init_subsys 里面会做两件事情，一个是调用 cgroup_subsys 的 css_alloc 函数创建一个 cgroup_subsys_state；另外就是调用 online_css，也即调用 cgroup_subsys 的 css_online 函数，激活这个 cgroup.
+
+对于 CPU 来讲，css_alloc 函数就是 [cpu_cgroup_css_alloc](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015). 这里面会调用 sched_create_group 创建一个 [struct task_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/sched.h#L365). 在这个结构中，第一项就是 cgroup_subsys_state，也就是说，task_group 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，可以通过强制类型转换变为 task_group.
+
+在 task_group 结构中，有一个成员是 sched_entity，即调度的实体，也即这一个 task_group 也是一个调度实体.
+
+接下来，online_css 会被调用. 对于 CPU 来讲，online_css 调用的是 [cpu_cgroup_css_online](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L7202). 它会调用 [sched_online_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L7070)->[online_fair_sched_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/fair.c#L10964).
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/fair.c#L10964
+void online_fair_sched_group(struct task_group *tg)
+{
+	struct sched_entity *se;
+	struct rq_flags rf;
+	struct rq *rq;
+	int i;
+
+	for_each_possible_cpu(i) {
+		rq = cpu_rq(i);
+		se = tg->se[i];
+		rq_lock_irq(rq, &rf);
+		update_rq_clock(rq);
+		attach_entity_cfs_rq(se);
+		sync_throttle(tg, i);
+		rq_unlock_irq(rq, &rf);
+	}
+}
+```
+
+在这里面，对于每一个 CPU，取出每个 CPU 的运行队列 rq，也取出 task_group 的 sched_entity，然后通过 attach_entity_cfs_rq 将 sched_entity 添加到运行队列中.
+
+对于内存来讲，css_alloc 函数就是 mem_cgroup_css_alloc. 这里面会调用 mem_cgroup_alloc，创建一个 [struct mem_cgroup](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/memcontrol.h#L201). 在这个结构中，第一项就是 cgroup_subsys_state，也就是说，mem_cgroup 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，因此可以通过强制类型转换变为 mem_cgroup.
+
+在 cgroup_init 函数中，cgroup 的初始化还做了一件很重要的事情，它会调用 cgroup_init_cftypes(NULL, cgroup_base_files)，来初始化对于 cgroup 文件类型 cftype 的操作函数，也就是将 struct kernfs_ops *kf_ops 设置为 cgroup_kf_ops.
