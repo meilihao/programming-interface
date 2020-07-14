@@ -341,15 +341,20 @@ register_pernet_device 函数注册了一个 loopback_net_ops，在这里面，�
 ## cgroup
 cgroup 全称是 control group，顾名思义，它是用来做“控制”的, 即控制资源的使用. 当前最新版本是cgroup v2(`grep cgroup /proc/filesystems`时会看到cgroup2).
 
-首先，cgroup 定义了下面的一系列子系统，每个子系统用于控制某一类资源:
-- CPU 子系统，主要限制进程的 CPU 使用率
-- cpuacct 子系统，可以统计 cgroup 中的进程的 CPU 使用报告
-- cpuset 子系统，可以为 cgroup 中的进程分配单独的 CPU 节点或者内存节点
-- memory 子系统，可以限制进程的 Memory 使用量
-- blkio 子系统，可以限制进程的块设备 IO
-- devices 子系统，可以控制进程能够访问某些设备
-- net_cls 子系统，可以标记 cgroups 中进程的网络数据包，然后可以使用 tc 模块（traffic control）对数据包进行控制
-- freezer 子系统，可以挂起或者恢复 cgroup 中的进程
+首先，cgroup 定义了下面的[一系列子系统(controller)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h)，每个子系统用于控制某一类资源:
+- cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者内存节点
+- cpu，主要限制进程的 CPU 使用率
+- cpuacct，可以统计 cgroup 中的进程的 CPU 使用报告
+- io，可以限制进程的块设备 IO
+- memory，可以限制进程的 Memory 使用量
+- devices，可以控制进程能够访问某些设备
+- freezer，可以挂起或者恢复 cgroup 中的进程
+- net_cls，可以标记 cgroups 中进程的网络数据包，然后可以使用 tc 模块（traffic control）对数据包进行控制
+- net_prio, 针对cgroup中的每个网络接口提供一种动态修改网络流量优先级的方法
+- perf_event, 支持访问cgroup中的性能事件
+- hugetlb, 为cgroup开启对大页内存的支持
+- pids, 限制cgroup中的进程数量
+- rdma
 
 这里面最常用的是对于 CPU 和内存的控制, 所以下面就详细来说它.
 
@@ -368,9 +373,37 @@ cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,mem
 cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
 cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
 cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
+$ mount -t cgroup2
+cgroup2 on /sys/fs/cgroup/unified type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate)
 ```
 
 ![cgroup 对于 Docker 资源的控制，在用户态的表现](/misc/img/container/1c762a6283429ff3587a7fc370fc090f.png)
+
+> 系统boot时，systemd默认使用cgroup v1
+
+> [禁用cgroup v1的方法: 在/boot/grub/grub.cfg添加内核启动参数`cgroup_no_v1=all(Available from Linux 4.6 onwards)`或`systemd.unified_cgroup_hierarchy=1(Available from systemd v226 onwards)`](https://sourcegraph.com/github.com/torvalds/linux@v5.8-rc4/-/blob/Documentation/admin-guide/kernel-parameters.txt#L507:1). 因为cgroup v1/2默认都是开启的, 但默认使用v1, 禁用v1后就等于默认使用了v2.
+
+## cgroup v1/2
+![](/misc/img/container/20200714222559.png) from [cgroupv2-fosdem.pdf](https://chrisdown.name/talks/cgroupv2/cgroupv2-fosdem.pdf)
+
+## cgroup v2
+CGroup V2 在 Linux Kernel 4.5中被引入，并且考虑到其它已有程序的依赖，V2 会和 V1 并存几年. 针对于 CGroup V1 中 Subsystem, Herarchy, CGroup 的关系混乱，CGroup V2 中，引入 unified hierarchy 的概念，即只有一个 Hierarchy, 即将所有的controller挂载到unified hierarchy，仍然通过 mount 来挂载 CGroup V2:
+```bash
+mount -t cgroup2 none $MOUNT_POINT # 会将所有可用的controller自动被挂载进去
+```
+
+> cgroup v2可以使用的controller必须没有被cgroup v1使用. 如果想在cgroup v2使用已经被cgroup v1使用的controller，则需要将cgroup v1已经挂载的controller umount掉之后，才能在v2中使用.
+
+挂载完成之后，目录下会有三个 CGroup 核心文件:
+- cgroup.controllers: 一个read-only文件, 列出当前 CGroup 支持的所有 Controller，如: cpu io memory
+- cgroup.procs: 在刚挂载时，Root CGroup 目录下的 cgroup.procs 文件中会包含系统当前所有的Proc PID(除了僵尸进程)。同样，可以通过将 Proc PID 写入 cgroup.procs 来将 Proc 加入到 CGroup
+- cgroup.subtree_control: 用于控制该 CGroup 下 Controller 开关，只有列在 cgroup.controllers 中的 Controller 才可以被开启，默认情况下所有的 Controller 都是关闭的
+
+	cgroup.subtree_control文件内容格式: controller之间使用空格间隔，前面用”+”表示启用,使用”-“表示停用, 比如`echo '+pids -memory' > x/y/cgroup.subtree_control`
+
+	![](/misc/img/container/t01ba8513f0d6685aa0.png)
+
+> 站在进程的角度来说，在挂载 CGroup V2时，所有已有Live Proc PID 都会加入到 Root CGroup，之后所有新创建的进程都会自动加入到父进程所属的 CGroup，由于 V2 只有一个 Hierarchy，因此一个进程同一时间只会属于一个 CGroup, 此时`cat /proc/${pid}/cgroup`仅返回一行内容.
 
 ## cgroup的内核实现
 参考:
@@ -484,3 +517,194 @@ void online_fair_sched_group(struct task_group *tg)
 对于内存来讲，css_alloc 函数就是 mem_cgroup_css_alloc. 这里面会调用 mem_cgroup_alloc，创建一个 [struct mem_cgroup](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/memcontrol.h#L201). 在这个结构中，第一项就是 cgroup_subsys_state，也就是说，mem_cgroup 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，因此可以通过强制类型转换变为 mem_cgroup.
 
 在 cgroup_init 函数中，cgroup 的初始化还做了一件很重要的事情，它会调用 cgroup_init_cftypes(NULL, cgroup_base_files)，来初始化对于 cgroup 文件类型 cftype 的操作函数，也就是将 struct kernfs_ops *kf_ops 设置为 cgroup_kf_ops.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L4812
+// cgroup_base_files is for cgroup v2, cgroup1_base_files is for cgroup v1.
+/* cgroup core interface files for the default hierarchy */
+static struct cftype cgroup_base_files[] = {
+	{
+		.name = "cgroup.type",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = cgroup_type_show,
+		.write = cgroup_type_write,
+	},
+	{
+		.name = "cgroup.procs",
+		.flags = CFTYPE_NS_DELEGATABLE,
+		.file_offset = offsetof(struct cgroup, procs_file),
+		.release = cgroup_procs_release,
+		.seq_start = cgroup_procs_start,
+		.seq_next = cgroup_procs_next,
+		.seq_show = cgroup_procs_show,
+		.write = cgroup_procs_write,
+	},
+	{
+		.name = "cgroup.threads",
+		.flags = CFTYPE_NS_DELEGATABLE,
+		.release = cgroup_procs_release,
+		.seq_start = cgroup_threads_start,
+		.seq_next = cgroup_procs_next,
+		.seq_show = cgroup_procs_show,
+		.write = cgroup_threads_write,
+	},
+	{
+		.name = "cgroup.controllers",
+		.seq_show = cgroup_controllers_show,
+	},
+	{
+		.name = "cgroup.subtree_control",
+		.flags = CFTYPE_NS_DELEGATABLE,
+		.seq_show = cgroup_subtree_control_show,
+		.write = cgroup_subtree_control_write,
+	},
+	{
+		.name = "cgroup.events",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.file_offset = offsetof(struct cgroup, events_file),
+		.seq_show = cgroup_events_show,
+	},
+	{
+		.name = "cgroup.max.descendants",
+		.seq_show = cgroup_max_descendants_show,
+		.write = cgroup_max_descendants_write,
+	},
+	{
+		.name = "cgroup.max.depth",
+		.seq_show = cgroup_max_depth_show,
+		.write = cgroup_max_depth_write,
+	},
+	{
+		.name = "cgroup.stat",
+		.seq_show = cgroup_stat_show,
+	},
+	{
+		.name = "cgroup.freeze",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = cgroup_freeze_show,
+		.write = cgroup_freeze_write,
+	},
+	{
+		.name = "cpu.stat",
+		.seq_show = cpu_stat_show,
+	},
+#ifdef CONFIG_PSI
+	{
+		.name = "io.pressure",
+		.seq_show = cgroup_io_pressure_show,
+		.write = cgroup_io_pressure_write,
+		.poll = cgroup_pressure_poll,
+		.release = cgroup_pressure_release,
+	},
+	{
+		.name = "memory.pressure",
+		.seq_show = cgroup_memory_pressure_show,
+		.write = cgroup_memory_pressure_write,
+		.poll = cgroup_pressure_poll,
+		.release = cgroup_pressure_release,
+	},
+	{
+		.name = "cpu.pressure",
+		.seq_show = cgroup_cpu_pressure_show,
+		.write = cgroup_cpu_pressure_write,
+		.poll = cgroup_pressure_poll,
+		.release = cgroup_pressure_release,
+	},
+#endif /* CONFIG_PSI */
+	{ }	/* terminate */
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778
+static struct kernfs_ops cgroup_kf_ops = {
+	.atomic_write_len	= PAGE_SIZE,
+	.open			= cgroup_file_open,
+	.release		= cgroup_file_release,
+	.write			= cgroup_file_write,
+	.poll			= cgroup_file_poll,
+	.seq_start		= cgroup_seqfile_start,
+	.seq_next		= cgroup_seqfile_next,
+	.seq_stop		= cgroup_seqfile_stop,
+	.seq_show		= cgroup_seqfile_show,
+};
+```
+
+在 cgroup 初始化完毕之后，接下来就是创建一个 cgroup 的文件系统，用于配置和操作 cgroup. cgroup 是一种特殊的文件系统. 它的定义如下：
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2157
+struct file_system_type cgroup_fs_type = {
+	.name			= "cgroup",
+	.init_fs_context	= cgroup_init_fs_context,
+	.parameters		= cgroup1_fs_parameters,
+	.kill_sb		= cgroup_kill_sb,
+	.fs_flags		= FS_USERNS_MOUNT,
+};
+
+static struct file_system_type cgroup2_fs_type = {
+	.name			= "cgroup2",
+	.init_fs_context	= cgroup_init_fs_context,
+	.parameters		= cgroup2_fs_parameters,
+	.kill_sb		= cgroup_kill_sb,
+	.fs_flags		= FS_USERNS_MOUNT,
+};
+```
+
+> cgroup2_fs_type.mount deleted on 90129625d9203a917fc1d3e4768976ba90d71b44 for "cgroup: start switching to fs_context "
+
+当 mount 这个 cgroup 文件系统的时候，会调用 [cgroup_init_fs_context](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2117)???.
+
+cgroup 被组织成为树形结构，因而有 cgroup_root. [init_cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1908) 会初始化这个 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157). 它有一个成员 kf_root，是 cgroup 文件系统的根 [struct kernfs_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kernfs.h#L180). kernfs_create_root 就是用来创建这个 kernfs_root 结构的 by [cgroup_setup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927).
+
+就像在普通文件系统上，每一个文件都对应一个 inode，在 cgroup 文件系统上，每个文件都对应一个 struct kernfs_node 结构，当然 kernfs_root 作为文件系的根也对应一个 kernfs_node 结构.
+
+接下来，cgroup_setup_root中的[css_populate_dir](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927) 会调用 cgroup_addrm_files->cgroup_add_file->cgroup_add_file，来创建整棵文件树，并且为树中的每个文件创建对应的 kernfs_node 结构，并将这个文件的操作函数设置为 kf_ops，也即指向 [cgroup_kf_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778) 
+
+从 cgroup_setup_root 返回后，接下来，在 cgroup_init 中，要做的一件事情是 [cgroup_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2084)->[cgroup_do_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2025)，调用 kernfs_mount 真的去 mount 这个文件系统，返回一个普通的文件系统都认识的 dentry. 这种特殊的文件系统对应的文件操作函数为 [kernfs_file_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/kernfs/file.c#L961)???(流程未梳理通).
+
+> cgroup_do_mount deleted on cca8f32714d3a8bb4d109c9d7d790fd705b734e5 for "cgroup: store a reference to cgroup_ns into cgroup_fs_context".
+
+当要写入一个 CGroup 文件来设置参数的时候，根据文件系统的操作，kernfs_fop_write 会被调用，在这里面会调用 kernfs_ops 的 write 函数，根据上面的定义为 cgroup_file_write，在这里会调用 cftype 的 write 函数. 对于 CPU 和内存的 write 函数，有以下不同的定义.
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L7975
+static struct cftype cpu_files[] = {
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	{
+		.name = "weight",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_u64 = cpu_weight_read_u64,
+		.write_u64 = cpu_weight_write_u64,
+	},
+	{
+		.name = "weight.nice",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_s64 = cpu_weight_nice_read_s64,
+		.write_s64 = cpu_weight_nice_write_s64,
+	},
+#endif
+#ifdef CONFIG_CFS_BANDWIDTH
+	{
+		.name = "max",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = cpu_max_show,
+		.write = cpu_max_write,
+	},
+#endif
+#ifdef CONFIG_UCLAMP_TASK_GROUP
+	{
+		.name = "uclamp.min",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = cpu_uclamp_min_show,
+		.write = cpu_uclamp_min_write,
+	},
+	{
+		.name = "uclamp.max",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = cpu_uclamp_max_show,
+		.write = cpu_uclamp_max_write,
+	},
+#endif
+	{ }	/* terminate */
+};
+```
+
+如果设置的是 cpu.weight，则调用 cpu_weight_write_u64 -> [sched_group_set_shares](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/fair.c#L11040). 在sched_group_set_shares里面，task_group 的 shares 变量更新了，并且更新了 CPU 队列上的调度实体.
