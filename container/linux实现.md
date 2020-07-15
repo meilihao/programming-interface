@@ -33,10 +33,10 @@ Docker 本身提供了限制cpu和内存的使用.
 - memory
 
     - `-m --memory`：容器能使用的最大内存大小
-    - `–memory-swap`：容器能够使用的 swap 大小
-    - `–memory-swappiness`：默认情况下，主机可以把容器使用的匿名页 swap 出来，可以设置一个 0-100 之间的值，代表允许 swap 出来的比例
-    - `–memory-reservation`：设置一个内存使用的 soft limit，如果 docker 发现主机内存不足，会执行 OOM (Out of Memory) 操作. 这个值必须小于 --memory 设置的值- `–kernel-memory`：容器能够使用的 kernel memory 大小
-    - `–oom-kill-disable`：是否运行 OOM (Out of Memory) 的时候杀死容器. 只有设置了 -m，才可以把这个选项设置为 false，否则容器会耗尽主机内存，而且导致主机应用被杀死
+    - `--memory-swap`：容器能够使用的 swap 大小
+    - `--memory-swappiness`：默认情况下，主机可以把容器使用的匿名页 swap 出来，可以设置一个 0-100 之间的值，代表允许 swap 出来的比例
+    - `--memory-reservation`：设置一个内存使用的 soft limit，如果 docker 发现主机内存不足，会执行 OOM (Out of Memory) 操作. 这个值必须小于 --memory 设置的值- `--kernel-memory`：容器能够使用的 kernel memory 大小
+    - `--oom-kill-disable`：是否运行 OOM (Out of Memory) 的时候杀死容器. 只有设置了 -m，才可以把这个选项设置为 false，否则容器会耗尽主机内存，而且导致主机应用被杀死
 
 ## [namespace](https://man7.org/linux/man-pages/man7/namespaces.7.html)
 参考:
@@ -145,7 +145,7 @@ child has terminated
 64267
 ```
 
-在内核里面，clone 会调用 _do_fork->copy_process->copy_namespaces，也就是说，在创建子进程的时候，有一个机会可以复制和设置 namespace.
+在内核里面，clone 会调用 [_do_fork](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/fork.c#L2416)->[copy_process](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/fork.c#L1841)->[copy_namespaces](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/nsproxy.c#L151)，也就是说，在创建子进程的时候，有一个机会可以复制和设置 namespace.
 
 namespace 在每一个进程的 task_struct 里面，有一个指向 namespace 结构体的指针 nsproxy.
 ```c
@@ -339,28 +339,32 @@ register_pernet_device 函数注册了一个 loopback_net_ops，在这里面，�
 ![/misc/img/container/56bb9502b58628ff3d1bee83b6f53cd7.png]
 
 ## cgroup
+参考:
+- [docker cgroup 技术之memory（首篇）](https://www.cnblogs.com/charlieroro/p/10180827.html)
+
 cgroup 全称是 control group，顾名思义，它是用来做“控制”的, 即控制资源的使用. 当前最新版本是cgroup v2(`grep cgroup /proc/filesystems`时会看到cgroup2).
 
-首先，cgroup 定义了下面的[一系列子系统(controller)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h)，每个子系统用于控制某一类资源:
-- cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者内存节点
+首先，cgroup 定义了下面的[一系列子系统(subsystem也称为resource controller)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h)，每个子系统用于控制某一类资源:
+- cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者NUMA节点
 - cpu，主要限制进程的 CPU 使用率
 - cpuacct，可以统计 cgroup 中的进程的 CPU 使用报告
-- io，可以限制进程的块设备 IO
-- memory，可以限制进程的 Memory 使用量
-- devices，可以控制进程能够访问某些设备
+- io，可以限制进程的块设备 IO速度
+- memory，可以限制进程的 Memory 使用量, 包括process memory, kernel memory, 和swap
+- devices，可以控制进程能够访问某些设备创建(mknod)
 - freezer，可以挂起或者恢复 cgroup 中的进程
-- net_cls，可以标记 cgroups 中进程的网络数据包，然后可以使用 tc 模块（traffic control）对数据包进行控制
+- net_cls，可以标记 cgroups 中进程的网络数据包，然后可以使用 tc 模块（traffic control）/nftables对数据包进行控制. 只对发出去的网络包生效，对收到的网络包不起作用
 - net_prio, 针对cgroup中的每个网络接口提供一种动态修改网络流量优先级的方法
 - perf_event, 支持访问cgroup中的性能事件
 - hugetlb, 为cgroup开启对大页内存的支持
-- pids, 限制cgroup中的进程数量
-- rdma
+- pids, 限制一个cgroup及其子孙cgroup中的总进程数
+- rdma, cgroup中使用的rdma
 
 这里面最常用的是对于 CPU 和内存的控制, 所以下面就详细来说它.
 
 在 Linux 上，为了操作 cgroup，有一个专门的 cgroup 文件系统，运行 `mount -t cgroup` 命令可以查看. 可以看到cgroup 文件系统均挂载到 /sys/fs/cgroup 下，通过该命令可以看到可以用 cgroup 控制哪些资源.
 
 ```bash
+# --- ubuntu 20.04默认系统boot时，systemd默认使用cgroup v1, 且cgroup v2挂载在/sys/fs/cgroup/unified
 $ mount -t cgroup
 cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,name=systemd)
 cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
@@ -375,13 +379,37 @@ cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,fr
 cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
 $ mount -t cgroup2
 cgroup2 on /sys/fs/cgroup/unified type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate)
+# --- 用`cgroup_no_v1=all`仅启用cgroup v2的效果
+$ ll /sys/fs/cgroup
+总用量 0
+-r--r--r--  1 root root 0 7月  15 14:26 cgroup.controllers
+-rw-r--r--  1 root root 0 7月  15 14:28 cgroup.max.depth
+-rw-r--r--  1 root root 0 7月  15 14:28 cgroup.max.descendants
+-rw-r--r--  1 root root 0 7月  15 14:26 cgroup.procs
+-r--r--r--  1 root root 0 7月  15 14:28 cgroup.stat
+-rw-r--r--  1 root root 0 7月  15 14:26 cgroup.subtree_control
+-rw-r--r--  1 root root 0 7月  15 14:28 cgroup.threads
+-rw-r--r--  1 root root 0 7月  15 14:28 cpu.pressure
+-r--r--r--  1 root root 0 7月  15 14:28 cpuset.cpus.effective
+-r--r--r--  1 root root 0 7月  15 14:28 cpuset.mems.effective
+drwxr-xr-x  2 root root 0 7月  15 14:26 init.scope/
+-rw-r--r--  1 root root 0 7月  15 14:28 io.cost.model
+-rw-r--r--  1 root root 0 7月  15 14:28 io.cost.qos
+-rw-r--r--  1 root root 0 7月  15 14:28 io.pressure
+-rw-r--r--  1 root root 0 7月  15 14:28 memory.pressure
+drwxr-xr-x 54 root root 0 7月  15 14:28 system.slice/
+drwxr-xr-x  3 root root 0 7月  15 14:27 user.slice/
 ```
 
 ![cgroup 对于 Docker 资源的控制，在用户态的表现](/misc/img/container/1c762a6283429ff3587a7fc370fc090f.png)
 
-> 系统boot时，systemd默认使用cgroup v1
-
 > [禁用cgroup v1的方法: 在/boot/grub/grub.cfg添加内核启动参数`cgroup_no_v1=all(Available from Linux 4.6 onwards)`或`systemd.unified_cgroup_hierarchy=1(Available from systemd v226 onwards)`](https://sourcegraph.com/github.com/torvalds/linux@v5.8-rc4/-/blob/Documentation/admin-guide/kernel-parameters.txt#L507:1). 因为cgroup v1/2默认都是开启的, 但默认使用v1, 禁用v1后就等于默认使用了v2.
+
+	```bash
+	# vim /etc/default/grub
+	GRUB_CMDLINE_LINUX="cgroup_no_v1=all"
+	# update-grub2
+	```
 
 ## cgroup v1/2
 ![](/misc/img/container/20200714222559.png) from [cgroupv2-fosdem.pdf](https://chrisdown.name/talks/cgroupv2/cgroupv2-fosdem.pdf)
@@ -408,6 +436,7 @@ mount -t cgroup2 none $MOUNT_POINT # 会将所有可用的controller自动被挂
 ## cgroup的内核实现
 参考:
 - [云计算时代，容器底层 cgroup 的代码实现分析](https://www.xujun.org/note-113352.html)
+- [源码解析容器底层cgroup的实现](https://www.sohu.com/a/402302235_827544)
 
 在系统初始化的时候，cgroup 也会进行初始化: 在 [start_kernel](https://elixir.bootlin.com/linux/v5.8-rc4/source/init/main.c#L830) 中，[cgroup_init_early](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5633) 和 [cgroup_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5672) 都会进行初始化.
 
@@ -485,7 +514,7 @@ struct cgroup_subsys memory_cgrp_subsys = {
 
 cgroup_init_subsys 里面会做两件事情，一个是调用 cgroup_subsys 的 css_alloc 函数创建一个 cgroup_subsys_state；另外就是调用 online_css，也即调用 cgroup_subsys 的 css_online 函数，激活这个 cgroup.
 
-对于 CPU 来讲，css_alloc 函数就是 [cpu_cgroup_css_alloc](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015). 这里面会调用 sched_create_group 创建一个 [struct task_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/sched.h#L365). 在这个结构中，第一项就是 cgroup_subsys_state，也就是说，task_group 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，可以通过强制类型转换变为 task_group.
+对于 CPU 来讲，css_alloc 函数就是 [cpu_cgroup_css_alloc](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015). 这里面会调用 sched_create_group 创建一个 [struct task_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/sched.h#L365). 在这个结构中，第一项就是 [cgroup_subsys_state](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup-defs.h#L138)，也就是说，task_group 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，可以通过强制类型转换变为 task_group.
 
 在 task_group 结构中，有一个成员是 sched_entity，即调度的实体，也即这一个 task_group 也是一个调度实体.
 
@@ -516,7 +545,7 @@ void online_fair_sched_group(struct task_group *tg)
 
 对于内存来讲，css_alloc 函数就是 mem_cgroup_css_alloc. 这里面会调用 mem_cgroup_alloc，创建一个 [struct mem_cgroup](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/memcontrol.h#L201). 在这个结构中，第一项就是 cgroup_subsys_state，也就是说，mem_cgroup 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，因此可以通过强制类型转换变为 mem_cgroup.
 
-在 cgroup_init 函数中，cgroup 的初始化还做了一件很重要的事情，它会调用 cgroup_init_cftypes(NULL, cgroup_base_files)，来初始化对于 cgroup 文件类型 cftype 的操作函数，也就是将 struct kernfs_ops *kf_ops 设置为 cgroup_kf_ops.
+在 cgroup_init 函数中，cgroup 的初始化还做了一件很重要的事情，它会调用 cgroup_init_cftypes(NULL, cgroup_base_files)，来初始化对于 cgroup 文件类型 cftype 的操作函数，也就是将 struct kernfs_ops *kf_ops 设置为 [cgroup_kf_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778).
 
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L4812
@@ -652,15 +681,20 @@ static struct file_system_type cgroup2_fs_type = {
 
 当 mount 这个 cgroup 文件系统的时候，会调用 [cgroup_init_fs_context](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2117)???.
 
-cgroup 被组织成为树形结构，因而有 cgroup_root. [init_cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1908) 会初始化这个 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157). 它有一个成员 kf_root，是 cgroup 文件系统的根 [struct kernfs_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kernfs.h#L180). kernfs_create_root 就是用来创建这个 kernfs_root 结构的 by [cgroup_setup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927).
+cgroup 被组织成为树形结构，因而有 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157). cgroup_init_early -> [init_cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1908) 会初始化这个 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157).
+
+
+它有一个成员 kf_root，是 cgroup 文件系统的根 [struct kernfs_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kernfs.h#L180). kernfs_create_root 就是用来创建这个 kernfs_root 结构的 by `cgroup_init -> [cgroup_setup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927)`.
 
 就像在普通文件系统上，每一个文件都对应一个 inode，在 cgroup 文件系统上，每个文件都对应一个 struct kernfs_node 结构，当然 kernfs_root 作为文件系的根也对应一个 kernfs_node 结构.
 
-接下来，cgroup_setup_root中的[css_populate_dir](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927) 会调用 cgroup_addrm_files->cgroup_add_file->cgroup_add_file，来创建整棵文件树，并且为树中的每个文件创建对应的 kernfs_node 结构，并将这个文件的操作函数设置为 kf_ops，也即指向 [cgroup_kf_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778) 
+接下来，cgroup_setup_root中的[css_populate_dir](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927) 会调用 [cgroup_addrm_files](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3858)->[cgroup_add_file](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3810)，来创建整棵文件树，并且为树中的每个文件创建对应的 kernfs_node 结构，并将这个文件的操作函数设置为 kf_ops，也即指向 [cgroup_kf_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778) 
 
-从 cgroup_setup_root 返回后，接下来，在 cgroup_init 中，要做的一件事情是 [cgroup_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2084)->[cgroup_do_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2025)，调用 kernfs_mount 真的去 mount 这个文件系统，返回一个普通的文件系统都认识的 dentry. 这种特殊的文件系统对应的文件操作函数为 [kernfs_file_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/kernfs/file.c#L961)???(流程未梳理通).
+从 cgroup_setup_root 返回后，接下来，在 cgroup_init 中，要做的一件事情是 [cgroup_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2084)->[cgroup_do_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2025)，调用 kernfs_get_tree 真的去 mount 这个文件系统. 这种特殊的文件系统对应的文件操作函数为 [kernfs_file_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/kernfs/file.c#L961) by kernfs_get_tree -> kernfs_fill_super -> kernfs_get_inode -> kernfs_init_inode 的 `inode->i_fop = &kernfs_file_fops`
 
 > cgroup_do_mount deleted on cca8f32714d3a8bb4d109c9d7d790fd705b734e5 for "cgroup: store a reference to cgroup_ns into cgroup_fs_context".
+
+> kernfs_mount deleted on 23bf1b6be9c291a7130118dcc7384f72ac04d813 for "kernfs, sysfs, cgroup, intel_rdt: Support fs_context".
 
 当要写入一个 CGroup 文件来设置参数的时候，根据文件系统的操作，kernfs_fop_write 会被调用，在这里面会调用 kernfs_ops 的 write 函数，根据上面的定义为 cgroup_file_write，在这里会调用 cftype 的 write 函数. 对于 CPU 和内存的 write 函数，有以下不同的定义.
 

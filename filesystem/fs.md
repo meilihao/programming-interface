@@ -246,7 +246,7 @@ bio结构是在文件系统层和块层之间的一个接口.
 	- state : 进程的总状态信息(ps可解析该信息)
 	- statm : 内存使用情况的信息
 	- task : 为进程中的每个线程均包含一个子目录(始自 Linux 2.6)
-
+- cgroup : 查看系统支持的cgruop subsystem(controller)
 - acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用.
 - bus : 包含总线子系统的信息, 比如pci总线或各自系统的usb接口
 - cmdline : 内核启动参数
