@@ -437,6 +437,7 @@ mount -t cgroup2 none $MOUNT_POINT # 会将所有可用的controller自动被挂
 参考:
 - [云计算时代，容器底层 cgroup 的代码实现分析](https://www.xujun.org/note-113352.html)
 - [源码解析容器底层cgroup的实现](https://www.sohu.com/a/402302235_827544)
+- [云计算时代，容器底层cgroup如何实现资源分组？](https://mp.weixin.qq.com/s?__biz=MjM5NzM0MjcyMQ==&mid=2650091443&idx=2&sn=2b53d6b5dac5d87a92b50afceabe0379&chksm=bedaf4dd89ad7dcbd4bc12fd92dc1645a2003614e4295d5be0ca7ec9e29c79ad3df9829db47a&scene=21#wechat_redirect)
 
 在系统初始化的时候，cgroup 也会进行初始化: 在 [start_kernel](https://elixir.bootlin.com/linux/v5.8-rc4/source/init/main.c#L830) 中，[cgroup_init_early](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5633) 和 [cgroup_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5672) 都会进行初始化.
 
@@ -476,6 +477,112 @@ SUBSYS 这个宏定义了这个 cgroup_subsys 数组，数组中的项定义在 
 
 因此能够找到 cpu_cgrp_subsys 和 memory_cgrp_subsys 的定义.
 ```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup-defs.h#L621
+/*
+ * Control Group subsystem type.
+ * See Documentation/admin-guide/cgroup-v1/cgroups.rst for details
+ */
+struct cgroup_subsys {
+	struct cgroup_subsys_state *(*css_alloc)(struct cgroup_subsys_state *parent_css);
+	int (*css_online)(struct cgroup_subsys_state *css);
+	void (*css_offline)(struct cgroup_subsys_state *css);
+	void (*css_released)(struct cgroup_subsys_state *css);
+	void (*css_free)(struct cgroup_subsys_state *css);
+	void (*css_reset)(struct cgroup_subsys_state *css);
+	void (*css_rstat_flush)(struct cgroup_subsys_state *css, int cpu);
+	int (*css_extra_stat_show)(struct seq_file *seq,
+				   struct cgroup_subsys_state *css);
+
+	int (*can_attach)(struct cgroup_taskset *tset);
+	void (*cancel_attach)(struct cgroup_taskset *tset);
+	void (*attach)(struct cgroup_taskset *tset);
+	void (*post_attach)(void);
+	int (*can_fork)(struct task_struct *task,
+			struct css_set *cset);
+	void (*cancel_fork)(struct task_struct *task, struct css_set *cset);
+	void (*fork)(struct task_struct *task);
+	void (*exit)(struct task_struct *task);
+	void (*release)(struct task_struct *task);
+	void (*bind)(struct cgroup_subsys_state *root_css);
+
+	bool early_init:1;
+
+	/*
+	 * If %true, the controller, on the default hierarchy, doesn't show
+	 * up in "cgroup.controllers" or "cgroup.subtree_control", is
+	 * implicitly enabled on all cgroups on the default hierarchy, and
+	 * bypasses the "no internal process" constraint.  This is for
+	 * utility type controllers which is transparent to userland.
+	 *
+	 * An implicit controller can be stolen from the default hierarchy
+	 * anytime and thus must be okay with offline csses from previous
+	 * hierarchies coexisting with csses for the current one.
+	 */
+	bool implicit_on_dfl:1;
+
+	/*
+	 * If %true, the controller, supports threaded mode on the default
+	 * hierarchy.  In a threaded subtree, both process granularity and
+	 * no-internal-process constraint are ignored and a threaded
+	 * controllers should be able to handle that.
+	 *
+	 * Note that as an implicit controller is automatically enabled on
+	 * all cgroups on the default hierarchy, it should also be
+	 * threaded.  implicit && !threaded is not supported.
+	 */
+	bool threaded:1;
+
+	/*
+	 * If %false, this subsystem is properly hierarchical -
+	 * configuration, resource accounting and restriction on a parent
+	 * cgroup cover those of its children.  If %true, hierarchy support
+	 * is broken in some ways - some subsystems ignore hierarchy
+	 * completely while others are only implemented half-way.
+	 *
+	 * It's now disallowed to create nested cgroups if the subsystem is
+	 * broken and cgroup core will emit a warning message on such
+	 * cases.  Eventually, all subsystems will be made properly
+	 * hierarchical and this will go away.
+	 */
+	bool broken_hierarchy:1;
+	bool warned_broken_hierarchy:1;
+
+	/* the following two fields are initialized automtically during boot */
+	int id;
+	const char *name;
+
+	/* optional, initialized automatically during boot if not set */
+	const char *legacy_name;
+
+	/* link to parent, protected by cgroup_lock() */
+	struct cgroup_root *root;
+
+	/* idr for css->id */
+	struct idr css_idr;
+
+	/*
+	 * List of cftypes.  Each entry is the first entry of an array
+	 * terminated by zero length name.
+	 */
+	struct list_head cfts;
+
+	/*
+	 * Base cftypes which are automatically registered.  The two can
+	 * point to the same array.
+	 */
+	struct cftype *dfl_cftypes;	/* for the default hierarchy */
+	struct cftype *legacy_cftypes;	/* for the legacy hierarchies */
+
+	/*
+	 * A subsystem may depend on other subsystems.  When such subsystem
+	 * is enabled on a cgroup, the depended-upon subsystems are enabled
+	 * together if available.  Subsystems enabled due to dependency are
+	 * not visible to userland until explicitly enabled.  The following
+	 * specifies the mask of subsystems that this one depends on.
+	 */
+	unsigned int depends_on;
+};
+
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015
 struct cgroup_subsys cpu_cgrp_subsys = {
 	.css_alloc	= cpu_cgroup_css_alloc,
@@ -510,13 +617,17 @@ struct cgroup_subsys memory_cgrp_subsys = {
 };
 ```
 
-在 for_each_subsys 的循环里面，cgroup_subsys[]数组中的每一个 cgroup_subsys，都会调用 [cgroup_init_subsys](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5574)，对于 cgroup_subsys 对于初始化.
+在 for_each_subsys 的循环里面，cgroup_subsys[]数组中的每一个 [cgroup_subsys](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup-defs.h#L621)，都会调用 [cgroup_init_subsys](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L5574)，s 和 cgroup 是多对多的关系，通过 css 实现, 由cgroup_init_subsys完成.
 
 cgroup_init_subsys 里面会做两件事情，一个是调用 cgroup_subsys 的 css_alloc 函数创建一个 cgroup_subsys_state；另外就是调用 online_css，也即调用 cgroup_subsys 的 css_online 函数，激活这个 cgroup.
+
+对于初始化 cgroup_subsys, 其中最重要的是它关联的 cftype 文件, mount 和 mkdir 的时候创建的一系列文件实际上就是它们, 由cgroup_init -> `cgroup_init_cftypes(NULL, cgroup_base_files)`完成
 
 对于 CPU 来讲，css_alloc 函数就是 [cpu_cgroup_css_alloc](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L8015). 这里面会调用 sched_create_group 创建一个 [struct task_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/sched.h#L365). 在这个结构中，第一项就是 [cgroup_subsys_state](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup-defs.h#L138)，也就是说，task_group 是 cgroup_subsys_state 的一个扩展，最终返回的是指向 cgroup_subsys_state 结构的指针，可以通过强制类型转换变为 task_group.
 
 在 task_group 结构中，有一个成员是 sched_entity，即调度的实体，也即这一个 task_group 也是一个调度实体.
+
+>  task_struct 的 cgroups 字段就是 css_set 指针类型，也就是进程指向一个 css_set 对象（某一组 css）
 
 接下来，online_css 会被调用. 对于 CPU 来讲，online_css 调用的是 [cpu_cgroup_css_online](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L7202). 它会调用 [sched_online_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/core.c#L7070)->[online_fair_sched_group](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/sched/fair.c#L10964).
 
@@ -679,10 +790,7 @@ static struct file_system_type cgroup2_fs_type = {
 
 > cgroup2_fs_type.mount deleted on 90129625d9203a917fc1d3e4768976ba90d71b44 for "cgroup: start switching to fs_context "
 
-当 mount 这个 cgroup 文件系统的时候，会调用 [cgroup_init_fs_context](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2117)???.
-
-cgroup 被组织成为树形结构，因而有 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157). cgroup_init_early -> [init_cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1908) 会初始化这个 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157).
-
+cgroup 被组织成为树形结构，因而有 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157)即cgrp_dfl_root, 看名字就知道，default cgroup_root，默认的 cgroup 层级结构，它在 cgroup v1 中戏份有限，在 v2 中是 c 位. cgroup_init_early -> [init_cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1908) 会初始化这个 [cgroup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L157).
 
 它有一个成员 kf_root，是 cgroup 文件系统的根 [struct kernfs_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kernfs.h#L180). kernfs_create_root 就是用来创建这个 kernfs_root 结构的 by `cgroup_init -> [cgroup_setup_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927)`.
 
@@ -690,7 +798,11 @@ cgroup 被组织成为树形结构，因而有 [cgroup_root](https://elixir.boot
 
 接下来，cgroup_setup_root中的[css_populate_dir](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L1927) 会调用 [cgroup_addrm_files](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3858)->[cgroup_add_file](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3810)，来创建整棵文件树，并且为树中的每个文件创建对应的 kernfs_node 结构，并将这个文件的操作函数设置为 kf_ops，也即指向 [cgroup_kf_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L3778) 
 
-从 cgroup_setup_root 返回后，接下来，在 cgroup_init 中，要做的一件事情是 [cgroup_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2084)->[cgroup_do_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2025)，调用 kernfs_get_tree 真的去 mount 这个文件系统. 这种特殊的文件系统对应的文件操作函数为 [kernfs_file_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/kernfs/file.c#L961) by kernfs_get_tree -> kernfs_fill_super -> kernfs_get_inode -> kernfs_init_inode 的 `inode->i_fop = &kernfs_file_fops`
+从 cgroup_setup_root 返回后，接下来是创建 sysfs 的 fs/cgroup（也就是/sys/fs/cgroup 目录），注册文件系统cgroup2_fs_type.
+
+初始化完毕，接下来就可以 mount cgroup 文件系统了.
+
+当 mount 这个 cgroup 文件系统的时候，会调用 [cgroup_init_fs_context](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2117)???. ，要做的一件事情是 [cgroup_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2084)->[cgroup_do_get_tree](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/cgroup/cgroup.c#L2025)，调用 kernfs_get_tree 真的去 mount 这个文件系统. 这种特殊的文件系统对应的文件操作函数为 [kernfs_file_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/kernfs/file.c#L961) by kernfs_get_tree -> kernfs_fill_super -> kernfs_get_inode -> kernfs_init_inode 的 `inode->i_fop = &kernfs_file_fops`
 
 > cgroup_do_mount deleted on cca8f32714d3a8bb4d109c9d7d790fd705b734e5 for "cgroup: store a reference to cgroup_ns into cgroup_fs_context".
 
