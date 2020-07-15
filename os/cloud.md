@@ -11,3 +11,5 @@
     云服务商提供给客户可直接使用的软件服务, 比如Google Docs.
 
 ![云计算服务层次模型](/misc/img/os/cloud_level.jpeg)
+
+![数据中心操作系统](/misc/img/os/1a8450f1fcda83b75c9ba301ebf9fbe5.jpg)
