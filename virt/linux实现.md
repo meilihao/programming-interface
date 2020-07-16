@@ -439,3 +439,243 @@ GSList *object_class_get_list(const char *implements_type,
 因而 pc_machine_##suffix##class_init 会被调用，在这里面，pc_i440fx_machine_options 才真正被调用初始化 MachineClass，并且将 MachineClass 的 init 函数设置为 pc_init##suffix. 也即，当 select_machine 执行完毕后，就有一个 MachineClass 了.
 
 接着，回到 [object_new_with_class](https://elixir.bootlin.com/qemu/latest/source/qom/object.c#L690). 这就很好理解了，MachineClass 是一个 Class 类，接下来应该通过它生成一个 Instance，也即对象，这就是 object_new_with_class 的作用.
+
+object_new_with_class 中，TypeImpl 的 instance_init 会被调用，创建一个对象. current_machine 就是这个对象，它的类型是 MachineState.
+
+至此，绕了这么大一圈，有关体系结构的对象才创建完毕，接下来很多的设备的初始化，包括 CPU 和内存的初始化，都是围绕着体系结构的对象来的，后面会常常看到 current_machine.
+
+## 4. 初始化块设备
+接下来初始化的是块设备，调用的是 [configure_blockdev](https://elixir.bootlin.com/qemu/latest/source/softmmu/vl.c#L1028).
+
+```c
+// https://elixir.bootlin.com/qemu/latest/source/softmmu/vl.c#L4138
+configure_blockdev(&bdo_queue, machine_class, snapshot);
+```
+
+## 5. 初始化计算虚拟化的加速模式
+接下来初始化的是计算虚拟化的加速模式，也即要不要使用 KVM. 根据参数中的配置是启用 KVM. 这里调用的是 [configure_accelerators](https://elixir.bootlin.com/qemu/latest/source/softmmu/vl.c#L2719).
+
+在 configure_accelerators 中，看命令行参数里面的 accel，发现是 kvm，则调用 [accel_find](https://elixir.bootlin.com/qemu/latest/source/softmmu/vl.c#L2693) 根据名字，得到相应的纸面上的 class，并初始化为 Class 类.
+
+MachineClass 是计算机体系结构的 Class 类，同理，[AccelClass](https://elixir.bootlin.com/qemu/latest/source/include/sysemu/accel.h#L34) 就是加速器的 Class 类，先通过 object_new_with_class，将 AccelClass 这个 Class 类实例化为 AccelState，类似对于体系结构的实例MachineState, 然后调用 accel_init_machine进行初始化.
+
+在 accel_find 中，会根据名字 kvm，找到纸面上的 class，也即 kvm_accel_type. 然后configure_accelerators -> do_configure_accelerator -> accel_init_machine.init_machine()，里面调用 [kvm_accel_type](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L3089) 的 class_init 方法，也即 [kvm_accel_class_init](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L3068).
+
+在 kvm_accel_class_init 中，创建 AccelClass，将 init_machine 设置为 kvm_init. 在 accel_init_machine 中其实就调用了这个 init_machine 函数，也即调用 [kvm_init 方法](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L1865).
+
+这里面的操作就从用户态到内核态的 KVM 了. 就像前面原理讲过的一样，用户态使用内核态 KVM 的能力，需要[打开一个文件 /dev/kvm](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L1903)，这是一个字符设备文件, 打开一个字符设备文件的过程这里不再赘述, 见[io/linux实现].
+
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3929
+static struct file_operations kvm_chardev_ops = {
+	.unlocked_ioctl = kvm_dev_ioctl,
+	.llseek		= noop_llseek,
+	KVM_COMPAT(kvm_dev_ioctl),
+};
+
+static struct miscdevice kvm_dev = {
+	KVM_MINOR,
+	"kvm",
+	&kvm_chardev_ops,
+};
+
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3929
+static long kvm_dev_ioctl(struct file *filp,
+			  unsigned int ioctl, unsigned long arg)
+{
+	long r = -EINVAL;
+
+	switch (ioctl) {
+	case KVM_GET_API_VERSION:
+		if (arg)
+			goto out;
+		r = KVM_API_VERSION;
+		break;
+	case KVM_CREATE_VM:
+		r = kvm_dev_ioctl_create_vm(arg);
+		break;
+	case KVM_CHECK_EXTENSION:
+		r = kvm_vm_ioctl_check_extension_generic(NULL, arg);
+		break;
+	case KVM_GET_VCPU_MMAP_SIZE:
+		if (arg)
+			goto out;
+		r = PAGE_SIZE;     /* struct kvm_run */
+#ifdef CONFIG_X86
+		r += PAGE_SIZE;    /* pio data page */
+#endif
+#ifdef CONFIG_KVM_MMIO
+		r += PAGE_SIZE;    /* coalesced mmio ring page */
+#endif
+		break;
+	case KVM_TRACE_ENABLE:
+	case KVM_TRACE_PAUSE:
+	case KVM_TRACE_DISABLE:
+		r = -EOPNOTSUPP;
+		break;
+	default:
+		return kvm_arch_dev_ioctl(filp, ioctl, arg);
+	}
+out:
+	return r;
+}
+```
+
+KVM 这个字符设备文件定义了一个字符设备文件的操作函数 kvm_chardev_ops，这里面只定义了 ioctl 的操作. 接下来，用户态就通过 ioctl 系统调用，调用到 kvm_dev_ioctl 这个函数.
+
+kvm_dev_ioctl里可以看到，在用户态 qemu 中，调用 KVM_GET_API_VERSION 查看版本号，内核就有相应的分支，返回版本号，如果能够匹配上，则可调用 KVM_CREATE_VM 创建虚拟机. 创建虚拟机，需要调用 [kvm_dev_ioctl_create_vm](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3843).
+
+在 kvm_dev_ioctl_create_vm 中，首先调用 kvm_create_vm 创建一个 [struct kvm](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kvm_host.h#L445) 结构. 这个结构在内核里面代表一个虚拟机. 从其结构的定义里，可以看到，这里面有 vcpu，有 mm_struct 结构. 这个结构本来用来管理进程的内存的. 虚拟机也是一个进程，所以虚拟机的用户进程空间也是用它来表示. 虚拟机里面的操作系统以及应用的进程空间不归它管.
+
+在 kvm_dev_ioctl_create_vm 中，第二件事情就是[创建一个文件描述符，和 struct file 关联起来，这个 struct file 的 file_operations 会被设置为 kvm_vm_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3861).
+
+kvm_dev_ioctl_create_vm 结束之后，对于一台虚拟机而言，只是在内核中有一个数据结构，对于相应的资源还没有分配，所以还需要接着看.
+
+## 6. 初始化网络设备
+接下来，调用 [net_init_clients](https://elixir.bootlin.com/qemu/latest/source/net/net.c#L1542) 进行网络设备的初始化. 可以解析 net 参数，也会在 net_init_clients 中解析 netdev 参数. 这属于网络虚拟化的部分，先暂时放一下.
+
+## 7.CPU 虚拟化
+接下来，要调用 [machine_run_board_init](https://elixir.bootlin.com/qemu/latest/source/hw/core/machine.c#L1091). 这里面调用了 MachineClass 的 init 函数, 上面是以`pc-i440fx-5.0`距离, 也就是v5_0. 盼啊盼才到了它，这才调用了 pc_init1.
+
+在 pc_init1 里面，需要重点关注两件重要的事情，一个的 CPU 的虚拟化，主要调用 [x86_cpus_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L133)；另外就是内存的虚拟化，主要调用 [pc_memory_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/pc.c#L936).
+
+在 pc_cpus_init 中，对于每一个 CPU，都调用 [x86_new_cpu](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L119)，在这里，看到了 object_new，这又是一个从 TypeImpl 到 Class 类再到对象的一个过程. 这个时候，就要看 CPU 的类是怎么组织的了. 在上面的参数里面，CPU 的配置是这样的:`
+-cpu SandyBridge,+erms,+smep,+fsgsbase,+pdpe1gb,+rdrand,+f16c,+osxsave,+dca,+pcid,+pdcm,+xtpr,+tm2,+est,+smx,+vmx,+ds_cpl,+monitor,+dtes64,+pbe,+tm,+ht,+ss,+acpi,+ds,+vme`.
+
+在这里要知道，SandyBridge 是 CPU 的一种类型. 在 hw/i386/pc.c 中，能看到这种 CPU 的定义:[`{ "SandyBridge" "-" TYPE_X86_CPU, "min-xlevel", "0x8000000a" }`](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/pc.c#L230).
+
+
+接下来，就来看"SandyBridge"，也即 TYPE_X86_CPU 这种 CPU 的类，是一个什么样的结构.
+
+```c
+// https://elixir.bootlin.com/qemu/v5.0.0/source/hw/core/qdev.c#L1263
+static const TypeInfo device_type_info = {
+    .name = TYPE_DEVICE,
+    .parent = TYPE_OBJECT,
+    .instance_size = sizeof(DeviceState),
+    .instance_init = device_initfn,
+    .instance_post_init = device_post_init,
+    .instance_finalize = device_finalize,
+    .class_base_init = device_class_base_init,
+    .class_init = device_class_init,
+    .abstract = true,
+    .class_size = sizeof(DeviceClass),
+    .interfaces = (InterfaceInfo[]) {
+        { TYPE_VMSTATE_IF },
+        { TYPE_RESETTABLE_INTERFACE },
+        { }
+    }
+};
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/hw/core/cpu.c#L440
+static const TypeInfo cpu_type_info = {
+    .name = TYPE_CPU,
+    .parent = TYPE_DEVICE,
+    .instance_size = sizeof(CPUState),
+    .instance_init = cpu_common_initfn,
+    .instance_finalize = cpu_common_finalize,
+    .abstract = true,
+    .class_size = sizeof(CPUClass),
+    .class_init = cpu_class_init,
+};
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/target/i386/cpu.c#L7293
+static const TypeInfo x86_cpu_type_info = {
+    .name = TYPE_X86_CPU,
+    .parent = TYPE_CPU,
+    .instance_size = sizeof(X86CPU),
+    .instance_init = x86_cpu_initfn,
+    .abstract = true,
+    .class_size = sizeof(X86CPUClass),
+    .class_init = x86_cpu_common_class_init,
+};
+```
+
+CPU 这种类的定义是有多层继承关系的. TYPE_X86_CPU 的父类是 TYPE_CPU，TYPE_CPU 的父类是 TYPE_DEVICE，TYPE_DEVICE 的父类是 TYPE_OBJECT, 到头了.
+
+这里面每一层都有 class_init，用于从 TypeImpl 生产 xxxClass，也有 instance_init 将 xxxClass 初始化为实例.
+
+在 TYPE_X86_CPU 这一层的 class_init 中，也即 [x86_cpu_common_class_init](https://elixir.bootlin.com/qemu/v5.0.0/source/target/i386/cpu.c#L7231) 中，设置了 DeviceClass 的 realize 函数为 x86_cpu_realizefn. 这个函数很重要，马上就能用到.
+
+在 TYPE_DEVICE 这一层的 instance_init 函数 device_initfn，会为这个设备添加一个属性"realized"，要设置这个属性，需要用函数 [device_set_realized](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/core/qdev.c#L852).
+
+回到 [x86_new_cpu](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L119) 函数，它里面就是通过 object_property_set_bool 设置这个属性为 true，所以 device_set_realized 函数会被调用. 在 device_set_realized 中，DeviceClass 的 realize 函数 [x86_cpu_realizefn](https://elixir.bootlin.com/qemu/v5.0.0/source/target/i386/cpu.c#L6472) 会被调用. x86_cpu_realizefn里面的 [qemu_init_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/cpus.c#L2058) 会调用 [qemu_kvm_start_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/cpus.c#L1998).
+
+在qemu_kvm_start_vcpu里面，为这个 vcpu 创建一个线程，也即虚拟机里面的一个 vcpu 对应物理机上的一个线程，然后这个线程被调度到某个物理 CPU 上. 来看这个 vcpu 的线程执行函数[qemu_kvm_cpu_thread_fn](https://elixir.bootlin.com/qemu/v5.0.0/source/cpus.c#L1218).
+
+在 qemu_kvm_cpu_thread_fn 中，先是 [kvm_init_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L383) 初始化这个 vcpu.
+
+kvm_init_vcpu -> [kvm_get_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L365)，在kvm_get_vcpu中会调用 kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id)，在内核里面创建一个 vcpu.
+
+在上面创建 KVM_CREATE_VM 的时候，就已经创建了一个 struct file，它的 file_operations 被设置为 kvm_vm_fops，这个内核文件也是可以响应 ioctl 的. 如果视角切换到内核 KVM，在 kvm_vm_ioctl 函数中，有对于 KVM_CREATE_VCPU 的处理，调用的是 [kvm_vm_ioctl_create_vcpu](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3022).
+
+
+在 kvm_vm_ioctl_create_vcpu 中，[kvm_arch_vcpu_create](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/x86.c#L9416) 调用 [kvm_x86_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L7846) 的 vcpu_create 函数即[svm_create_vcpu](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/svm/svm.c#L1156)来创建 CPU.
+
+然后，[create_vcpu_fd](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L2994) 又创建了一个 struct file，它的 file_operations 指向 [kvm_vcpu_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L2983). 从这里可以看出，KVM 的内核模块是一个文件，可以通过 ioctl 进行操作. 基于这个内核模块创建的 VM 也是一个文件，也可以通过 ioctl 进行操作. 在这个 VM 上创建的 vcpu 同样是一个文件，同样可以通过 ioctl 进行操作.
+
+回过头来看，kvm_x86_ops 的 vcpu_create 函数, kernel中存在两种kvm_x86_ops: [vmx_x86_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L7846)和svm_x86_ops, 分别对应vmx/svm(vmx：英特尔CPU虚拟化技术; svm：AMD的CPU虚拟化技术), 这里看vmx_x86_ops.
+
+vmx_create_vcpu 创建用于表示 vcpu 的结构 [struct vcpu_vmx](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.h#L201)，并填写里面的内容. 例如 guest_msrs，学系统调用的时候提过 msr 寄存器，虚拟机也需要有这样的寄存器.
+
+enable_ept 是和内存虚拟化相关的，EPT 全称 Extended Page Table，顾名思义，是优化内存虚拟化的，先忽略.
+
+最最重要的就是 loaded_vmcs 了. VMCS 是什么呢？
+
+它的全称是 Virtual Machine Control Structure. 它是来干什么呢？学进程调度的时候学过，为了支持进程在 CPU 上的切换，CPU 硬件要求有一个 TSS 结构，用于保存进程运行时的所有寄存器的状态，进程切换的时候，需要根据 TSS 恢复寄存器.
+
+虚拟机也是一个进程，也需要切换，而且切换更加的复杂，可能是两个虚拟机之间切换，也可能是虚拟机切换给内核，虚拟机因为里面还有另一个操作系统，要保存的信息比普通的进程多得多. 那就需要有一个结构来保存虚拟机运行的上下文，VMCS 就是是 Intel 实现 CPU 虚拟化，记录 vCPU 状态的一个关键数据结构.
+
+VMCS 数据结构主要包含以下信息:
+- Guest-state area，即 vCPU 的状态信息，包括 vCPU 的基本运行环境，例如寄存器等
+- Host-state area，是物理 CPU 的状态信息, 物理 CPU 和 vCPU 之间也会来回切换，所以，VMCS 中既要记录 vCPU 的状态，也要记录物理 CPU 的状态
+- VM-execution control fields，对 vCPU 的运行行为进行控制. 例如，发生中断怎么办，是否使用 EPT（Extended Page Table）功能等.
+
+接下来，对于 VMCS，有两个重要的操作.
+
+VM-Entry，称为从根模式切换到非根模式，也即切换到 guest 上，这个时候 CPU 上运行的是虚拟机. VM-Exit 称为 CPU 从非根模式切换到根模式，也即从 guest 切换到宿主机. 例如，当要执行一些虚拟机没有权限的敏感指令时.
+
+![](/misc/img/virt/1ec7600be619221dfac03e6ade67f7dc.png)
+
+为了维护这两个动作，VMCS 里面还有几项内容：
+- VM-exit control fields，对 VM Exit 的行为进行控制. 比如，VM Exit 的时候对 vCPU 来说需要保存哪些 MSR 寄存器，对于主机 CPU 来说需要恢复哪些 MSR 寄存器
+- VM-entry control fields，对 VM Entry 的行为进行控制. 比如，需要保存和恢复哪些 MSR 寄存器等
+- VM-exit information fields，记录下发生 VM Exit 发生的原因及一些必要的信息，方便对 VM Exit 事件进行处理.
+
+至此，内核准备完毕.
+
+再回到 qemu 的 kvm_init_vcpu 函数，这里面除了创建内核中的 vcpu 结构之外，还通过 mmap 将内核的 vcpu 结构，映射到 qemu 中 CPUState 的 kvm_run 中，为什么能用 mmap 呢，因为 vcpu 也是一个文件. 再回到这个 vcpu 的线程函数 [qemu_kvm_cpu_thread_fn](https://elixir.bootlin.com/qemu/v5.0.0/source/cpus.c#L1218)，它在执行 kvm_init_vcpu 创建 vcpu 之后，接下来是一个 do-while 循环，也即一直运行，并且通过调用 [kvm_cpu_exec](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L2307)，运行这个虚拟机.
+
+在 kvm_cpu_exec 中，能看到一个循环，在循环中，kvm_vcpu_ioctl(KVM_RUN) 运行这个虚拟机，这个时候 CPU 进入 VM-Entry，也即进入客户机模式. 如果一直是客户机的操作系统占用这个 CPU，则会一直停留在这一行运行，一旦这个调用返回了，就说明 CPU 进入 VM-Exit 退出客户机模式，将 CPU 交还给宿主机. 在循环中，会对退出的原因 exit_reason 进行分析处理，因为有了 I/O，还有了中断等，做相应的处理. 处理完毕之后，再次循环，再次通过 VM-Entry，进入客户机模式. 如此循环，直到虚拟机正常或者异常退出.
+
+来看 kvm_vcpu_ioctl(KVM_RUN) 在内核做了哪些事情. 因为vcpu 在内核也是一个文件，也是通过 ioctl 进行用户态和内核态通信的，在内核中，调用的是 [kvm_vcpu_ioctl](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3120).
+
+kvm_vcpu_ioctl根据`case KVM_RUN`调用[kvm_arch_vcpu_ioctl_run(https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/x86.c#L8823)-> [vcpu_run](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/x86.c#L8649)，vcpu_run里面也是一个无限循环.
+
+在这个循环中，除了调用 [vcpu_enter_guest](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/x86.c#L8309) 进入客户机模式运行之外，还有对于信号的响应 signal_pending，也即一台虚拟机是可以被 kill 掉的，还有对于调度的响应，这台虚拟机可以被从当前的物理 CPU 上赶下来，换成别的虚拟机或者其他进程. 这里重点看 vcpu_enter_guest.
+
+在 vcpu_enter_guest 中，会调用 vmx_x86_ops.run 即 [vmx_vcpu_run](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L6657) 函数，进入客户机模式.
+
+[在 vmx_vcpu_run 中，出现了汇编语言的代码](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmenter.S#L103), 比较难看懂，但是没有关系呀，里面有注释呀，可以沿着注释来看:
+1. 首先是 Store host registers，要从宿主机模式变为客户机模式了，所以原来宿主机运行时候的寄存器要保存下来
+1. 接下来是 Load guest registers，将原来客户机运行的时候的寄存器加载进来
+1. 接下来是 [Enter guest mode](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmenter.S#L157)，[调用 vmlaunch(cpu指令)进入客户机模型运行](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmenter.S#L157)，或者 vmresume 恢复客户机模型运行
+1. 如果客户机因为某种原因退出，Save guest registers, load host registers，也即保存客户机运行的时候的寄存器，就加载宿主机运行的时候的寄存器
+1. 最后将 exit_reason 保存在 vmx 结构中.
+
+kernel加载宿主机寄存器，进入宿主机模式运行，并且会记录退出虚拟机模式的原因. 大部分的原因是等待 I/O，因而宿主机调用 [kvm_handle_io](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L2386) 进行处理.
+
+至此，CPU 虚拟化就解析完了.
+
+![](/misc/img/virt/c43639f7024848aa3e828bcfc10ca467.png)
+
+## 总结
+![MachineClass](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
+
+每个模块都会有一个定义 TypeInfo，会通过 type_init 变为全局的 TypeImpl. TypeInfo 以及生成的 TypeImpl 有以下成员：
+- name 表示当前类型的名称
+- parent 表示父类的名称
+- class_init 用于将 TypeImpl 初始化为 MachineClass
+- instance_init 用于将 MachineClass 初始化为 MachineState
+
+所以，以后遇到任何一个类型的时候，将父类和子类之间的关系，以及对应的初始化函数都要看好，这样就一目了然了.
