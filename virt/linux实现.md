@@ -13,7 +13,7 @@ qemu 和 kvm 整合之后，CPU 的性能问题解决了. 另外 Qemu 还会模�
 
 例如，网络需要加载 virtio_net，存储需要加载 virtio_blk，Guest 需要安装这些半虚拟化驱动，GuestOS 知道自己是虚拟机，所以数据会直接发送给半虚拟化设备，经过特殊处理（例如排队、缓存、批量处理等性能优化方式），最终发送给真正的硬件. 这在一定程度上提高了性能.
 
-> CPU 和内存主要使用硬件辅助虚拟化进行加速，需要配备特殊的硬件才能工作
+> 完全虚拟化是很慢的，而通过内核的 KVM 技术和 EPT 技术，加速虚拟机对于物理 CPU 和内存的使用，即称为硬件辅助虚拟化, 因此它需要配备特殊的硬件才能工作
 
 > 网络和存储主要使用特殊的半虚拟化驱动加速，需要加载特殊的驱动程序
 
@@ -895,6 +895,367 @@ __direct_map 首先判断页表的根是否存在，当然存在，刚才初始�
 
 ### vm内存管理总结
 ![](/misc/img/virt/0186c533b7ef706df880dfd775c2449b.jpg)
+
+## 存储虚拟化
+存储使用完全虚拟化时，qemu 模拟的设备是一个翻译官的角色, 因为这个时候虚拟机里面的操作系统，意识不到自己是运行在虚拟机里面的，因此这种需要每个指令都翻译的方式，实在是太慢了.
+
+因此有了半虚拟化. 即虚拟机里面的操作系统不是一个通用的操作系统，它知道自己是运行在虚拟机里面的，使用的硬盘设备和网络设备都是虚拟的，应该加载特殊的驱动才能运行. 这些特殊的驱动往往要通过虚拟机里面和外面配合工作的模式，来加速对于物理存储和网络设备的使用.
+
+### virtio 的基本原理
+virtio，即虚拟化 I/O 设备. virtio 负责对于虚拟机提供统一的接口. 也就是说，在虚拟机里面的操作系统加载的驱动，以后都统一加载 virtio 就可以了, 简化了驱动开发.
+
+virtio 是对半虚拟化 hypervisor 中的一组通用模拟设备的抽象. Virtio设备本质上也是一个PCI设备.
+
+virtio 的架构可以分为四层:
+1. 首先，在虚拟机里面的 virtio 前端，针对不同类型的设备有不同的驱动程序，但是接口都是统一的. 例如，硬盘就是 virtio_blk，网络就是 virtio_net.
+
+1. 其次，在宿主机的 qemu 里面，实现 virtio 后端的逻辑，主要就是操作硬件的设备. 例如在宿主机的 qemu 进程中，当收到客户机的写入请求的时候，调用文件系统的 write 函数，写入宿主机的 VFS 文件系统，最终写到物理硬盘设备上的 qcow2 文件. 再如向内核协议栈发送一个网络包完成虚拟机对于网络的操作.
+
+1. 在 virtio 的前端和后端之间，有一个通信层，里面包含 virtio 层和 virtio-ring 层. virtio 这一层实现的是虚拟队列接口，算是前后端通信的桥梁. 而 virtio-ring 则是该桥梁的具体实现.
+
+![virtio 的架构](/misc/img/virt/2e9ef612f7b80ec9fcd91e200f4946f3.png)
+![](/misc/img/virt/1f0c3043a11d6ea1a802f7d0f3b0b34b.png)
+
+virtio 使用 virtqueue 进行前端和后端的高速通信. 不同类型的设备队列数目不同. virtio-net 使用两个队列，一个用于接收，另一个用于发送；而 virtio-blk 仅使用一个队列.
+
+如果客户机要向宿主机发送数据，客户机会将数据的 buffer 添加到 virtqueue 中，然后通过写入寄存器通知宿主机. 这样宿主机就可以从 virtqueue 中收到的 buffer 里面的数据.
+
+了解了 virtio 的基本原理，接下来，以硬盘写入为例，具体看一下存储虚拟化的过程.
+
+```c
+// https://elixir.bootlin.com/qemu/v5.0.0/source/hw/virtio/virtio.c#L3807
+static const TypeInfo virtio_device_info = {
+    .name = TYPE_VIRTIO_DEVICE,
+    .parent = TYPE_DEVICE,
+    .instance_size = sizeof(VirtIODevice),
+    .class_init = virtio_device_class_init,
+    .instance_finalize = virtio_device_instance_finalize,
+    .abstract = true,
+    .class_size = sizeof(VirtioDeviceClass),
+};
+
+static void virtio_register_types(void)
+{
+    type_register_static(&virtio_device_info);
+}
+
+type_init(virtio_register_types)
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/hw/block/virtio-blk.c#L1316
+static const TypeInfo virtio_blk_info = {
+    .name = TYPE_VIRTIO_BLK,
+    .parent = TYPE_VIRTIO_DEVICE,
+    .instance_size = sizeof(VirtIOBlock),
+    .instance_init = virtio_blk_instance_init,
+    .class_init = virtio_blk_class_init,
+};
+
+static void virtio_register_types(void)
+{
+    type_register_static(&virtio_blk_info);
+}
+
+type_init(virtio_register_types)
+```
+
+Virtio Block Device 这种类的定义是有多层继承关系的. TYPE_VIRTIO_BLK 的父类是 TYPE_VIRTIO_DEVICE，TYPE_VIRTIO_DEVICE 的父类是 TYPE_DEVICE，TYPE_DEVICE 的父类是 TYPE_OBJECT, 到头了.
+
+type_init 用于注册这种类. 这里面每一层都有 class_init，用于从 TypeImpl 生产 xxxClass. 还有 instance_init，可以将 xxxClass 初始化为实例.
+
+在 TYPE_VIRTIO_BLK 层的 class_init 函数 virtio_blk_class_init 中，定义了 DeviceClass 的 realize 函数为 [virtio_blk_device_realize](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/block/virtio-blk.c#L1122)，这一点在虚拟化CPU那节也有类似的结构.
+
+在 virtio_blk_device_realize 函数中，先是通过 [virtio_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/virtio/virtio.c#L3238) 初始化 VirtIODevice 结构.
+
+从 virtio_init 中可以看出，VirtIODevice 结构里面有一个 VirtQueue 数组，这就是 virtio 前端和后端互相传数据的队列，最多 VIRTIO_QUEUE_MAX 个.
+
+回到 virtio_blk_device_realize 函数. 接下来，根据配置的队列数目 num_queues，对于每个队列都调用 [virtio_add_queue](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/virtio/virtio.c#L2395) 来初始化队列.
+
+在每个 VirtQueue 中，都有一个 vring，用来维护这个队列里面的数据；另外还有一个函数 virtio_blk_handle_output，用于处理数据写入，这个函数后面会用到.
+
+至此，VirtIODevice，VirtQueue，vring 之间的关系如下图所示. 这是在 qemu 里面的对应关系，需记好，后面还能看到类似的结构.
+
+![](/misc/img/virt/e18dae0a5951392c4a8e8630e53a616d.jpg)
+
+### qemu 启动过程中的存储虚拟化
+对于硬盘的虚拟化，qemu 的启动参数里面有关的是下面两行:
+```bash
+-drive file=/var/lib/nova/instances/1f8e6f7e-5a70-4780-89c1-464dc0e7f308/disk,if=none,id=drive-virtio-disk0,format=qcow2,cache=none
+-device virtio-blk-pci,scsi=off,bus=pci.0,addr=0x4,drive=drive-virtio-disk0,id=virtio-disk0,bootindex=1
+```
+
+其中，第一行指定了宿主机硬盘上的一个文件，文件的格式是 qcow2，这个格式这里不准备解析它，只要明白，对于宿主机上的一个文件，可以被 qemu 模拟称为客户机上的一块硬盘就可以了.
+
+而第二行说明了，使用的驱动是 virtio-blk 驱动.
+
+在 qemu 启动的 qemu_init 函数里面，初始化块设备，是通过 [configure_blockdev](https://elixir.bootlin.com/qemu/v5.0.0/source/softmmu/vl.c#L1028) 调用开始的.
+
+在 configure_blockdev 中，能看到对于 drive 这个参数的解析，并且初始化这个设备要调用 [drive_init_func](https://elixir.bootlin.com/qemu/v5.0.0/source/softmmu/vl.c#L985) 函数，它里面会调用 drive_new 创建一个设备.
+
+在 [drive_new](https://elixir.bootlin.com/qemu/v5.0.0/source/blockdev.c#L760) 里面，会解析 qemu 的启动参数. 对于 virtio 来讲，会解析 device 参数，把 driver 设置为 virtio-blk-pci；还会解析 file 参数，就是指向那个宿主机上的文件.
+
+接下来，drive_new 会调用 blockdev_init，根据参数进行初始化，最后会创建一个 DriveInfo 来管理这个设备.
+
+重点来看 [blockdev_init](https://elixir.bootlin.com/qemu/v5.0.0/source/blockdev.c#L460). 在这里面会发现，如果 file 不为空，则应该调用 [blk_new_open](https://elixir.bootlin.com/qemu/v5.0.0/source/block/block-backend.c#L371) 打开宿主机上的硬盘文件，返回的结果是 BlockBackend，对应上面讲原理的时候的 virtio 的后端.
+
+接下来的调用链为：[bdrv_open](https://elixir.bootlin.com/qemu/v5.0.0/source/block.c#L3381)->[bdrv_open_inherit](https://elixir.bootlin.com/qemu/v5.0.0/source/block.c#L3112)->[bdrv_open_common](https://elixir.bootlin.com/qemu/v5.0.0/source/block.c#L1621).
+
+在 bdrv_open_common 中，根据硬盘文件的格式，得到 BlockDriver. 因为虚拟机的硬盘文件格式有很多种，qcow2 是一种，raw 是一种，vmdk 是一种，各有优缺点，启动虚拟机的时候，可以自由选择. 对于不同的格式，打开的方式不一样，拿 qcow2 来解析, 它的 BlockDriver 实现是[bdrv_qcow2](https://elixir.bootlin.com/qemu/v5.0.0/source/block/qcow2.c#L5531).
+
+根据上面的定义，对于 qcow2 来讲，bdrv_open 调用的是 qcow2_open.
+
+在 qcow2_open 中，会通过 [qemu_coroutine_enter](https://elixir.bootlin.com/qemu/v5.0.0/source/util/qemu-coroutine.c#L168) 进入一个协程 coroutine. 什么叫协程呢？可以简单地将它理解为用户态自己实现的线程.
+
+学线程的时候学过，如果一个程序想实现并发，可以创建多个线程，但是线程是一个内核的概念，创建的每一个线程内核都能看到，内核的调度也是以线程为单位的. 这对于普通的进程没有什么问题，但是对于 qemu 这种虚拟机，如果在用户态和内核态切换来切换去，由于还涉及虚拟机的状态，代价比较大.
+
+但是，qemu 的设备也是需要多线程能力的，怎么办呢？此时就需要在用户态实现一个类似线程的东西，也就是协程，用于实现并发，并且不被内核看到，调度全部在用户态完成.
+
+从后面的读写过程可以看出，协程在后端经常使用. 这里打开一个 qcow2 文件就是使用一个协程，创建一个协程和创建一个线程很像，也需要指定一个函数来执行，[qcow2_open_entry](https://elixir.bootlin.com/qemu/v5.0.0/source/block/qcow2.c#L1790) 就是协程的函数.
+
+可以看到，qcow2_open_entry 函数前面有一个 coroutine_fn，说明它是一个协程函数. 在 qcow2_do_open 中，qcow2_do_open 根据 qcow2 的格式打开硬盘文件. 这个格式[官网](https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.txt)就有，这里就不解析了.
+
+### 前端设备驱动 virtio_blk
+虚拟机里面的进程写入一个文件，当然要通过文件系统. 整个过程和在无虚拟化写文件的过程没有区别. 只是到了设备驱动层，看到的就不是普通的硬盘驱动了，而是 virtio 的驱动.
+
+```c
+// https://elixir.bootlin.com/linux/latest/source/drivers/block/virtio_blk.c#L971
+static struct virtio_driver virtio_blk = {
+	.feature_table			= features,
+	.feature_table_size		= ARRAY_SIZE(features),
+	.feature_table_legacy		= features_legacy,
+	.feature_table_size_legacy	= ARRAY_SIZE(features_legacy),
+	.driver.name			= KBUILD_MODNAME,
+	.driver.owner			= THIS_MODULE,
+	.id_table			= id_table,
+	.probe				= virtblk_probe,
+	.remove				= virtblk_remove,
+	.config_changed			= virtblk_config_changed,
+#ifdef CONFIG_PM_SLEEP
+	.freeze				= virtblk_freeze,
+	.restore			= virtblk_restore,
+#endif
+};
+
+static int __init init(void)
+{
+	int error;
+
+	virtblk_wq = alloc_workqueue("virtio-blk", 0, 0);
+	if (!virtblk_wq)
+		return -ENOMEM;
+
+	major = register_blkdev(0, "virtblk");
+	if (major < 0) {
+		error = major;
+		goto out_destroy_workqueue;
+	}
+
+	error = register_virtio_driver(&virtio_blk);
+	if (error)
+		goto out_unregister_blkdev;
+	return 0;
+
+out_unregister_blkdev:
+	unregister_blkdev(major, "virtblk");
+out_destroy_workqueue:
+	destroy_workqueue(virtblk_wq);
+	return error;
+}
+
+static void __exit fini(void)
+{
+	unregister_virtio_driver(&virtio_blk);
+	unregister_blkdev(major, "virtblk");
+	destroy_workqueue(virtblk_wq);
+}
+module_init(init);
+module_exit(fini);
+
+MODULE_DEVICE_TABLE(virtio, id_table);
+MODULE_DESCRIPTION("Virtio block driver");
+MODULE_LICENSE("GPL");
+```
+
+virtio 的驱动程序代码在 Linux 操作系统的源代码里面，文件名叫 [drivers/block/virtio_blk.c](https://elixir.bootlin.com/linux/latest/source/drivers/block/virtio_blk.c).
+
+从这里的代码中，能看到非常熟悉的结构. 它会创建一个 workqueue，注册一个块设备，并获得一个主设备号，然后注册一个驱动函数 virtio_blk. 当一个设备驱动作为一个内核模块被初始化的时候，probe 函数会被调用，因而来看一下 [virtblk_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L684).
+
+在 virtblk_probe 中，首先看到的是 struct request_queue，这是每一个块设备都有的一个队列. 还记得吗？它有两个函数，一个是 make_request_fn 函数，用于生成 request；另一个是 request_fn 函数，用于处理 request.
+
+这个 request_queue 的初始化过程在 [blk_mq_init_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2906) 中. blk_mq_init_queue -> blk_mq_init_queue_data -> [blk_mq_init_allocated_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3057). 也就是说，一旦上层有写入请求，就通过 blk_mq_make_request 这个函数，将请求放入 request_queue 队列中.
+
+另外，在 virtblk_probe 中，会初始化一个 gendisk. 每一个块设备都有这样一个结构. 在 virtblk_probe 中，还有一件重要的事情就是，init_vq 会来初始化 virtqueue.
+
+按照上面的原理来说，virtqueue 是一个介于客户机前端和 qemu 后端的一个结构，用于在这两端之间传递数据. 这里建立的 struct virtqueue 是客户机前端对于队列的管理的数据结构，在客户机的 linux 内核中通过 kmalloc_array 进行分配. 而队列的实体需要通过函数 [virtio_find_vqs](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/virtio_config.h#L192) 查找或者生成，所以这里还把 callback 函数指定为 [virtblk_done](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L159). 当 buffer 使用发生变化的时候，就需要调用这个 callback 函数进行通知.
+
+根据 virtio_config_ops 的定义，virtio_find_vqs在这里是[virtio_pci_config_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_pci_modern.c#L463), 它会调用 vp_modern_find_vqs. 
+
+在 [vp_modern_find_vqs](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_pci_modern.c#L403) 中，vp_find_vqs 会调用 vp_find_vqs_intx.
+
+在 vp_find_vqs_intx 中，通过 request_irq 注册一个中断处理函数 vp_interrupt，当设备的配置信息发生改变，会产生一个中断，当设备向队列中写入信息时，也会产生一个中断，称为 vq 中断，中断处理函数需要调用相应的队列的回调函数. 然后，根据队列的数目，依次调用 vp_setup_vq，完成 virtqueue、vring 的分配和初始化.
+
+在 vring_create_virtqueue 中，会调用 vring_alloc_queue，来创建队列所需要的内存空间，然后调用 vring_init 初始化结构 struct vring，来管理队列的内存空间，调用 __vring_new_virtqueue，来创建 [struct vring_virtqueue](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L87).
+
+vring_virtqueue结构的一开始，是 [struct virtqueue](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/virtio.h#L27)，它也是 struct virtqueue 的一个扩展, 包含了 [struct vring](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/linux/virtio_ring.h#L152).
+
+至此发现，虚拟机里面的 virtio 的前端是这样的结构：struct virtio_device 里面有一个 struct vring_virtqueue，在 struct vring_virtqueue 里面有一个 struct vring.
+
+### 中间 virtio 队列的管理
+参考:
+- [virtio之vring](https://www.cnblogs.com/yi-mu-xi/p/12544695.html)
+
+qemu 初始化的时候，virtio 的后端有数据结构 VirtIODevice，VirtQueue 和 vring 一模一样，前端和后端对应起来，都应该指向刚才创建的那一段内存.
+ 
+现在的问题是，刚才分配的内存在客户机的内核里面，如何告知 qemu 来访问这段内存呢？别忘了，qemu 模拟出来的 virtio block device 只是一个 PCI 设备. 对于客户机来讲，这是一个外部设备，可以通过给外部设备发送指令的方式告知外部设备，这就是代码中 vp_iowrite16 的作用. 它会调用专门给外部设备发送指令的函数 iowrite，告诉外部的 PCI 设备.
+ 
+告知的有三个地址 virtqueue_get_desc_addr、virtqueue_get_avail_addr，virtqueue_get_used_addr. 从客户机角度来看，这里面的地址都是物理地址，也即 GPA（Guest Physical Address）. 因为只有物理地址才是客户机和 qemu 程序都认可的地址，本来客户机的物理内存也是 qemu 模拟出来的.
+ 
+在 qemu 中，对 PCI 总线添加一个设备的时候，会调用 [virtio_pci_device_plugged](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L1532).
+
+在virtio_pci_device_plugged里面，对于这个加载的设备进行 I/O 操作，会映射到读写某一块内存空间，对应的操作为 [virtio_pci_config_ops](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L482)，也即写入这块内存空间，这就相当于对于这个 PCI 设备进行某种配置.
+ 
+对 PCI 设备进行配置的时候，会有这样的调用链：[virtio_pci_config_write](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L448)->[virtio_ioport_write](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L295)->[virtio_queue_set_addr](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio.c#L2222). 设置 virtio 的 queue 的地址是一项很重要的操作.
+
+从这里我们可以看出，qemu 后端的 VirtIODevice 的 VirtQueue 的 vring 的地址，被设置成了刚才给队列分配的内存的 GPA.
+
+![](/misc/img/virt/2572f8b1e75b9eaab6560866fcb31fd0.jpg)
+
+接着，来看一下这个队列的格式.
+
+![](/misc/img/virt/49414d5acc81933b66410bbba102b0db.jpg)
+```c
+// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/linux/virtio_ring.h#L97
+/* Virtio ring descriptors: 16 bytes.  These can chain together via "next". */
+struct vring_desc {
+	/* Address (guest-physical). */
+	__virtio64 addr;
+	/* Length. */
+	__virtio32 len;
+	/* The flags as indicated above. */
+	__virtio16 flags;
+	/* We chain unused descriptors via this, too */
+	__virtio16 next;
+};
+
+struct vring_avail {
+	__virtio16 flags;
+	__virtio16 idx;
+	__virtio16 ring[];
+};
+
+/* u32 is used here for ids for padding reasons. */
+struct vring_used_elem {
+	/* Index of start of used descriptor chain. */
+	__virtio32 id;
+	/* Total length of the descriptor chain which was used (written to) */
+	__virtio32 len;
+};
+
+typedef struct vring_used_elem __attribute__((aligned(VRING_USED_ALIGN_SIZE)))
+	vring_used_elem_t;
+
+struct vring_used {
+	__virtio16 flags;
+	__virtio16 idx;
+	vring_used_elem_t ring[];
+};
+
+/*
+ * The ring element addresses are passed between components with different
+ * alignments assumptions. Thus, we might need to decrease the compiler-selected
+ * alignment, and so must use a typedef to make sure the aligned attribute
+ * actually takes hold:
+ *
+ * https://gcc.gnu.org/onlinedocs//gcc/Common-Type-Attributes.html#Common-Type-Attributes
+ *
+ * When used on a struct, or struct member, the aligned attribute can only
+ * increase the alignment; in order to decrease it, the packed attribute must
+ * be specified as well. When used as part of a typedef, the aligned attribute
+ * can both increase and decrease alignment, and specifying the packed
+ * attribute generates a warning.
+ */
+typedef struct vring_desc __attribute__((aligned(VRING_DESC_ALIGN_SIZE)))
+	vring_desc_t;
+typedef struct vring_avail __attribute__((aligned(VRING_AVAIL_ALIGN_SIZE)))
+	vring_avail_t;
+typedef struct vring_used __attribute__((aligned(VRING_USED_ALIGN_SIZE)))
+	vring_used_t;
+
+struct vring {
+	unsigned int num;
+
+	vring_desc_t *desc;
+
+	vring_avail_t *avail;
+
+	vring_used_t *used;
+};
+```
+
+vring 包含三个成员：
+- vring_desc 指向分配的内存块，用于存放客户机和 qemu 之间传输的数据
+- avail->ring[]是发送端维护的环形队列，指向需要接收端处理的 vring_desc
+- used->ring[]是接收端维护的环形队列，指向自己已经处理过了的 vring_desc
+
+### 数据写入的流程
+接下来，来看，真的写入一个数据的时候，会发生什么.
+
+按照上面 virtio 驱动初始化的时候的逻辑，[blk_mq_make_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2023) 会被调用. 这个函数比较复杂，会分成多个分支，但是最终都会调用到 request_queue 的  queue_rq 函数即[virtio_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L673) 的[virtio_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L201).
+
+在 virtio_queue_rq 中，会将请求写入的数据，通过 [virtblk_add_req](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L92) 放入 struct virtqueue. 因此，接下来的调用链为：virtblk_add_req->[virtqueue_add_sgs](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1724)->[virtqueue_add](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1693)->[](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1091).
+
+> virtio1.1(最新, 2020.7) 关键的最大改动点就是引入了packed queue，也就是将virtio1.0中的desc ring，avail ring，used ring三个ring打包成一个desc ring了. 相对应的，将virtio 1.0这种实现方式称之为split ring.
+
+**下面算法描述是旧代码的描述**.
+
+在 virtqueue_add_packed 函数中，能看到，free_head 指向的整个内存块空闲链表的起始位置，用 head 变量记住这个起始位置. 接下来，i 也指向这个起始位置，然后是一个 for 循环，将数据放到内存块里面，放的过程中，next 不断指向下一个空闲位置，这样空闲的内存块被不断的占用. 等所有的写入都结束了，i 就会指向这次存放的内存块的下一个空闲位置，然后 free_head 就指向 i，因为前面的都填满了.
+
+至此，从 head 到 i 之间的内存块，就是这次写入的全部数据. 于是，在 vring 的 avail 变量中，在 ring[]数组中分配新的一项，在 avail 的位置，avail 的计算是 avail_idx_shadow & (vq->vring.num - 1)，其中，avail_idx_shadow 是上一次的 avail 的位置. 这里如果超过了 ring[]数组的下标，则重新跳到起始位置，就说明是一个环. 这次分配的新的 avail 的位置就存放新写入的从 head 到 i 之间的内存块. 然后是 avail_idx_shadow++，这说明这一块内存可以被接收方读取了.
+
+接下来，回到 virtio_queue_rq，调用 [virtqueue_notify](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1841) 通知接收方. 而 virtqueue_notify 会调用 vp->notify即[vp_notify](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_pci_common.c#L41), vp由[vring_create_virtqueue创建](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_pci_modern.c#L342).
+
+然后，写入一个 I/O 会触发 VM exit. 在解析 CPU 的时候看到过这个逻辑在[kvm_cpu_exec](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L2307)的`case KVM_EXIT_IO`分支由[kvm_handle_io](https://elixir.bootlin.com/qemu/latest/source/accel/kvm/kvm-all.c#L2133)处理.
+
+kvm_handle_io写入的也是一个 I/O 的内存空间，同样会触发 virtio_ioport_write，这次会调用 [address_space_rw](https://elixir.bootlin.com/qemu/latest/source/exec.c#L3274)->[address_space_write](https://elixir.bootlin.com/qemu/latest/source/exec.c#L3258)->[flatview_write](https://elixir.bootlin.com/qemu/latest/source/exec.c#L3167)->[flatview_write_continue](https://elixir.bootlin.com/qemu/latest/source/exec.c#L3118)->[memory_region_dispatch_write](https://elixir.bootlin.com/qemu/latest/source/memory.c#L1455)->[memory_region_write_accessor](https://elixir.bootlin.com/qemu/latest/source/memory.c#L467)的`mr->ops->write`, 此时ops是[notify_ops](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L1422)/[notify_pio_ops](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio-pci.c#L1431)->[virtio_queue_notify](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio.c#L2352).
+
+> notify_pio_ops/notify_ops的区别在[这里](https://lists.gnu.org/archive/html/qemu-devel/2015-08/msg02411.html). I/O作为CPU和外设交流的一个渠道，主要分为两种，一种是Port I/O即pio，一种是MMIO(Memory mapping I/O), MMIO更普遍.
+
+virtio_queue_notify 会调用 VirtQueue 的 handle_output 函数，前面已经设置过这个函数了，是 [virtio_blk_handle_output](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L806). 接下来的调用链为：virtio_blk_handle_output->[virtio_blk_handle_output_do](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L801)->[virtio_blk_handle_vq](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L763)
+
+在 virtio_blk_handle_vq 中，有一个 while 循环，在循环中调用函数 virtio_blk_get_request 从 vq 中取出请求，然后调用 [virtio_blk_handle_request](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L614) 处理从 vq 中取出的请求. 先来看 [virtio_blk_get_request](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L614).
+
+可以看到，virtio_blk_get_request 会调用 [virtqueue_pop](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio.c#L1684). 在virtqueue_pop里面，能看到对于 vring 的操作，也即[从这里面将客户机里面写入的数据读取出来，放到 VirtIOBlockReq 结构中](https://elixir.bootlin.com/qemu/latest/source/hw/virtio/virtio.c#L1549). 接下来，就要调用 virtio_blk_handle_request 处理这些数据.
+
+所以接下来的调用链为：virtio_blk_handle_request->[virtio_blk_submit_multireq](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L447)->[submit_requests](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L384).
+
+在 submit_requests 中，看到了 BlockBackend. 这是在 qemu 启动的时候，打开 qcow2 文件的时候生成的，现在可以用它来写入文件了，调用的是 [blk_aio_pwritev](https://elixir.bootlin.com/qemu/latest/source/block/block-backend.c#L1507).
+
+在 blk_aio_pwritev 中，看到，又是创建了一个协程来进行写入. 写入完毕之后调用 [virtio_blk_rw_complete](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L115)即blk_aio_pwritev传入的BlockCompletionFunc->[virtio_blk_req_complete](https://elixir.bootlin.com/qemu/latest/source/hw/block/virtio-blk.c#L75).
+
+在 virtio_blk_req_complete 中，先是调用 virtqueue_push，更新 vring 中 used 变量，表示这部分已经写入完毕，空间可以回收利用了. 但是，这部分的改变仅仅改变了 qemu 后端的 vring，我们还需要通知客户机中 virtio 前端的 vring 的值，因而要调用 virtio_notify. virtio_notify 会调用 virtio_irq 发送一个中断. 还记得前面注册过一个中断处理函数 vp_interrupt 吗？它就是干这个事情的.
+
+就像前面说的一样 vp_interrupt 这个中断处理函数，一是处理配置变化，二是处理 I/O 结束. 第二种的调用链为：vp_interrupt->vp_vring_interrupt->vring_interrupt.
+
+在 vring_interrupt 中，会调用 callback 函数，这个也是在前面注册过的，是 virtblk_done. 接下来的调用链为：virtblk_done->virtqueue_get_buf->virtqueue_get_buf_ctx.
+
+在 virtqueue_get_buf_ctx 中，可以看到，virtio 前端的 vring 中的 last_used_idx 加一，说明这块数据 qemu 后端已经消费完毕. 可以通过 detach_buf 将其放入空闲队列中，留给以后的写入请求使用.
+
+至此，整个存储虚拟化的写入流程才全部完成.
+
+### 存储虚拟化总结
+存储虚拟化的场景下，整个写入的过程:
+1. 在虚拟机里面，应用层调用 write 系统调用写入文件
+1. write 系统调用进入虚拟机里面的内核，经过 VFS，通用块设备层，I/O 调度层，到达块设备驱动
+1. 虚拟机里面的块设备驱动是 virtio_blk，它和通用的块设备驱动一样，有一个 request  queue，另外有一个函数 make_request_fn 会被设置为 blk_mq_make_request，这个函数用于将请求放入队列.
+1. 虚拟机里面的块设备驱动是 virtio_blk 会注册一个中断处理函数 vp_interrupt. 当 qemu 写入完成之后，它会通知虚拟机里面的块设备驱动
+1. blk_mq_make_request 最终调用 virtqueue_add，将请求添加到传输队列 virtqueue 中，然后调用 virtqueue_notify 通知 qemu
+1. 在 qemu 中，本来虚拟机正处于 KVM_RUN 的状态，也即处于客户机状态
+1. qemu 收到通知后，通过 VM exit 指令退出客户机状态，进入宿主机状态，根据退出原因，得知有 I/O 需要处理
+1. qemu 调用 virtio_blk_handle_output，最终调用 virtio_blk_handle_vq
+1. virtio_blk_handle_vq 里面有一个循环，在循环中，virtio_blk_get_request 函数从传输队列中拿出请求，然后调用 virtio_blk_handle_request 处理请求
+1. virtio_blk_handle_request 会调用 blk_aio_pwritev，通过 BlockBackend 驱动写入 qcow2 文件
+1. 写入完毕之后，virtio_blk_req_complete 会调用 virtio_notify 通知虚拟机里面的驱动. 数据写入完成，刚才注册的中断处理函数 vp_interrupt 会收到这个通知.
+
+![](/misc/img/virt/79ad143a3149ea36bc80219940d7d00c.jpg)
 
 ## 总结
 ![MachineClass](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
