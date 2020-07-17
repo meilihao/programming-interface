@@ -67,12 +67,15 @@ qemu 和 kvm 整合之后，CPU 的性能问题解决了. 另外 Qemu 还会模�
 qemu入口在`softmmu/main.c`, 其初始化工作在`softmmu/vl.c`的`qemu_init()`中完成.
 
 ![](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
+![MachineClass](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
 
 qemu每个模块都会有一个定义 TypeInfo，会通过 type_init 变为全局的 TypeImpl. TypeInfo 以及生成的 TypeImpl 有以下成员：
 - name 表示当前类型的名称
 - parent 表示父类的名称
 - class_init 用于将 TypeImpl 初始化为 MachineClass
 - instance_init 用于将 MachineClass 初始化为 MachineState
+
+所以，以后遇到任何一个类型的时候，将父类和子类之间的关系，以及对应的初始化函数都要看好，这样就一目了然了.
 
 ### 1. 初始化所有的 Module
 `qemu_init()`初始化所有的 Module时, 会调用函数`module_call_init(MODULE_INIT_QOM)`
@@ -1257,13 +1260,4 @@ virtio_queue_notify 会调用 VirtQueue 的 handle_output 函数，前面已经�
 
 ![](/misc/img/virt/79ad143a3149ea36bc80219940d7d00c.jpg)
 
-## 总结
-![MachineClass](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
-
-每个模块都会有一个定义 TypeInfo，会通过 type_init 变为全局的 TypeImpl. TypeInfo 以及生成的 TypeImpl 有以下成员：
-- name 表示当前类型的名称
-- parent 表示父类的名称
-- class_init 用于将 TypeImpl 初始化为 MachineClass
-- instance_init 用于将 MachineClass 初始化为 MachineState
-
-所以，以后遇到任何一个类型的时候，将父类和子类之间的关系，以及对应的初始化函数都要看好，这样就一目了然了.
+###
