@@ -490,6 +490,7 @@ TCP 数据段结构(不计算选项字段，TCP 首部的长度为 20B):
 
 ![tcp握手/挥手/状态](/misc/img/net/tcp_status.jpg)
 ![tcp状态转换](/misc/img/net/tcp_status_change.jpg)
+![TCP状态流程图](/misc/img/net/Tcp_state_diagram_fixed_new.svg)
 
 实验环境:
 ```bash

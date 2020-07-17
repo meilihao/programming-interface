@@ -8,6 +8,8 @@
 LIBRARY_PATH ： 用于在程序**编译期间**查找动态链接库时指定查找共享库的路径
 LD_LIBRARY_PATH ： 用于在程序**加载运行期间**查找动态链接库时指定除了系统默认路径之外的其他路径
 
+> xxx.so和xxx.a是给程序编译时用的; 而xxx.h是给开发者调用该lib中的接口时用的, 编译时可以不存在
+
 ## 静态库
 本质上说来,静态库是对已编译目标模块的一种结构化整合, 其后缀一般为“.a”. 使用时需要在创建程序的链接命令中指定相应的库.
 
@@ -24,7 +26,7 @@ LD_LIBRARY_PATH ： 用于在程序**加载运行期间**查找动态链接库�
 生成静态库：
 ```
 // 把file1.o和file2.o打包生成静态库libxxx.a
-ar cr libxxx.a file1.o file2.o  
+ar cr libxxx.a file1.o file2.o
 ```
 
 使用静态库：
@@ -66,7 +68,9 @@ gcc -o test test.c -L<path> -lxxx
 
 1. 编译目标代码时指定的动态库搜索路径
 2. 环境变量LD_LIBRARY_PATH
-3. 配置文件/etc/ld.so.conf中指定的动态库搜索路径
+3. 配置文件/etc/ld.so.conf中指定的动态库搜索路径, 比如`/etc/ld.so.conf.d/*.conf`
+
+    `/etc/ld.so.conf.d`下改动需要执行`sudo ldconfig`刷新
 4. 默认的动态库搜索路径/lib
 5. 默认的动态库搜索路径/usr/lib
 
