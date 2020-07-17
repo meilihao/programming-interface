@@ -539,7 +539,7 @@ kvm_dev_ioctl_create_vm 结束之后，对于一台虚拟机而言，只是在�
 
 在 pc_init1 里面，需要重点关注两件重要的事情，一个的 CPU 的虚拟化，主要调用 [x86_cpus_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L133)；另外就是内存的虚拟化，主要调用 [pc_memory_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/pc.c#L936).
 
-在 pc_cpus_init 中，对于每一个 CPU，都调用 [x86_new_cpu](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L119)，在这里，看到了 object_new，这又是一个从 TypeImpl 到 Class 类再到对象的一个过程. 这个时候，就要看 CPU 的类是怎么组织的了. 在上面的参数里面，CPU 的配置是这样的:`
+在 x86_cpus_init 中，对于每一个 CPU，都调用 [x86_new_cpu](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/x86.c#L119)，在这里，看到了 object_new，这又是一个从 TypeImpl 到 Class 类再到对象的一个过程. 这个时候，就要看 CPU 的类是怎么组织的了. 在上面的参数里面，CPU 的配置是这样的:`
 -cpu SandyBridge,+erms,+smep,+fsgsbase,+pdpe1gb,+rdrand,+f16c,+osxsave,+dca,+pcid,+pdcm,+xtpr,+tm2,+est,+smx,+vmx,+ds_cpl,+monitor,+dtes64,+pbe,+tm,+ht,+ss,+acpi,+ds,+vme`.
 
 在这里要知道，SandyBridge 是 CPU 的一种类型. 在 hw/i386/pc.c 中，能看到这种 CPU 的定义:[`{ "SandyBridge" "-" TYPE_X86_CPU, "min-xlevel", "0x8000000a" }`](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/pc.c#L230).
@@ -665,9 +665,236 @@ kvm_vcpu_ioctl根据`case KVM_RUN`调用[kvm_arch_vcpu_ioctl_run(https://elixir.
 
 kernel加载宿主机寄存器，进入宿主机模式运行，并且会记录退出虚拟机模式的原因. 大部分的原因是等待 I/O，因而宿主机调用 [kvm_handle_io](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L2386) 进行处理.
 
-至此，CPU 虚拟化就解析完了.
+至此，CPU 虚拟化就解析完了, 可以看到，CPU 的虚拟化是用户态的 qemu 和内核态的 KVM 共同配合完成的, 它们二者通过 ioctl 进行通信.
 
 ![](/misc/img/virt/c43639f7024848aa3e828bcfc10ca467.png)
+
+## vm的内存管理
+有了虚拟机，内存就变成了四类：
+- 虚拟机里面的虚拟内存（Guest OS Virtual Memory，GVA），这是虚拟机里面的进程看到的内存空间
+- 虚拟机里面的物理内存（Guest OS Physical Memory，GPA），这是虚拟机里面的操作系统看到的内存，它认为这是物理内存
+- 物理机的虚拟内存（Host Virtual Memory，HVA），这是物理机上的 qemu 进程看到的内存空间
+- 物理机的物理内存（Host Physical Memory，HPA），这是物理机上的操作系统看到的内存
+
+从 GVA 到 GPA，到 HVA，再到 HPA，这样几经转手，计算机的性能就会变得很差.
+
+### 内存管理
+参考:
+- [*QEMU学习笔记——内存](https://www.binss.me/blog/qemu-note-of-memory/)
+
+由于 CPU 和内存是紧密结合的，因而内存虚拟化的初始化过程，和 CPU 虚拟化的初始化是一起完成的.
+
+CPU 虚拟化初始化的时候，会调用 kvm_init 函数，它里面打开了"/dev/kvm"这个字符文件，并且通过 ioctl 调用到内核 kvm 的 KVM_CREATE_VM 操作，除了这些 CPU 相关的调用，其实还有内存相关的.
+
+```c
+// https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L2099
+    kvm_memory_listener_register(s, &s->memory_listener,
+                                 &address_space_memory, 0);
+    memory_listener_register(&kvm_io_listener,
+                             &address_space_io);
+    memory_listener_register(&kvm_coalesced_pio_listener,
+                             &address_space_io);
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/include/exec/memory.h#L660
+/**
+ * AddressSpace: describes a mapping of addresses to #MemoryRegion objects
+ */
+struct AddressSpace {
+    /* private: */
+    struct rcu_head rcu;
+    char *name;
+    MemoryRegion *root;
+
+    /* Accessed via RCU.  */
+    struct FlatView *current_map;
+
+    int ioeventfd_nb;
+    struct MemoryRegionIoeventfd *ioeventfds;
+    QTAILQ_HEAD(, MemoryListener) listeners;
+    QTAILQ_ENTRY(AddressSpace) address_spaces_link;
+};
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L1237
+void kvm_memory_listener_register(KVMState *s, KVMMemoryListener *kml,
+                                  AddressSpace *as, int as_id)
+{
+    int i;
+
+    qemu_mutex_init(&kml->slots_lock);
+    kml->slots = g_malloc0(s->nr_slots * sizeof(KVMSlot));
+    kml->as_id = as_id;
+
+    for (i = 0; i < s->nr_slots; i++) {
+        kml->slots[i].slot = i;
+    }
+
+    kml->listener.region_add = kvm_region_add;
+    kml->listener.region_del = kvm_region_del;
+    kml->listener.log_start = kvm_log_start;
+    kml->listener.log_stop = kvm_log_stop;
+    kml->listener.log_sync = kvm_log_sync;
+    kml->listener.log_clear = kvm_log_clear;
+    kml->listener.priority = 10;
+
+    memory_listener_register(&kml->listener, as);
+
+    for (i = 0; i < s->nr_as; ++i) {
+        if (!s->as[i].as) {
+            s->as[i].as = as;
+            s->as[i].ml = kml;
+            break;
+        }
+    }
+}
+```
+
+这里面有两个地址空间 AddressSpace，一个是系统内存的地址空间 address_space_memory，一个用于 I/O 的地址空间 address_space_io. 这里重点看 address_space_memory.
+
+对于一个地址空间，会有多个内存区域 MemoryRegion 组成树形结构. 这里面，root 是这棵树的根. 另外，还有一个 MemoryListener 链表，当内存区域发生变化的时候，需要做一些动作，使得用户态和内核态能够协同，就是由这些 MemoryListener 完成的.
+
+在 kvm_init 这个时候，还没有内存区域加入进来，root 还是空的，但是可以先注册 MemoryListener，这里注册的是 [KVMMemoryListener](https://elixir.bootlin.com/qemu/v5.0.0/source/include/sysemu/kvm_int.h#L28).
+
+在这个 KVMMemoryListener 中是这样配置的：当添加一个 MemoryRegion 的时候，region_add 会被调用, 下面会用到. 
+
+接下来，在 qemu 启动的 qemu_init 函数中，会调用 [cpu_exec_init_all](https://elixir.bootlin.com/qemu/v5.0.0/source/exec.c#L3412)->[memory_map_init](https://elixir.bootlin.com/qemu/v5.0.0/source/exec.c#L2963).
+
+```c
+// https://elixir.bootlin.com/qemu/v5.0.0/source/exec.c#L2963
+static void memory_map_init(void)
+{
+    system_memory = g_malloc(sizeof(*system_memory));
+
+    memory_region_init(system_memory, NULL, "system", UINT64_MAX);
+    address_space_init(&address_space_memory, system_memory, "memory");
+
+    system_io = g_malloc(sizeof(*system_io));
+    memory_region_init_io(system_io, NULL, &unassigned_io_ops, NULL, "io",
+                          65536);
+    address_space_init(&address_space_io, system_io, "I/O");
+}
+
+// https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L2767
+
+void address_space_init(AddressSpace *as, MemoryRegion *root, const char *name)
+{
+    memory_region_ref(root);
+    as->root = root;
+    as->current_map = NULL;
+    as->ioeventfd_nb = 0;
+    as->ioeventfds = NULL;
+    QTAILQ_INIT(&as->listeners);
+    QTAILQ_INSERT_TAIL(&address_spaces, as, address_spaces_link);
+    as->name = g_strdup(name ? name : "anonymous");
+    address_space_update_topology(as);
+    address_space_update_ioeventfds(as);
+}
+```
+在这里，对于系统内存区域 system_memory 和用于 I/O 的内存区域 system_io，都进行了初始化，并且关联到了相应的地址空间 AddressSpace.
+
+对于系统内存地址空间 address_space_memory，需要把它里面内存区域的根 root 设置为 system_memory. 另外，在这里，还调用了 [address_space_update_topology](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L1046).
+
+address_space_update_topology里面会生成 AddressSpace 的 flatview, flatview 是什么意思呢？
+
+可以看到，在 AddressSpace 里面，除了树形结构的 MemoryRegion 之外，还有一个 flatview 结构，其实这个结构就是把这样一个树形的内存结构变成平的内存结构. 因为树形内存结构比较容易管理，但是平的内存结构，比较方便和内核里面通信，来请求物理内存. 虽然操作系统内核里面也是用树形结构来表示内存区域的，但是用户态向内核申请内存的时候，会按照平的、连续的模式进行申请. 这里，qemu 在用户态，所以要做这样一个转换.
+
+在 [address_space_set_flatview](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L1001) 中，将老的 flatview 和新的 flatview 进行比较. 如果不同，说明内存结构发生了变化，会调用[address_space_update_topology_pass](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L890)->[MEMORY_LISTENER_UPDATE_REGION](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L155)->[MEMORY_LISTENER_CALL](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L130).
+
+MEMORY_LISTENER_CALL里面调用所有的 listener. 但是，这个逻辑这里不会执行的. 这是因为这里内存处于初始化的阶段，全局的 flat_views 里面肯定找不到. 因而 [generate_memory_topology](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L703) 第一次生成了 FlatView，然后才调用了 address_space_set_flatview. 这里面，老的 flatview 和新的 flatview 一定是一样的.
+
+但是，请记住这个逻辑，到这里为止还没解析 qemu 有关内存的参数，所以这里添加的 MemoryRegion 虽然是一个根，但是是空的，是为了管理使用的，后面真的添加内存的时候，这个逻辑还会调用到.
+
+再回到 qemu 启动的 qemu_init 函数中. 接下来的初始化过程会调用 pc_init1. 在这里面，对于 CPU 虚拟化，会调用 pc_init1. 另外，pc_init1 还会调用 [pc_memory_init](https://elixir.bootlin.com/qemu/v5.0.0/source/hw/i386/pc.c#L936)，进行内存的虚拟化，这里解析这一部分.
+
+在 pc_memory_init 中，因为已经知道了虚拟机要申请的内存 machine->ram_size，为了兼容过去的版本，分成两个 MemoryRegion 进行管理，一个是 ram_below_4g，一个是 ram_above_4g. 对于这两个 MemoryRegion，都会初始化一个 alias，也即别名，意思是说，两个 MemoryRegion 其实都指向分配到的内存，只不过分成两个部分，起两个别名指向不同的区域.
+
+> memory_region_allocate_system_memory deleted in bd457782b3b0a313f3991038eb55bc44369c72c6 for "x86/pc: use memdev for RAM"
+
+这两部分 MemoryRegion 都会调用 [memory_region_add_subregion](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L2399)，将这两部分作为子的内存区域添加到 system_memory 这棵树上.
+
+接下来的调用链为：memory_region_add_subregion->[memory_region_add_subregion_common](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L2389)->[memory_region_update_container_subregions](https://elixir.bootlin.com/qemu/v5.0.0/source/memory.c#L2369).
+
+在 memory_region_update_container_subregions 中，会将子区域放到链表中，然后调用 memory_region_transaction_commit. 在memory_region_transaction_commit里面，会调用 address_space_set_flatview. 因为内存区域变了，flatview 也会变，就像上面分析过的一样，listener 会被调用.
+
+因为添加了一个 MemoryRegion，region_add 也即 [kvm_region_add](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L1116).
+
+kvm_region_add 调用的是 [kvm_set_phys_mem](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L1026)，这里面分配一个用于放这块内存的 KVMSlot 结构，就像一个内存条一样，当然这是在用户态模拟出来的内存条，放在 KVMState 结构里面. 这个结构是创建虚拟机的时候创建的. 接下来，[kvm_set_user_memory_region](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L296) 就会将用户态模拟出来的内存条，和内核中的 KVM 模块关联起来.
+
+终于，在kvm_set_user_memory_region里，又看到了可以和内核通信的 kvm_vm_ioctl. 来看内核收到 KVM_SET_USER_MEMORY_REGION 会做哪些事情.
+
+接下来的调用链为：[kvm_vm_ioctl_set_memory_region](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1341)->[kvm_set_memory_region](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1329)->[__kvm_set_memory_region](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1211).
+
+在用户态每个 KVMState 有多个 KVMSlot，在内核里面，同样每个 struct kvm 也有多个 struct [kvm_memory_slot](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/kvm_host.h#L341)，两者是对应起来的.
+
+并且，[__kvm_set_memory_region](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1211)->[id_to_memslot](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1248) 函数可以根据用户态的 slot 号得到内核态的 slot 结构. 如果传进来的参数是 KVM_MR_CREATE，表示要创建一个新的内存条，就会调用 kvm_arch_create_memslot 来创建 kvm_memory_slot 的成员 kvm_arch_memory_slot.
+
+接下来就是创建 kvm_memslots 结构，填充这个结构，然后通过 install_new_memslots 将这个新的内存条，添加到 struct kvm 结构中.
+
+至此，用户态的内存结构和内核态的内存结构算是对应了起来.
+
+### 页面分配和映射
+上面对于内存的管理，还只是停留在元数据的管理. 对于内存的分配与映射，还没有涉及，接下来，就来看看，页面是如何进行分配和映射的. 上面说了，内存映射对于虚拟机来讲是一件非常麻烦的事情，从 GVA 到 GPA 到 HVA 到 HPA，性能很差，为了解决这个问题，有两种主要的思路.
+
+### 1. 影子页表
+第一种方式就是软件的方式，影子页表  （Shadow Page Table）.
+
+内存映射要通过页表来管理，页表地址应该放在 cr3 寄存器里面. 本来的过程是，客户机要通过 cr3 找到客户机的页表，实现从 GVA 到 GPA 的转换，然后在宿主机上，要通过 cr3 找到宿主机的页表，实现从 HVA 到 HPA 的转换.
+
+为了实现客户机虚拟地址空间到宿主机物理地址空间的直接映射. 客户机中每个进程都有自己的虚拟地址空间，所以 KVM 需要为客户机中的每个进程页表都要维护一套相应的影子页表. 在客户机访问内存时，使用的不是客户机的原来的页表，而是这个页表对应的影子页表，从而实现了从客户机虚拟地址到宿主机物理地址的直接转换. 而且，在 TLB 和 CPU 缓存上缓存的是来自影子页表中客户机虚拟地址和宿主机物理地址之间的映射，也因此提高了缓存的效率.
+
+但是影子页表的引入也意味着 KVM 需要为每个客户机的每个进程的页表都要维护一套相应的影子页表，内存占用比较大，而且客户机页表和和影子页表也需要进行实时同步.
+
+### 2. 扩展页表于
+第二种方式，就是硬件的方式，Intel 的 EPT（Extent Page Table，扩展页表）技术.
+
+EPT 在原有客户机页表对客户机虚拟地址到客户机物理地址映射的基础上，又引入了 EPT 页表来实现客户机物理地址到宿主机物理地址的另一次映射. 客户机运行时，客户机页表被载入 CR3，而 EPT 页表被载入专门的 EPT 页表指针寄存器 EPTP.
+
+有了 EPT，在客户机物理地址到宿主机物理地址转换的过程中，缺页会产生 EPT 缺页异常. KVM 首先根据引起异常的客户机物理地址，映射到对应的宿主机虚拟地址，然后为此虚拟地址分配新的物理页，最后 KVM 再更新 EPT 页表，建立起引起异常的客户机物理地址到宿主机物理地址之间的映射.
+
+KVM 只需为每个客户机维护一套 EPT 页表，也大大减少了内存的开销.
+
+这里，重点看第二种方式. 因为使用了 EPT 之后，客户机里面的页表映射，也即从 GVA 到 GPA 的转换，还是用传统的方式，和在linux kernel内存管理的没有什么区别. 而 EPT 重点帮我们解决的就是从 GPA 到 HPA 的转换问题. 因为要经过两次页表，所以 EPT 又称为 tdp（two dimentional paging）.
+
+EPT 的页表结构也是分为四层，EPT Pointer （EPTP）指向 PML4 的首地址.
+![](/misc/img/virt/02e4740398bc3685f366351260ae7230.jpg)
+
+管理物理页面的 Page 结构和kernel的内存管理是一样的. EPT 页表也需要存放在一个页中，这些页要用 kvm_mmu_page 这个结构来管理. 当一个虚拟机运行，进入客户机模式的时候，它会调用 [vcpu_enter_guest](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/x86.c#L8309) 函数，它里面会调用 [kvm_mmu_reload](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu.h#L76)->[kvm_mmu_load](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L5150)
+
+> set_cr3 deleted in 727a7e27cf88a261c5a0f14f4f9ee4d767352766 for "KVM: x86: rename set_cr3 callback and related flags to load_mmu_pgd"
+
+kvm_mmu_load里构建的是页表的根部，也即顶级页表，并且通过[kvm_mmu_load_pgd](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu.h#L98)->`kvm_x86_ops.load_mmu_pgd`->[vmx_load_mmu_pgd](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L3098)设置 cr3 来刷新 TLB. [mmu_alloc_roots](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L3817) 会调用 mmu_alloc_direct_roots，因为用的是 EPT 模式，而非影子表. 在 [mmu_alloc_direct_roots](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L3697) 中，[mmu_alloc_root](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L3679)->[kvm_mmu_get_page](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L2472) 会分配一个 [kvm_mmu_page](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/include/asm/kvm_host.h#L325)，来存放顶级页表项.
+
+接下来，当虚拟机真的要访问内存的时候，会发现有的页表没有建立，有的物理页没有分配，这都会触发缺页异常，在 KVM 里面会发送 VM-Exit，从客户机模式转换为宿主机模式，来修复这个缺失的页表或者物理页.
+
+前面讲过，[虚拟机退出客户机模式有很多种原因](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L5672)，例如接收到中断、接收到 I/O 等，EPT 的缺页异常也是一种类型，称为 EXIT_REASON_EPT_VIOLATION，对应的处理函数是 [handle_ept_violation](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/vmx/vmx.c#L5273).
+
+在 handle_ept_violation 里面，从 VMCS 中得到没有解析成功的 GPA by vmcs_read64，也即客户机的物理地址，然后调用 [kvm_mmu_page_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L5405)，看为什么解析不成功. kvm_mmu_page_fault -> [kvm_mmu_do_page_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu.h#L108) -> `vcpu->arch.mmu->page_fault == kvm_tdp_page_fault`，其实是 [kvm_tdp_page_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L4193) 函数. tdp 的意思就是 EPT.
+
+> Rename tdp_page_fault() to kvm_tdp_page_fault() in 7a02674d154d38da33517855b6d1d4cfc27a9a04 for "KVM: x86/mmu: Avoid retpoline on ->page_fault() with TDP"
+
+既然没有映射，就应该加上映射，kvm_tdp_page_fault 就是干这个事情的.
+
+在 kvm_tdp_page_fault -> [direct_page_fault](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L4095) 这个函数开头，通过 gpa，也即客户机的物理地址得到客户机的页号 gfn. 接下来，要通过调用 [try_async_pf](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L4062) 得到宿主机的物理地址对应的页号，也即真正的物理页的页号，然后通过 [__direct_map](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L3327) 将两者关联起来.
+
+在 try_async_pf 中，要想得到 pfn，也即物理页的页号，会先通过 [kvm_vcpu_gfn_to_memslot](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1615)，根据客户机的物理地址对应的页号找到内存条，然后调用 [__gfn_to_pfn_memslot](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1929)，根据内存条找到 pfn.
+
+在 __gfn_to_pfn_memslot 中，会调用 [__gfn_to_hva_many](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1658)，从客户机物理地址对应的页号，得到宿主机虚拟地址 hva，然后从宿主机虚拟地址到宿主机物理地址，调用的是 [hva_to_pfn](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1881). hva_to_pfn 会调用 [hva_to_pfn_fast](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1744)/[hva_to_pfn_slow](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L1772). 最终都会得到一个物理页面，然后再调用 page_to_pfn 将物理页面转换成为物理页号.
+
+> 为该 HVA 分配一个物理页，有 hva_to_pfn_fast 和 hva_to_pfn_slow 两种， hva_to_pfn_fast 实际上是调用 get_user_page_fast_only ，会尝试去 pin 该 page，即确保该地址所在的物理页在内存中. 如果失败，退化到 hva_to_pfn_slow ，会先去拿 mm->mmap_sem 的锁然后调用 get_user_page_fast_only 来 pin.
+
+> 无论是hva_to_pfn_fast/hva_to_pfn_slow, 最终都会调用 get_user_page_fast_only-> [__gup_longterm_unlocked](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/gup.c#L2716)->[get_user_pages_unlocked](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/gup.c#L2065)->[__get_user_pages_locked](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/gup.c#L1272)->[__get_user_pages](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/gup.c#L1031)-> [faultin_page](https://elixir.bootlin.com/linux/v5.8-rc4/source/mm/gup.c#L862)，在 faultin_page 中会调用 handle_mm_fault来为虚拟机的物理内存空间分配真正的物理页面.
+
+至此，try_async_pf 得到了物理页面，并且转换为对应的物理页号.
+
+接下来，[__direct_map](https://elixir.bootlin.com/linux/v5.8-rc4/source/arch/x86/kvm/mmu/mmu.c#L3327) 会关联客户机物理页号和宿主机物理页号.
+
+__direct_map 首先判断页表的根是否存在，当然存在，刚才初始化了. 接下来是 for_each_shadow_entry 一个循环.
+
+每一个循环中，先是会判断需要映射的 level，是否正是当前循环的这个 it.level. 如果是，则说明是叶子节点，直接映射真正的物理页面 pfn，然后退出. 接着是非叶子节点的情形，判断如果这一项指向的页表项不存在，就要建立页表项，通过 kvm_mmu_get_page 得到保存页表项的页面，然后将这一项指向下一级的页表页面.
+
+至此，内存映射就结束了.
+
+### vm内存管理总结
+![](/misc/img/virt/0186c533b7ef706df880dfd775c2449b.jpg)
 
 ## 总结
 ![MachineClass](/misc/img/virt/078dc698ef1b3df93ee9569e55ea2f30.png)
