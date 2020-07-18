@@ -346,7 +346,12 @@ $ sudo make install
 ### 编译kernel
 ```
 # apt install libssl-dev libelf-dev bc
+# make -j8
+# make modules_install
+# make install # 安装编译好的kernel. 当编译完毕之后，grub 和 menu.lst 都会发生改变。例如，grub.conf 里面会多一个新内核的项
 ```
+
+调试kernel需要编译前激活 CONFIG_DEBUG_INFO 和 CONFIG_FRAME_POINTER 选项. 且在内核命令行中需要添加 nokaslr，来关闭 KASLR. 因为KASLR 会使得内核地址空间布局随机化，从而会造成打的断点不起作用.
 
 ## FAQ
 ### kernel开发与用户空间程序开发的差异
