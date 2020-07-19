@@ -182,14 +182,28 @@ umount用于卸载文件系统, 但不能卸载正处于"busy"状态的文件系
 ## lost+found
 fsck(文件系统一致性检查工具)找到一个无法确定其父目录的文件时就会将其放入其中.
 
+## ramdisk
+将一部分固定大小的内存当作分区来使用.
+
 ## tmpfs
 驻留于内存中的虚拟文件系统. 其可使用swap.
 
-创建命令: `mount -t tmpfs ${source} ${target}`, 无需预先mkfs. source是要创建的tmpfs的名称.
+创建命令: `mount -t tmpfs ${source} ${target} [-o size=<n>m]`, 无需预先mkfs. source是要创建的tmpfs的名称.
 
 tmpfs 文件系统还有以下两个特殊用途:
 - 由内核内部挂载的隐形 tmpfs 文件系统,用于实现 System V 共享内存和共享匿名内存映射.
 - 挂载于/dev/shm 的 tmpfs 文件系统, 被 glibc 用以实现 POSIX 共享内存和 POSIX 信号量.
+
+## devfs
+设备文件系统, 管理/dev下的所有设备
+
+## sysfs
+在/sys下管理设备, 是当前系统上实际设备树的一个直观反应, 是通过kobject子系统管理的, 用于取代devfs.
+
+udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来实现所有devfs的功能, 能够根据系统中的硬件设备的状况动态更新设备文件，包括设备文件的创建，删除等. 它需要内核sysfs和tmpfs的支持，sysfs为udev提供设备入口和uevent通道，tmpfs为udev设备文件提供存放空间.
+
+## initramfs
+解决找init的问题
 
 ## vfs
 虚拟文件系统(Virtual Files System, VFS) 是驻留在用户进程和各种类型的linux 文件系统之间的一个抽象接口层.
@@ -226,7 +240,7 @@ bio结构是在文件系统层和块层之间的一个接口.
 > 大多数linux工具都依赖`/proc`提供的信息进行性能监控. 比如ps和top均从`/proc`读取进程状态信息, 再比如vmstat, cpuinfo等.
 
 `/proc`: 各种系统信息
-- `/proc/${pid}` : 进程信息
+- `${pid}` : 进程信息
 
 	- cmdline : 进程的完整命令行(以null即`\0`分隔)
 	- cwd : 链接到进程当前工作目录的符号链接
@@ -246,18 +260,41 @@ bio结构是在文件系统层和块层之间的一个接口.
 	- state : 进程的总状态信息(ps可解析该信息)
 	- statm : 内存使用情况的信息
 	- task : 为进程中的每个线程均包含一个子目录(始自 Linux 2.6)
-- cgroup : 查看系统支持的cgruop subsystem(controller)
-- acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用.
+- acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用
+- asound : alsa声卡驱动接口
+- buddyinfo : buddy内存分配信息
 - bus : 包含总线子系统的信息, 比如pci总线或各自系统的usb接口
+- cgroups : 查看系统支持的cgruop subsystem(controller)
 - cmdline : 内核启动参数
 - cpuinfo : cpu的信息
 - devices : kernel中的设备驱动程序列表
+- diskstats : 磁盘i/o的统计信息
+- driver : 驱动信息
 - dma : 当前使用的dma通道
+- execdomains : 执行区域列表
+- fb : frame buffer信息
 - filesystems : 查看当前为内核所支持的文件系统类型
-- ioports : 当前使用的i/o端口
-- irq : 系统中的中断信息. 每个子目录是一个中断, 并可能是一个连接的设备, 比如一个网卡接口. 这里可修改一个特定中断的cpu亲和力.
+- fs : 文件系统特别信息
+- interrupt : 中断的使用情况, 记录中断的产生次数
+- iomem : i/o内存映射信息
+- ioports : i/o端口分配情况
+- irq : 中断请求设置接口. 每个子目录是一个中断, 并可能是一个连接的设备, 比如一个网卡接口. 这里可修改一个特定中断的cpu亲和力.
+
+	修改cpu亲缘性: <irq id>/smp_smp_affinity, 其内容是16进制数, 用位表示某cpu, 比如01表示cpu0.
 - interrupts : 中断报告文件, 关于哪些中断正在使用和每个处理器各被中断了多少次的信息
+
+	文件信息:
+	1. 中断号
+	1. cpu接到该中断的数量
+	1. 最后列: 使用该中断的设备
+- kcore : 内核核心映像, gdb可以利用它查看当前内核的所有数据结构状态
+- key-users : 密钥保留服务文件
+- kmsg : 内核消息
+- loadavg : 负载均衡信息
+- locks : 内核锁
+- mdstat : 磁盘阵列信息
 - meminfo : 内存信息, 包括虚拟内存
+- misc : 杂项信息
 - modules : 系统已加载的kernel模块信息
 
 	列:
@@ -268,10 +305,13 @@ bio结构是在文件系统层和块层之间的一个接口.
 	1. 模块的状态，有Live， Loading， Unloading三种状态
 	1. 模块当前的内核内存偏移位置. 这些信息，debug的时候会非常有用, 例如一些诊断工具 oprofile
 - mounts : 当前已挂载文件系统的列表
+- net : 网络接口的大量原始统计, 比如接收的组播数据包或每个接口的路由
 - partitions : 记录了系统中每个磁盘分区的主辅设备编号、大小和名称
-- net : 网络接口的大量原始统计, 比如接收的组播数据包或每个接口的路由.
-- scsi : scsi子系统信息, 比如连接的设备或驱动程序版本.
+- scsi : scsi子系统信息, 比如连接的设备或驱动程序版本
+- self : 访问procfs的进程信息
+- slabinfo : 内核缓存信息
 - stat : 系统的各种状态信息
+- swaps : 交换空间使用情况
 - sys : 可调整的内核参数, 比如虚拟内存管理器或网络协议栈的行为.
 
 	- abi : 文件与应用程序的二进制信息
@@ -303,11 +343,16 @@ bio结构是在文件系统层和块层之间的一个接口.
 			```
 	- net : 网络和套接字的设置
 	- vm : 内存管理设置, 包括buffer和cache管理
+
+		- drop_caches : 强制释放memory的磁盘缓存, 不推荐使用, 内存不够时还是加内存的好
+		
+			写入1, 释放页面缓存; 写入2, 释放目录文件和inodes; 写入3, 释放页面缓存, 目录文件和inodes
 - tty : 各个虚拟终端和与它连接的物理设备信息.
 - sysvipc : 有关 System V IPC 对象的信息
-- swaps : 查看系统中当前已激活交换区域的信息. 其中包括每个交换区域的大小,以及在用交换区域的个数
 - uptime : 系统的总的运行时间和空闲时间
 - version : kernel版本信息
+- vmstat : 虚拟内存统计表
+- zoneinfo : 内存管理区信息
 
 > 针对进程中的每个线程,内核提供了以/proc/PID/task/TID 命名的子目录,其中 TID 是该线程的线程 ID. TID 子目录中都有一套类似于/proc/PID 目录内容的文件和目录.
 

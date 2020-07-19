@@ -2,38 +2,46 @@
 linux文件系统结构引用了[Linux Foundation Referenced Specifications](https://refspecs.linuxfoundation.org/)的[Filesystem Hierarchy Standard Specifications Archive](https://refspecs.linuxfoundation.org/fhs.shtml)
 
 ## index
-- /boot : 启动linux所需的文件
+- /boot : 启动linux所需的文件, 比如grub2的配置, 内核镜像等
 	- initrd.img-5.4.0-39-generic : initramfs
 - /bin : /usr/bin的软连接
 - /dev : 包含系统所有的设备文件
-- /dev/audio* : 声卡
-- /dev/sd* : scsi 磁盘
-- /dev/lp* : 并行串口
-- /dev/pty* : 网络中登录的远程终端设备
-- /dev/ram* : 系统内存
-- /dev/null : 空设备
-- /dev/console : 系统控制台, 可直接连接到显示器
-- /dev/ttS* : 代表串行端口. 类似windows下的COM
-- /dev/tty* : linux上的虚拟控制台
+
+	- audio* : 声卡
+	- sd* : scsi 磁盘
+	- lp* : 并行串口
+	- pty* : 网络中登录的远程终端设备
+	- ram* : 系统内存
+	- null : 空设备
+	- console : 系统控制终端, kernel输出的信息会到这里
+	- shm : 一个tmpfs, 由posix标准规定, 可用于内存共享
+	- ttS* : 代表串行端口. 类似windows下的COM
+	- tty* : linux上的虚拟控制台, 仅接收进程输出的信息, 这是与/dev/console的区别
 - /etc : 存放系统管理相关的配置
-- /etc/crontab : 系统定时任务的配置
-- /etc/fstab : 开机启动时自动挂载的分区列表
-- /etc/group : 保存用户组的信息
-- /etc/hosts : hostname配置
-- /etc/passwd : 用户登录信息保存位置
-- /etc/resolv.conf : 本地dns配置
-- /etc/rsyslog.conf : 系统日志的配置
-- /etc/profile : 系统全局环境变量的配置
-- /etc/services : 常用服务与端口的对应关系
-- /etc/shadow : 保存用户密码
-- /etc/sysctl.conf : 系统kernel配置, 已转移到`/usr/lib/sysctl.d`, 但sysctl.conf任有效, 且可覆盖`/usr/lib/sysctl.d`的配置
-- /etc/systemd : systemd的配置目录
-- /etc/systemd/system/*.wants : 所有服务的启动脚步
-- /etc/X11 : x-window的配置文件
+
+	- crontab : 系统定时任务的配置
+	- fstab : 开机启动时自动挂载的分区列表
+	- group : 保存用户组的信息
+	- hosts : hostname配置
+	- ld.so.conf : 记录搜索so目录的文件
+	- mtab : 文件系统的动态信息, 记录当前挂载的fs
+	- passwd : 用户登录信息保存位置
+	- profile : sh shell登录时的全局初始化文件
+	- resolv.conf : 本地dns配置
+	- rsyslog.conf : 系统日志的配置
+	- services : 常用服务与端口的对应关系
+	- shadow : 保存用户密码
+	- shells : 可登录的shell
+	- sysctl.conf : 系统kernel配置, 已转移到`/usr/lib/sysctl.d`, 但sysctl.conf任有效, 且可覆盖`/usr/lib/sysctl.d`的配置
+	- systemd : systemd的配置目录
+	- systemd/system/*.wants : 所有服务的启动脚步
+	- X11 : x-window的配置文件
 - /home : 存放每个用户的主目录
-- /lib* : /usr/lib*的软连接
-- lost+found : 保存丢失的文件, 不恰当的关机操作和磁盘错误均会导致文件丢失, 这些会丢失的文件会临时放在这里. 系统重启后, 引导运行fsck时就会发现这些文件. 每个分区均有lost+found.
-- /mnt : 用于挂载移动设备
+- /lib* : /usr/lib*的软连接, 存放so和内核模块
+- lost+found : 保存丢失的文件, 不恰当的关机操作和磁盘错误均会导致文件丢失, 这些会丢失的文件会临时放在这里. 系统重启后, 引导运行fsck时就会发现这些文件. 每个ext4分区均有lost+found.
+- /media : 移动设备挂载点, 比如u盘, 光盘等
+- /mnt : 其他文件系统的**临时**挂载点
+- /opt : 附加应用软件包安装位置
 - /root: root的主目录
 - /run : 外部设备的自动挂载点
 - /tmp : 存放临时文件
@@ -41,25 +49,33 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 	默认重启删除/tmp的内容.
 
 	systemd使用systemd-tmpfiles-clean.service来Cleanup of Temporary Directories, /tmp的清理规则主要取决于/usr/lib/tmpfiles.d/tmp.conf文件的设定
+- /srv : 主要用来存储本机或本服务器提供的服务或数据. 由用户主动生产的数据和对外提供的服务
 - /usr : 存放应用和文件
-- /usr/lib64和/usr/local/lib64 : 64位系统中的函数库目录
-- /usr/src : 包含所有应用程序的源码, 主要是linux 核心生态程序的源码
-- /usr/local : 存放本地安装的软件和其他文件, 与linux系统无关
-- /usr/lib和/usr/local/lib : 32位系统中的函数库目录
-- /usr/bin和/usr/local/bin : 用户可用的可执行程序
-- /usr/sbin和/usr/local/sbin : 管理员才可用的可执行程序
-- /usr/include : 包含c语言的头文件
-- /usr/share : 存放共享的文件和数据库
-- /var : 存放系统运行以及软件运行的日志信息
-- /var/log : 存放各种应用的日志文件, **需定期清理**
-- /var/lib : 存放系统正常运行时需要改变的库文件
-- /var/spool : 是mail, new, 打印机队列和其他队列输入, 输出的缓冲目录
-- /var/tmp : 允许比/tmp存放更大的文件
-- /var/lock : 存放被锁定的文件, 很多应用都会在/var/lock下生成一个锁文件, 以保证其他应用不会同时使用某些资源
-- /var/local : 存放/usr/local中所安装应用的可变数据
-- /var/account : 存放格式化的man页
-- /var/run : 包含到下次系统启动前的系统信息
-- /sbin : /usr/sbin的软连接
+
+	- bin : 用户可用的可执行程序
+	- include : c/c++程序头文件目录
+	- lib : 32位系统中的函数库目录
+	- lib64 : 64位系统中的函数库目录
+	- local : 存放本地安装的软件和其他文件, 与linux系统无关
+
+		- lib : 用户安装的32位系统中的函数库目录
+		- lib64 : 用户安装的64位的函数库目录
+		- sbin : 用户安装的管理员才可用的可执行程序
+	- sbin : 管理员才可用的可执行程序
+	- share : 存放与arch无关的数据文件
+
+		- man : 用户手册页
+	- src : 包含所有应用程序的源码, 主要是linux 核心生态程序的源码
+- /var : 不可自动销毁的缓存文件、日志记录
+
+	- log : 存放各种应用的日志文件, **需定期清理**
+	- lib : 存放系统正常运行时需要改变的库文件
+	- spool : 是mail, new, 打印机队列和其他队列输入, 输出的缓冲目录
+	- tmp : 允许比/tmp存放更大的文件
+	- lock : 存放被锁定的文件, 很多应用都会在/var/lock下生成一个锁文件, 以保证其他应用不会同时使用某些资源
+	- local : 存放/usr/local中所安装应用的可变数据
+	- run : 包含到下次系统启动前的系统信息
+- /sbin : /usr/sbin的软连接, 存放需管理员权限运行的可执行文件
 
 # boot
 ## initrd.img-$(uname -r)
