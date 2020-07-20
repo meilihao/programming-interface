@@ -966,6 +966,8 @@ typedef struct {
 
 如果大于 32 的信号是什么情况呢？接着看, 接下来，__sigqueue_alloc 会分配一个 struct sigqueue 对象，然后通过 list_add_tail 挂在 struct sigpending 里面的链表上. 这样就靠谱多了是不是？如果发送过来 100 个信号，变成链表上的 100 项，都不会丢，哪怕相同的信号发送多遍，也处理多遍. 因此，大于 32 的信号我们称为可靠信号. 当然，队列的长度也是有限制的，如果执行 `ulimit -a` 命令，可以看到，这个限制 pending signals (-i) 31181. 当信号挂到了 task_struct 结构之后，最后需要调用 [complete_signal](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/signal.c#L989). 这里面的逻辑也很简单，就是说，既然这个进程有了一个新的信号，赶紧找一个线程处理一下吧.
 
+>　可靠信号通过信号队列实现, 即没有处理过的信号会在队列中, 因此不会丢失.
+
 complete_signal在找到了一个进程或者线程的 task_struct 之后，要调用 [signal_wake_up](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/sched/signal.h#L407)，来企图唤醒它，signal_wake_up 会调用 [signal_wake_up_state](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/signal.c#L989).
 
 signal_wake_up_state 里面主要做了两件事情:

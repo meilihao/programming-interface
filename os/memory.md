@@ -52,6 +52,8 @@ Linux像多数现代内核一样,采用了虚拟内存管理技术. 该技术利
 	- 分段
 	- 段页结合
 
+目前的主流是分页, 但x86 cpu非主流设计的分页是构建在分段的基础上, 因此x86是段页结合.
+
 ### 分段机制
 分段机制下的虚拟地址由两部分组成: 段选择子和段内偏移量.
 
@@ -169,6 +171,8 @@ EXPORT_PER_CPU_SYMBOL_GPL(gdt_page);
 
 对于 64 位的系统，两级肯定不够了，而是使用四级目录，分别是全局页目录项 PGD（Page Global Directory）、上层页目录项 PUD（Page Upper Directory）、中间页目录项 PMD（Page Middle Directory）和页表项 PTE（Page Table Entry）.
 ![](/misc/img/os/42eff3e7574ac8ce2501210e25cd2c0b.jpg)
+
+> 32bit 的页目录在CR3寄存器中, 保存的是页目录的指针.
 
 ## 内存分配
 Linux内核内存管理的一项重要工作就是如何在频繁申请释放内存的情况下，避免碎片的产生. Linux采用伙伴系统解决外部碎片的问题，采用slab解决内部碎片的问题.

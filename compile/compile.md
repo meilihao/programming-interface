@@ -151,4 +151,10 @@ gcc对fi条件选择语句的优化.
 -  likely  : 经常触发
 - unlikely : 绝少触发
 
-> 场景用错会导致性能下降.
+> 场景用错会导致性能下降
+
+### 编译不报错, 但运行报错: 缺so
+比如使用librocksdb.so:`Compression type Snappy is not linked with the binary`
+
+原因: rocksdb编译所需的依赖lib未安装, 且rocksdb编译时未报错.
+解决方案: 安装依赖lib, 重新编译rocksdb.
