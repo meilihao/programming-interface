@@ -5,6 +5,102 @@
 - [阿里云携ESSD高性能云盘亮相2019全球闪存峰会，领跑微秒存储时代](https://www.csdn.net/article/a/2019-08-23/15979950)
 - [NAS、OSS和EBS的区别](https://help.aliyun.com/document_detail/140812.html?spm=5176.cnnas.0.0.78d06689n3cMGJ)
 
+## 存储金字塔
+![存储金字塔](/misc/img/io/v2-ddb5b180fe342d92f7e3be8b1e39a07e_720w.jpg)
+![存储金字塔](/misc/img/io/storage_speed.jpg)
+![存储器level](/misc/img/io/storage_level.png)
+
+常见硬件性能参数:
+|类别 | 耗时 |
+|-|-|
+|访问L1 Cache|0.5ns|
+|分支预测失败|5ns|
+|访问L2 Cache|7ns|
+|Mutex 加锁/解锁|100ns|
+|内存访问|100ns|
+|千兆网络发送1MB数据|10ms|
+|从内存顺序读取1MB数据|0.25ms|
+|机房内网络来回|0.5ms|
+|异地机房之间网络来回|30～100ms|
+|SATA磁盘寻道|10ms|
+|从SATA磁盘顺序读取1MB数据|20ms|
+|固态盘SSD访问延迟|0.1～0.2ms|
+
+存储器分类:
+- 信息的可保存性
+
+  1. 易失性存储: 
+  
+    - SRAM（Static Random-Access Memory，静态随机存取存储器）
+    - DRAM（Dynamic Random Access Memory，动态随机存取存储器），比起 SRAM 来说，它的密度更高，有更大的容量，而且它也比 SRAM 芯片便宜不少
+  1. 非易失性存储
+
+    1. 根据介质和工作原理
+
+      - 机械硬盘(harddisk)
+      - 固态硬盘(sdid state drive, ssd)
+
+        - 根据颗粒和介质
+
+          - nand
+          - 3d xpoint
+      - 磁带(tap)
+    1. 根据协议
+
+      - PCIe
+      - SATA(serial advanced technology attachment)
+      - SAS(serial attached scsi)
+      - AHCI(advanced host controller interface)
+
+# linux存储服务
+## 1. linux本地文件系统
+ext4, xfs, btrfs
+
+## 2. linux远程存储服务
+1. 块设备服务
+
+  - iscsi
+  - nvme over fabrics: nvme协议在fabrics上的延伸, 主要设计目的是让client能更高效地访问远端server上的nvme盘.
+  
+    它往往与RDMA(remote direct memory access)功能的以太网卡, 或者光纤通道, infiniband一起工作.
+1. 文件存储服务
+
+  - nfs(network file system)
+  - cifs(common internet file system)
+1. 对象存储
+
+  文件存储和对象存储的本质区别是有无层次结构.
+
+## 压缩
+本质是用更少的数据表示更多的数据.
+
+无损压缩可实现的基础是真实世界的信息存在大量冗余.
+
+熵编码是指对出现的每个不同符号, 创建分配一个唯一的前缀码. 前缀码是一种可变长度码, 并且每个码字都具有前置性, 即每个码字都不会被其他码字作为前置部分.
+
+常见压缩编码:
+1. 霍夫曼编码
+
+  原理: 为出现频率更高的字符分配更短的编码.
+1. 算术编码
+
+  算术编码与其他熵编码不同的是, 算术编码可以把整条信息编码成一个一定精度的小数q(0.0<=q<1.0), 基本原理是根据信源发射不同符号的概率, 对区间[0,1]进行划分, 区间宽度代表各符号出现的概率.
+
+  算术编码是目前为止编码效率最高的一种统计熵编码方式, 但编码复杂.
+
+## 重复数据删除
+分文件和块级别, 常用在备份场景. zfs提供重删功能.
+
+百度云的极速上传就是文件级别的重删体现.
+
+按应用位置分:
+- 源端重复数据删除
+- 目的端重复数据删除
+
+按应用时间点分:
+- 离线重复数据删除
+- 在线重复数据删除
+
 ## 概念
 - 带内(In Band) : 控制信令和数据走同一条路线.
 - 带外(Out Band) : 控制信令和数据分开走.
