@@ -329,3 +329,7 @@ free()将内存块置于空闲列表之上时,是如何知晓内存块大小的:
 ### 在栈上分配内存:alloca()
 alloca()分配内存的速度要快于 malloc(),因为编译器将 alloca()作为内联代码处理,并通过直接调整堆栈指针来实
 现. 此外,alloca()也不需要维护空闲内存块列表, 且由 alloca()分配的内存随栈帧的移除而自动释放.
+
+## FAQ
+### memory dump
+`head /dev/mem |hexdump -C`
