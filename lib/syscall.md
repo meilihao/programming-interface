@@ -345,3 +345,19 @@ SUSv3 规定将常量 SIGSTKSZ作为划分备选栈大小的典型值,而将 MIN
 
 ### mmap
 需求大小较大
+
+```c
+// from man 2 mmap
+#include <sys/mman.h>
+
+       void *mmap(void *addr, size_t length, int prot, int flags,
+                  int fd, off_t offset);
+       int munmap(void *addr, size_t length);
+```
+mmap可将fd从偏移offset开始长度为length的一块映射到内存区域中, 从而把文件的某一段映射到进程的地址空间, 实现通过访问内存的方式去访问文件.
+
+应用访问文件一般有两种方法:
+1. mmap直接访问虚拟地址空间
+1. read/write进行寻址访问
+
+> mmap2()与mmap的区别是mmap2中文件的偏移以页为单位.

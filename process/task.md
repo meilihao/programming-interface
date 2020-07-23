@@ -462,6 +462,10 @@ struct rb_root mm_rb;
 
 这里面一个是单链表，用于将这些区域串起来. 另外还有一个红黑树, 是为了快速查找一个内存区域，并在需要改变的时候，能够快速修改.
 
+进程地址空间里的内存区域块被称为VMA(virtual memory area), 它描述了一个连续空间上的独立区间, 拥有一致的属性. 一个进程地址空间内的vms不允许发生地址重叠.
+
+用`pmap <pid>`可查看进程的地址空间分布情况.
+
 ```c
 // https://elixir.bootlin.com/linux/latest/source/include/linux/mm_types.h#L297
 /*

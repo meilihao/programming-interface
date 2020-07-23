@@ -1,6 +1,22 @@
 # fs
-> ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
+## vfs
+Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽象了四种对象类型：
+1. 超级块对象：代表一个已安装的文件系统,用于存储该文件系统的有关信息.
+1. 索引节点对象：代表具体的文件, 用于存储该文件的有关信息
+1. 目录项对象：代表一个目录项，描述了文件系统的层次结构.
 
+	一个文件路径的各组成部分都是一个目录项对象. 比如`/home/test/test.c`, kernel为home, test和test.c都创建了目录项对象.
+1. 文件对象：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
+
+	当且仅当进程访问文件期间存在与内存中. 同一个文件可能对应多个文件对象, 但其对应的索引节点对象是唯一的.
+
+每个对象都包含一组操作方法，用于操作相应的文件系统.
+
+kernel只能基于块来访问fs, 块也被成为fs的最小寻址单位.
+
+> 从2.4.10开始, buffer cache不再是一个独立的缓存, 而是被包含在page cache中, 通过page cache来实现.
+
+## stat
 ```c
 // from `man 2 stat`
 int stat(const char *pathname, struct stat *statbuf);
@@ -34,6 +50,8 @@ struct stat {
 参考:
 - [*Ext4文件系统架构分析(一)](https://www.cnblogs.com/alantu2018/p/8461272.html)
 - [*linux io过程自顶向下分析](https://my.oschina.net/fileoptions/blog/3058792/print)
+
+> ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
 
 ![](/misc/img/fs/f81bf3e5a6cd060c3225a8ae1803a138.jpeg)
 

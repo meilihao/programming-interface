@@ -1,5 +1,6 @@
 # io
 ![io抽象层次](/misc/img/io/80e152fe768e3cb4c84be62ad8d6d07f.jpg)
+![The Linux Storage Stack Diagram](/misc/img/io/The Linux Storage Stack Diagram.svg)
 
 ## 用设备控制器屏蔽设备差异
 计算机系统里, CPU 并不直接和设备打交道，而是通过设备控制器（Device Control Unit）的组件中转.
@@ -1036,6 +1037,23 @@ static const struct block_device_operations sd_fops = {
 
 ![](/msic/img/io/6290b73283063f99d6eb728c26339620.png)
 
+### bio
+bio描述了磁盘里要真实操作的位置与page cache中页的映射关系.
+
+每个bio对应磁盘里一块连续的位置(由磁盘物理特性决定), 但一个bio请求要读/写的数据在内存中可以不连续, 每个不连续的数据段由bio_vec来描述. bio_vec是一个bio的数据容器, 也是组成bio数据的最小单位.
+
+![bio、bio_vec与page之间的关系](/misc/img/io/Image00037.jpg)
+
+bio_idx指向当前的bio_vec，通过它可以跟踪I/O操作的完成进度. 但bio_idx更重要的作用在于对bio结构体进行分割，像磁盘阵列这样的驱动器可以把单独的bio结构体（原本是为单个设备使用准备的）分割到磁盘阵列中的各个硬盘上，磁盘阵列设备驱动只需复制这个bio结构体，再把bio_idx域设置为每个独立硬盘操作时需要的位置就可以了.
+
+bio在块层会被转化为request，多个连续的bio可以合并到一个request中，生成的request会继续进行合并、排序，并最终调用块设备驱动的接口将request从块层的request队列（request_queue）中移到驱动层进行处理，以完成I/O请求在通用块层的整个处理流程.
+
+![bio关系.jpg](/misc/img/io/bio关系.jpg)
+
+request用来描述单次I/O请求，request_queue用来描述与设备相关的请求队列，每个块设备在块层都有一个request_queue与之对应，所有对该块设备的I/O请求最后都会流经request_queue。块层正是借助bio、bio_vec、request、request_queue这几个结构将I/O请求在内核I/O子系统各个层次的处理过程联系起来的.
+
+面对新的、快速的存储设备，一个块设备一个队列的策略，开始变得不合时宜, kernel的块层已切换到多队列(multi-queue)模型.
+
 ### 直接 I/O 如何访问块设备
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L61
@@ -1295,9 +1313,15 @@ static blk_qc_t do_make_request(struct bio *bio)
 - [如何选择IO调度器](https://blog.csdn.net/keocce/article/details/106016416)
 
 它有很多种类型，定义为 [elevator_type](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/elevator.h#L66). 下面来逐一说一下:
-1. [(struct request_queue).elevator == NULL](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L787) : 调度算法是最简单的 IO 调度算法
+1. [(struct request_queue).elevator == NULL none](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L787) : 调度算法是最简单的 IO 调度算法
 
     它将 IO 请求放入到一个 FIFO 队列中，然后逐个执行这些 IO 请求
+
+	适用场景:
+	1. i/o调度器下方有更智能的i/o调度器, 比如磁盘阵列等.
+	1. 上层应用比i/o调度器更懂底层设备. 上层应用下来的bio已优化.
+
+	none适合nvme.	
 1. [struct elevator_type mq_deadline](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/mq-deadline.c#L774) 算法
 
     要保证每个 IO 请求在一定的时间内一定要被服务到，以此来避免某个请求饥饿. 为了完成这个目标，算法中引入了两类队列，一类队列用来对请求按起始扇区序号进行排序，通过红黑树来组织，称为 sort_list，按照此队列传输性能会比较高；另一类队列对请求按它们的生成时间进行排序，由链表来组织，称为 fifo_list，并且每一个请求都有一个期限值
