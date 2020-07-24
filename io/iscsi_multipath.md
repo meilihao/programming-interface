@@ -6,6 +6,8 @@
             iqn规范 = iqn.yyyy-mm.主机域名反写:任意字串,  例: iqn.2018-02.com.example:data
 - lun(逻辑单元)：Logic Unit Number ，绑定、关联存储设备
 
+![在以太网上比较NVMe-oF Target和iSCSI Target](/misc/img/io/Image00099.jpg)
+
 # multipath
 ```sh
 # yum install device-mapper-multipath -y
