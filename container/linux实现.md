@@ -345,7 +345,7 @@ register_pernet_device 函数注册了一个 loopback_net_ops，在这里面，�
 cgroup 全称是 control group，顾名思义，它是用来做“控制”的, 即控制资源的使用. 当前最新版本是cgroup v2(`grep cgroup /proc/filesystems`时会看到cgroup2).
 
 首先，cgroup 定义了下面的[一系列子系统(subsystem也称为resource controller)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h)，每个子系统用于控制某一类资源:
-- cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者NUMA节点
+- cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者NUMA节点, 取代了一起的cpu affinity功能
 - cpu，主要限制进程的 CPU 使用率
 - cpuacct，可以统计 cgroup 中的进程的 CPU 使用报告
 - io，可以限制进程的块设备 IO速度

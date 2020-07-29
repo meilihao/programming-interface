@@ -1,4 +1,9 @@
-# linux编译
+# linux
+
+## ko
+Linux内核是单内核（monolithic kernel），也就是所有的内核功能都集成在一个内核空间内. 但是kernel内核又有微内核的设计即具有模块功能，可以将磁盘驱动程序、文件系统等独立的内核功能制作成模块，并动态添加到内核空间或者删除.
+
+内核模块是可以动态添加到Linux内核空间的二进制文件，文件扩展名为ko.
 
 ## doc
 - [The Linux Kernel的翻译](https://www.kernel.org/doc/html/latest/translations/zh_CN/index.html)
@@ -331,6 +336,7 @@ $ sudo make install
 配置工具:
 - `make config` : 字符界面. 要求手动设定所有的选项，即使之前曾设定过
 - `make oldconfig` : 所有选择都基于已有的.config文件，只对新特性和新设定提出询问
+- `make localmodconfig` : 所有选择都基于已有的.config文件，只对新特性和新设定提出询问, 并会禁用**当前未被系统已加载的module**即不编译它们
 - `make menuconfig` : 基于ncurse库编制的图形界面工具, **推荐**
 - `make gconfig` : 基于gtk+的图形工具
 - `make xconfig` : 基于qt的图形工具
@@ -424,6 +430,33 @@ make 选项:
 
     常用的解决竞争的方法是自旋锁和信号量.
 1. 要考虑可移植的重要性
+
+### 提交kernel patch流程
+1. 在`.git/config`配置`sendemail`
+
+    ```conf
+    [sendemail]
+    smtpEncryption = tls
+    smtpServer = smtp.gmail.com
+    smtpUser = xxx@gmail.com
+    smtpServerPort = 587
+    ```
+1. 准备patch
+
+    ```bash
+    # git format-path HEAD~ # 生成patch
+    # ./scripts/checkpatch.pl --terse --file xxx.patch # 检查patch的格式
+    ```
+1. 提交patch
+
+    ```bash
+    # ./scripts/get_maintainer.pl xxx.patch # 获取patch相关代码的维护人员
+    # git send-email --to xxx1@xxx.com --to xxx2@xxx.com --cc linux-kernel@vger.kernel.org xxx.patch # 发送Patch
+    ```
+
+    提交成功后，就能在[内核邮件列表](https://lkml.org/)中看到自己的邮件以及维护人员的回复.
+
+    Linux内核被划分成不同的子系统，如网络、内存管理等，不同的子系统有相应的维护人员，一个Patch会首先提交到子系统分支，再被维护人员提交到上游分支, 最终由Linus Torvalds将Patch合并到主分支.
 
 ### kernel调试
 - printk : 支持设置优先级
