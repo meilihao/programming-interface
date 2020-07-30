@@ -11,3 +11,11 @@ Linux 2.6 所实现的 POSIX.1b 扩展为高精度时钟和定时器定义了一
 
 Linux 特有的 timerfd API 提供了一组创建定时器的接口,与 POSIX 定时器 API 相类似,但
 允许从文件描述符中读取定时器通知, 还可使用 select()、poll()和 epoll()来监控这些描述符.
+
+## kernel timer
+LINUX内核定时器是内核用来控制在未来某个时间点（基于jiffies）调度执行某个函数的一种机制. 其实现位于 [`<linux/timer.h>`(即`include/linux/timer.h`)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/timer.h) 和 [kernel/time/timer.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/kernel/time/timer.c) 文件中。被调度的函数肯定是异步执行的，它类似于一种"软件中断"，而且是处于非进程的上下文中，所以调度函数必须遵守以下规则：
+1. 没有 current 指针、不允许访问用户空间. 因为没有进程上下文，相关代码和被中断的进程没有任何联系
+1. 不能执行休眠（或可能引起休眠的函数）和调度
+1. 任何被访问的数据结构都应该针对并发访问进行保护，以防止竞争条件
+
+内核定时器的调度函数运行过一次后就不会再被运行了（相当于自动注销），但可以通过在被调度的函数中重新调度自己来周期运行.

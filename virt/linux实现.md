@@ -905,11 +905,6 @@ __direct_map 首先判断页表的根是否存在，当然存在，刚才初始�
 因此有了半虚拟化. 即虚拟机里面的操作系统不是一个通用的操作系统，它知道自己是运行在虚拟机里面的，使用的硬盘设备和网络设备都是虚拟的，应该加载特殊的驱动才能运行. 这些特殊的驱动往往要通过虚拟机里面和外面配合工作的模式，来加速对于物理存储和网络设备的使用.
 
 ### virtio 的基本原理
-参考:
-- [VIRTIO & VHOST](https://zhuanlan.zhihu.com/p/38370357)
-- [virtIO之VHOST工作原理简析](https://www.cnblogs.com/ck1020/p/7204769.html)
-- [*Virtio和Vhost介绍](https://forum.huawei.com/enterprise/zh/thread-465473.html)
-
 virtio，即虚拟化 I/O 设备. virtio 负责对于虚拟机提供统一的接口. 也就是说，在虚拟机里面的操作系统加载的驱动，以后都统一加载 virtio 就可以了, 简化了驱动开发.
 
 virtio 是对半虚拟化 hypervisor 中的一组通用模拟设备的抽象. Virtio设备本质上也是一个PCI设备.
@@ -924,7 +919,7 @@ virtio 的架构可以分为四层:
 ![virtio 的架构](/misc/img/virt/2e9ef612f7b80ec9fcd91e200f4946f3.png)
 ![](/misc/img/virt/1f0c3043a11d6ea1a802f7d0f3b0b34b.png)
 
-vhost是一种 virtio 高性能的后端驱动实现. 原有virtio后端驱动的i/o要进过vmm(qemu)和host kernel, 但它进一步缩短了i/o路径, 不再进过vmm.
+**vhost是一种 virtio 高性能的后端驱动实现, 是virtio的趋势**, 详情见[这里](/virt/vhost.md).
 
 virtio 使用 virtqueue 进行前端和后端的高速通信. 不同类型的设备队列数目不同. virtio-net 使用两个队列，一个用于接收，另一个用于发送；而 virtio-blk 仅使用一个队列.
 

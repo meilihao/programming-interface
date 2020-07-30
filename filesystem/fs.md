@@ -276,6 +276,8 @@ vfs有4中主要的数据结构:
 	- state : 进程的总状态信息(ps可解析该信息)
 	- statm : 内存使用情况的信息
 	- task : 为进程中的每个线程均包含一个子目录(始自 Linux 2.6)
+	- oom_adj : OOM Killer分值, range is [-16, 15]和-17. -17表示禁止被OOM机制处理. 其他具体值是用2^N来体现的, 因此n是正数时容易被OOM Killer选定.
+	- oom_score_adj : 用于替换oom_adj, range is [-1000, 1000], -1000即禁止被OOM机制处理
 - acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用
 - asound : alsa声卡驱动接口
 - buddyinfo : buddy内存分配信息
@@ -485,6 +487,10 @@ inotify 监控机制为**非递归**. 若应用程序有意监控整个目录子
 
 	对由每个真实用户 ID 创建的监控项数量的限制值
 
+## fuse
+fuse(filesystem in userspace, 用户空间文件系统)是在用户空间创建fs的框架. 一些文件系统如glusterfs和lustre使用FUSE实现.
+
+在用户态实现文件系统必然会引入额外的内核态/用户态切换带来的开销，对性能会产生一定影响
 
 ## FAQ
 ### 关闭文件系统日志功能

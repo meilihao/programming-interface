@@ -1,18 +1,20 @@
-# linux编译
+# linux
 
-如何替换linux内核:
-```sh
-# sudo apt-get install libncurses5-dev libssl-dev build-essential openssl bison flex bc
-# wget https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.3.11.tar.xz
-# xz -d linux-5.3.11.tar.xz
-# tar -xf linux-5.3.11.tar
-# cd linux-5.3.11
-# cp /boot/config-4.15.0-30deepin-generic .config # 基于现有内核的配置来编译kernel
-# make -j4
-# sudo make modules_install # 编译并安装kernel的模块
-# sudo make install # 编译并安装新kernel
-# sudo reboot
-```
+## ko
+Linux内核是单内核（monolithic kernel），也就是所有的内核功能都集成在一个内核空间内. 但是kernel内核又有微内核的设计即具有模块功能，可以将磁盘驱动程序、文件系统等独立的内核功能制作成模块，并动态添加到内核空间或者删除.
+
+内核模块是可以动态添加到Linux内核空间的二进制文件，文件扩展名为ko.
+
+## doc
+- [The Linux Kernel的翻译](https://www.kernel.org/doc/html/latest/translations/zh_CN/index.html)
+
+## kernel git tree
+- mainline : 由Linus Torvalds亲自制作的内核发布版，是官方当前最新版本的kernel source
+- stable : 稳定分支
+- longterm : 长期维护分支
+- linux-next : 根据设计 linux-next 提前包含了下一个合并窗口要合并的patch，理论上应该是下一个合并窗口关闭之后主线应该要成为的样子.
+
+    当Linus发布一个Mainline主线内核时，一个为期2周左右的主线合并窗口就会打开，在此期间，mainline分支会从linux-next以及各个子模块的维护者处接收合并patch，当合入一些patch后，就会形成下一个版本的rc候选版本，一般会经历多个rc版本，等待时机成熟，就会发布下一个版本的Mainline内核.
 
 ## header
 参考:
@@ -316,42 +318,93 @@ $ sudo make install
 - virt : 虚拟化基础结构
 
 ### 配置kernel
-各种选项以CONFIG_FEATRUE形式表示, 前缀是CONFIG.
+> Kconfig,Makefile,.config的关系: Kconfig是编译选项的配置菜单, 配置好的结果就是.config, Makefile根据.config编译kernel.
+
+`.config`的各种选项以CONFIG_FEATRUE形式表示, 前缀是CONFIG.
 
 部分选项支持多选, 比如PREEMPT(内核抢占):
-- no : 不支持
-- yes: 支持, 会编入kernel image
-- module : 编译这部分代码时已模块(一种可以动态安装的独立代码段)方式编译
+- n : 不编译
+- y: yes, 会静态编入kernel image
+- m : module, 编译这部分代码时以模块(一种可以动态安装的独立代码段)方式编译
+
+> `#CONFIG_<xxx> is not set` : 该选项所对应的功能不编译
+
+> kernel config不支持手动编辑, 必须使用相应的工具比如`make menuconfig`, 因为某些功能可能依赖其他功能.
 
 通常驱动程序都会提供三选一的配置项.
 
 配置工具:
 - `make config` : 字符界面. 要求手动设定所有的选项，即使之前曾设定过
 - `make oldconfig` : 所有选择都基于已有的.config文件，只对新特性和新设定提出询问
+- `make localmodconfig` : 所有选择都基于已有的.config文件，只对新特性和新设定提出询问, 并会禁用**当前未被系统已加载的module**即不编译它们
 - `make menuconfig` : 基于ncurse库编制的图形界面工具, **推荐**
 - `make gconfig` : 基于gtk+的图形工具
-- `make defconfig` : 基于默认的配置为本机的体现结构创建一个配置
+- `make xconfig` : 基于qt的图形工具
+- `make defconfig` : 使用本机arch对应的默认配置创建一个`.config`, 之后可用`make menuconfig`调整
+    
+    每种arch的默认`.config`在`arch/<arch>/config/defconfig`
 
 生成的配置会保存在kernel root的`.config`中.
 
 > 可将make menuconfig 当做make oldconfig的图形版本. 在将新的设定更新到.config中去的同时，将原来的.config文件保存为.config.old
+
 > 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
-
-使用`make -j${N}`编译完kernel后可用`make modules_install`安装已编译的模块到`/lib/modules`.
-
-> distcc和ccache可加速编译kernel.
 
 > 获取最新kernel的config: 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
 
-### 编译kernel
+### 编译kernel & 替换linux内核
 ```
-# apt install libssl-dev libelf-dev bc
+# sudo apt-get install libncurses5-dev libssl-dev build-essential openssl bison flex bc
+# wget https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.3.11.tar.xz
+# xz -d linux-5.3.11.tar.xz
+# tar -xf linux-5.3.11.tar
+# cd linux-5.3.11
+# cp /boot/config-4.15.0-30deepin-generic .config # 基于现有内核的配置来编译kernel
 # make -j8
-# make modules_install
-# make install # 安装编译好的kernel. 当编译完毕之后，grub 和 menu.lst 都会发生改变。例如，grub.conf 里面会多一个新内核的项
+# make modules_install # 安装kernel的模块到`/lib/modules`
+# make install # 将编译好的kernel image安装到/boot. 当安装完毕之后，grub 和 menu.lst 都会发生改变, 比如，grub.conf 里面会多一个新内核的项
+# sudo reboot
 ```
 
+> distcc和ccache可加速编译kernel.
+
+> 编译并安装已有版本的kernel会覆盖同版本的kernel相关文件(kernel image, kernel modules等), 而CONFIG_LOCALVERSION可解决该问题, 因为该项指定的字符会成为version的一部分而避免发生覆盖.
+
 调试kernel需要编译前激活 CONFIG_DEBUG_INFO 和 CONFIG_FRAME_POINTER 选项. 且在内核命令行中需要添加 nokaslr，来关闭 KASLR. 因为KASLR 会使得内核地址空间布局随机化，从而会造成打的断点不起作用.
+
+其他可用的make命令:
+- clean : 将源码恢复到编译前的状态, 但.config和编译过程中自动生成的部分文件不会被删除
+- mrproper : 将源码恢复到刚下载时的状态, 删除的文件包括.config
+- help : 显示可以使用的make命令
+- tags : 生成tag文件, 可是vim等editor的tag jump功能可用(比如函数跳转), 便于源码浏览
+- cscope : 生成用于cscope的索引文件. cscope是基于字符界面的源码浏览器
+- allyesconfig : 生成将所有设置项启用并静态链接到kernel的.config
+- allnoconfig : 生成将允许范围内的设置项设为无效的.config
+- allmodconfig : 生成将所有能编为module的设置项设为m的.config
+- <dir> : 编译dir及其以下的所有文件
+- <dir>/<file>.o : 仅生成指定的目标文件
+- <dir>/<file>.ko : 仅生成指定的模块
+
+make 选项:
+- V=0|1|2 : 设置编译时console显示的详细程度
+- O=<dir> : 将编译最终生成的文件全部输出到dir. 在源码目录禁止写入等情况下很实用
+
+#### 生成内核包
+1. fedora
+
+    ```bash
+    # make rpm-pkg # 会生成两个包, 二进制包在~/rpmbuild/rpms, 源码包在~/rpmbuild/SRPM
+    ```
+1. ubuntu
+
+    ```bash
+    # make deb-pkg # 同样会生成二进制包和源码包
+    ```
+#### 在kernel源码外编译module
+```bash
+# make -C /lib/modules/$(uname -r)/build M=$PWD # M=$PWD是为了告诉kernel编译在kernel源码外执行
+# make -C /lib/modules/$(uname -r)/build M=$PWD modules_install # modules_install可用INSTALL_MOD_PATH来指定module的安装目录
+```
 
 ## FAQ
 ### kernel开发与用户空间程序开发的差异
@@ -377,6 +430,33 @@ $ sudo make install
 
     常用的解决竞争的方法是自旋锁和信号量.
 1. 要考虑可移植的重要性
+
+### 提交kernel patch流程
+1. 在`.git/config`配置`sendemail`
+
+    ```conf
+    [sendemail]
+    smtpEncryption = tls
+    smtpServer = smtp.gmail.com
+    smtpUser = xxx@gmail.com
+    smtpServerPort = 587
+    ```
+1. 准备patch
+
+    ```bash
+    # git format-path HEAD~ # 生成patch
+    # ./scripts/checkpatch.pl --terse --file xxx.patch # 检查patch的格式
+    ```
+1. 提交patch
+
+    ```bash
+    # ./scripts/get_maintainer.pl xxx.patch # 获取patch相关代码的维护人员
+    # git send-email --to xxx1@xxx.com --to xxx2@xxx.com --cc linux-kernel@vger.kernel.org xxx.patch # 发送Patch
+    ```
+
+    提交成功后，就能在[内核邮件列表](https://lkml.org/)中看到自己的邮件以及维护人员的回复.
+
+    Linux内核被划分成不同的子系统，如网络、内存管理等，不同的子系统有相应的维护人员，一个Patch会首先提交到子系统分支，再被维护人员提交到上游分支, 最终由Linus Torvalds将Patch合并到主分支.
 
 ### kernel调试
 - printk : 支持设置优先级

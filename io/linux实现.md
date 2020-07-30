@@ -1317,6 +1317,8 @@ elevator有很多种类型，定义为 [elevator_type](https://elixir.bootlin.co
     它不会为磁盘分配每个时间段固定的时间片，而是为该过程分配以扇区数衡量的“预算”，并使用启发式方法, 可能更适合于旋转驱动器和慢速SSD. 在其默认配置中，它专注于提供最低的延迟而不是实现最大的吞吐量.
 1. [struct elevator_type kyber_sched](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/kyber-iosched.c#L1010)
 
+> 电梯调度可参考*Linux性能优化大师*的`1.4.3`块层.
+
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L49
 static LIST_HEAD(elv_list);

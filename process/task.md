@@ -900,7 +900,10 @@ SMP （Symmetric Multiprocessing, 对称多处理器）, 顾名思义, 在SMP中
 # ls /sys/devices/system/node/  # 如果只看到一个node0 那就是smp架构
 ```
 
-为了提高性能和可扩展性，后来有了一种更高级的模式，NUMA（Non-uniform memory access），非一致内存访问. 这种模型的是为了解决smp扩容性很差而提出的技术方案，如果说smp 相当于多个cpu 连接一个内存池导致请求经常发生冲突的话，numa 就是将cpu的资源分开，以node 为单位进行切割，每个node 里有着独有的core ，memory 等资源，CPU 访问本地内存不用过总线，因而速度要快很多，每个 CPU 和内存在一起，称为一个 NUMA 节点. 这也就导致了cpu在性能使用上的提升，但是同样存在问题就是2个node 之间的资源交互非常慢，比如在本地内存不足的情况下，每个 CPU 都可以去另外的 NUMA 节点申请内存，这个时候访问延时就会比较长.
+为了提高性能和可扩展性，后来有了一种更高级的模式，NUMA（Non-uniform memory access），非一致性内存访问. 这种模型的是为了解决smp扩容性很差而提出的技术方案，如果说smp 相当于多个cpu 连接一个内存池导致请求经常发生冲突的话，numa 就是将cpu的资源分开，以node 为单位进行切割，每个node 里有着独有的core ，memory 等资源，CPU 访问本地内存不用过总线，因而速度要快很多，每个 CPU 和内存在一起，称为一个 NUMA 节点. 这也就导致了cpu在性能使用上的提升，但是同样存在问题就是2个node 之间的资源交互非常慢，比如在本地内存不足的情况下，每个 CPU 都可以去另外的 NUMA 节点申请内存，这个时候访问延时就会比较长.
+
+**NUMA可体现在cpu里(AMD EPYC)或cpu+主板上, 本质都是numa相关的物理cpu(该cpu可能在一个大cpu里, 比如下图的AMD EPYC)的引脚与内存相连. 相关的硬件情况可用`numactl --hardware`查看.**
+![](/misc/img/task/803522171f494d3e913485bef0c5e840.png)
 
 这里仅说明NUMA方式, 且先上结论:
 
