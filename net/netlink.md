@@ -3,7 +3,7 @@
 - [linux netlink通信机制](https://www.cnblogs.com/wenqiang/p/6306727.html)
 - [Linux，Netlink 和 Go](http://blog.studygolang.com/2017/07/linux-netlink-and-go-part-1-netlink/)
 
-netlink是一中 Linux 内核进程间通信机制(IPC), 是用以实现用户进程与内核进程通信或多个用户空间进程通讯, 也是网络应用程序与内核通信的最常用的接口.
+netlink是一中 Linux 内核进程间通信机制(IPC), 是用以实现**用户进程与内核进程通信或多个用户空间进程通讯**, 也是网络应用程序与内核通信的最常用的接口.
 
 Netlink 是一种特殊的 socket(使用标准 BSD 套接字 API)，它是 Linux 所特有的，类似于 BSD 中的AF_ROUTE 但又远比它的功能强大，目前在Linux 内核中使用netlink 进行应用与内核通信的应用很多; 包括：路由 daemon（NETLINK_ROUTE），用户态 socket 协议（NETLINK_USERSOCK），防火墙（NETLINK_FIREWALL），netfilter 子系统（NETLINK_NETFILTER），内核事件向用户态通知（NETLINK_KOBJECT_UEVENT），通用 netlink（NETLINK_GENERIC）等.
     

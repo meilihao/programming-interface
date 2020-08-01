@@ -221,3 +221,135 @@ SNAS（Streaming Network Analytics System）是一个实时跟踪和分析网络
 OPNFV（Open Platform for NFV）是运营商级的开源网络集成参考平台。NFV架构里包含多个开源组件，不同开源组件间的集成和测试非常关键。OPNFV则提供了多组件持续开发、集成和测试的开源方案，并不断地向上游组织输出电信级 NFV平台的增强特性。
 
 OPNFV 目前已经集成了 OpenStack、ODL、ONOS、DPDK、ONAP、FD.IO 等多个关键组件，发布了7个版本、超过60多个集成套件和几十个自动化测试工具，为NFV集成和测试提供了大量开源参考方案和自动化框架。
+
+# linux virtual network
+![虚拟网络结构](/misc/img/net/Image00019_net.jpg)
+
+虚拟机的网络功能由虚拟网卡（vNIC）提供，Hypervisor可以为每个虚拟机创建一个或多个 vNIC. 站在虚拟机的角度，这些 vNIC 等同于物理的网卡。为了实现与传统物理网络等同的网络结构，与 NIC 一样，Switch 也被虚拟化为虚拟交换机（vSwitch）. 各个vNIC连接在vSwitch的端口上，最后这些vSwitch通过物理Server的物理网卡访问外部的物理网络. 由此可见，一个虚拟的二层网络结构，主要是完成两种网络设备的虚拟化：NIC硬件与交换设备.
+
+## MACVTAP
+传统的Linux网络虚拟化技术采用的是TAP+Bridge方式，将虚拟机连接到虚拟的TAP网卡，然后将TAP网卡绑定到Linux Bridge. 这种解决方案实际上就是使用软件，用服务器的CPU模拟网络，但这种技术主要有三个缺点：
+- 每台宿主机内都存在Bridge会使网络拓扑变得复杂，相当于增加了交换机的级联层数
+- 同一宿主机上虚拟机之间的流量直接在Bridge完成交换，使流量监控、监管变得困难
+- Bridge是软件实现的二层交换技术，会加大服务器的负担
+
+针对云计算中的复杂网络问题，业界主要提出了两种技术标准进行扩展：802.1Qbg与802.1Qbh.
+
+802.1Qbh Bridge Port Extension主要由VMware与 Cisco 提出，尝试从接入层到汇聚层提供一个完整的虚拟化网络解决方案，尽可能达到通过软件定义一个可控网络的目的. 它扩展了传统的网络协议，因此需要新的网络设备支持，成本较高.
+
+802.1Qbg Edge Virtual Bridging（EVB）主要由 HP 等公司提出，尝试以较低成本利用现有设备改进软件模拟的网络. 802.1Qbg 的一个核心概念是 VEPA，它通过端口汇聚和数据分类转发，把宿主机上原来由 CPU 和软件来做的网络处理工作转移到接入层交换机上，减轻宿主机的CPU 负载. 同时，使得在一级的交换机上做虚拟机网络流量监控成为可能.
+
+为支持这种新的虚拟化网络技术，Linux 引入了新的网络设备模型——MACVTAP，用来简化虚拟化环境下的桥接网络，代替传统的TAP+Bridge组合，同时支持新的虚拟化网络技术，如 802.1 Qbg. 和 TAP 设备一样，每一个 MACVTAP设备都拥有一个对应的 Linux 字符设备，因此能直接被 KVM/QEMU使用，方便完成网络数据交换工作.
+
+MACVTAP的实现基于传统的 MACVLAN. MACVLAN允许在主机的一个网络接口上配置多个虚拟的网络接口，这些网络接口有自己独立的 MAC 地址，也可以配置 IP 地址进行通信. MACVLAN 下的虚拟机或者容器和主机在同一个网段中，共享同一个广播域. MACVLAN 和 Bridge 比较相似，但因为它省去了 Bridge，所以配置和调试起来比较简单，而且效率也相对更高.
+
+同一个物理网卡上的各个MACVTAP设备，都可以拥有属于自己的 MAC地址和IP地址。使用MACVTAP，管理员不再需要建立网桥br0，并且同时把物理网卡eth0、连接虚拟机的TAP设备tap0和tap1加入网桥br0中，而是只需要在物理网卡eth0上建立两个MACVTAP设备，并让虚拟机直接使用这两个MACVTAP设备就可以了.
+
+MACVTAP设备支持3种操作模式：
+- VEPA模式：VEPA模式是默认模式. 在这种模式下，两个在同一个物理网卡上的 MACVTAP 设备（都处于 VEPA 模式）通信，网络数据会从一个MACVTAP 设备通过底层的物理网卡发往外界的交换机. 此时，外界交换机必须支持Hairpin模式，只有这样才可以把网络数据重新送回物理网卡，传送给此物理网卡上的另一个MACVTAP设备.
+- 桥接模式：在桥接模式下，同一个物理网卡上的所有桥接模式的MACVTAP设备直接两两互通，它们之间的通信，网络数据不会经过外界交换机
+- 私有模式：在私有模式时，类似于VEPA模式时外界交换机不支持Hairpin模式的情况. 此时，同一个物理设备上的MACVTAP设备之间不能通信
+
+## Open vSwitch
+Open vSwitch是一个具有产品级质量的虚拟交换机，它使用C语言进行开发，从而充分考虑了在不同虚拟化平台间的移植性，同时它遵循Apache2.0许可，因此对商用也非常友好.
+
+对于虚拟网络来说，交换设备的虚拟化是很关键的一环，vSwitch负责连接vNIC与物理网卡，同时也桥接同一物理Server内的各个vNIC. Linux Bridge已经能够很好地充当这样的角色，为什么还需要Open vSwith呢？
+
+在传统数据中心中，网络管理员通过对交换机的端口进行一定的配置，可以很好地控制物理机的网络接入，完成网络隔离、流量监控、数据包分析、Qos配置、流量优化等一系列工作.
+
+但是在云环境中，仅凭物理交换机的支持，管理员无法区分被桥接的物理网卡上流淌的数据包属于哪个VM、哪个OS及哪个用户，Open vSwitch的引入则使云环境中虚拟网络的管理以及对网络状态和流量的监控变得容易.
+
+比如，可以像配置物理交换机一样，将接入到Open vSwitch（Open vSwitch同样会在物理Server上创建一个或多个vSwitch供各个虚拟机接入）上的各个VM分配到不同的VLAN中实现网络的隔离. 也可以在Open vSwitch端口上为VM配置Qos，同时Open vSwitch也支持包括NetFlow、sFlow很多标准的管理接口和协议，可以通过这些接口完成流量监控等工作.
+
+此外，Open vSwitch也提供了对Open Flow的支持，可以接受Open Flow Controller的管理.
+
+总之，Open vSwitch在云环境中的各种虚拟化平台上（比如KVM）实现了分布式的虚拟交换机，一个物理 Server 上的 vSwitch 可以透明地与另一个 Server上的vSwitch连接在一起.
+
+![Open vSwitch软件结构](/misc/img/net/Image00023_net.jpg)
+
+其中ovs-vswitchd是最重要的模块，实现了虚拟机交换机的后台，负责与远程的Controller进行通信，例如通过OpenFlow协议与OpenFlow Controller通信，通过sFlow协议同sFlow Trend通信. 此外，ovs-switchd也负责同内核态模块通信，基于netlink机制下发具体的规则和动作到内核态的 datapath。datapath 负责执行数据交换，也就是把从接收端口收到的数据包在流表（Flow Table）中进行匹配，并执行匹配到的动作。每个datapath都和一个流表关联，当datapath接收数据后，会在流表中查找可以匹配的Flow，执行对应的动作，比如转发数据到另外的端口。ovsdb-server是一个轻量级的数据库服务器，主要用来记录被ovs-switchd的配置信息。
+
+Open vSwitch还包括了一系列的命令行工具，主要包括：
+- ovs-vsctl：查询和更新ovs-vswitchd的配置信息
+- ovsdb-client:ovsdb-server的客户端命令行工具
+- ovs-appctl：用来配置运行中的Open vSwitch daemon
+- ovs-dpctl：用来配置内核模块中的datapath
+- ovs-ofctl：通过OpenFlow协议查询和控制OpenFlow交换机和控制器
+
+## Linux Network Namespace
+如果不考虑内存、CPU等其他共享的资源，仅从网络的角度来看，Network Namespace就和一台虚拟机一样，它可以在一台机器上模拟出多个完整的协议栈.
+
+每个新的Network Namespace都默认有一个本地回环LO接口，此外，所有的其他网络设备，包括物理/虚拟网络接口、网桥等，只能属于一个Network Namespace，每个Socket也只能属于一个Network Namespace.
+
+创建 Network Namespace 也非常简单，使用 ip netns add 后面跟着要创建的Namespace 名称，如果相同名字的 Namespace 已经存在，会产生"Cannot create namespace"的错误.
+
+ip netns命令创建的Network Namespace会出现在/var/run/netns/目录下，如果需要管理其他不是ip netns创建的Network Namespace，只要在这个目录下创建一个指向对应 Network Namespace 文件的链接就可以.
+
+ip命令提供了ip netns exec子命令，可以在对应的Network Namespace中执行任意命令(但和网络无关的命令执行结果和在外部执行没有区别)，比如要看Network Namespace 中有哪些网卡: `ip netns exec ns1 ip addr`.
+
+有了不同的Network Namespace后，也就有了网络的隔离，而要把两个网络连接起来，Linux提供了VETH pair. 可以把VETH pair当作双向的管道，从一端发送的网络数据，可以直接被另外一端接收到，也可以想象成两个 Namespace 直接通过一个特殊的虚拟网卡连接起来，可以直接通信.
+
+可以使用ip link add type veth 创建一对VETH pair，系统自动生成VETH0和VETH1两个网络接口，如果需要指定它们的名字，则可以使用ip link add vethfoo type veth peer name vethbar，此时创建出来的两个名字就是vethfoo和vethbar. 需要记住的是**VETH pair无法单独存在，删除其中一个，另一个也会自动消失**.
+
+然后，可以把这对VETH pair分别放到创建的两个Namespace里，可以使用ip link set DEV netns NAME来实现.
+
+虽然 VETH pair 可以实现两个 Network Namespace 之间的通信，但是当多个Namespace需要通信的时候，就无能为力了. 涉及多个网络设备之间的通信，首先想到的是交换机和路由器. 因为这里要考虑的只是同一个网络，所以只用到交换机的功能，也就是brigde. 即先创建VETH pair，比如veth0与veth1，再将一个VETH接口veth0加入Network Namespace，另一个VETH接口veth1加入Bridge即可.
+
+## NAT
+> 在ipv6逐渐普及的现今, nat不再是重点, 因此这里不会很深入.
+
+网络地址转换（NAT,Network Address Translation）是一种在IP数据包通过路由器或防火墙时重写来源IP地址或目的IP地址的技术. 这种技术被普遍使用在有多台主机通过一个公有IP地址访问外部网络的私有网络中，NAT也可以被称作IP伪装（IP Masquerading），可以分为目的地址转换（DNAT）和源地址转换（SNAT）两类.
+
+DNAT 主要用在从公网访问内部私网的网络数据流中. 比如从公网访问地址为IP1的公网IP地址，NAT网关根据设定的DNAT规则，把IP数据报文包头内的目的IP地址IP1修改为内部的私网IP地址192.168.1.10，从而把IP数据报文发送给地址为192.168.1.10的内部服务器. DNAT可以用来将内部私网服务器上的服务暴露给公网使用.
+
+SNAT 主要应用在从内部私网访问公网的网络数据流中. 比如内部私网 IP 地址为192.168.1.20的机器想访问外部公网IP地址为IP2的服务，NAT网管根据设定的SNAT规则，把IP数据报文包头内的源IP地址192.168.1.20修改为NAT网关自己的公网IP地址IP1。这样内网中没有公网IP地址的机器也能访问外部公网中的服务了.
+
+Linux中的NAT功能一般通过iptables/nftables实现. iptables/nftables是基于Linux内核的功能强大的防火墙. eBPF也实现了NAT.
+
+## 虚拟网络隔离技术
+### 1. 虚拟局域网（VLAN）
+
+LAN（Local Area Network，本地局域网）中的计算机通常使用Switch连接. 一般来说，两台计算机连入同一个Switch时，它们就在同一个 LAN 中. 一个 LAN 表示一个广播域，含义就是：LAN 中的所有成员都会收到任意一个成员发出的广播包.
+
+VLAN（Virtual LAN，虚拟局域网）表示一个带有VLAN功能的Switch能将自己的端口划分出多个LAN. 计算机发出的广播包可以被同一个LAN中的其他计算机收到，但位于其他LAN的计算机则无法收到。简单地说，**VLAN将一个交换机在逻辑上分成了多个交换机，限制了广播的范围，在二层将计算机隔离到不同的VLAN中**.
+
+需要注意的是，VLAN实现的只是二层的隔离，比如二层广播包arp无法跨越 VLAN 的边界，但在三层上（比如IP地址）是可以通过路由器让两个VLAN互通的.
+
+使用VLAN，能够更好地控制广播风暴，提高网络整体的安全性，也能使网络管理更加简单直观. 不同的VLAN由VLAN tag（VID）标明，IEEE 802.1Q规定了VLAN tag的格式. 在Linux上要使用VLAN，需要加载8021q的内核模块.
+
+现在的交换机几乎都是支持 VLAN 的. 交换机的端口通常有两种配置模式：Access和Trunk:
+
+其中，Access 端口被打上了 VLAN tag，表明该端口属于哪个 VLAN,Access口只能属于一个 VLAN。Access 端口都是直接与计算机网卡相连的，这样从该网卡出来的数据包流入Access端口后就被打上了所在的 VLAN tag。
+
+Trunk 端口一般用于交换机之间的连接，可以允许多个 VLAN 通过，可以接收和发送多个 VLAN 的报文。如果划分了 VLAN，但是没有配置 Trunk，那么交换机之间的每个VLAN 间通信都要通过一条线路来实现。
+
+![Linux VLAN](/misc/img/net/Image00042_net.jpg)
+
+在Linux中可以通过Linux Bridge、物理网卡等模拟交换机的VLAN环境。上图中, eth0 是宿主机上的物理网卡，有一个命名为eth0.10的子设备与之相连。eth0.10 就是 VLAN 设备，其 VLAN ID 就是 VLAN 10。eth0.10 挂在命名为 brvlan10 的 Linux Bridge 上，虚拟机 VM1 的虚拟网卡 vent0也挂在brvlan10 上。
+
+这样配置的效果等同于宿主机用软件实现了一个虚拟交换机，上面定义了一个VLAN10, eth0.10和vnet0 都分别接到 VLAN10 的 Access端口上。而 eth0 就相当于一个 Trunk 端口，VM1 通过 vnet0 发出来的数据包会被打上 VLAN10 的标签。
+
+但是Linux在VLAN模拟上有一个不足，即需要多少个VLAN，就得创建多少个Bridge,Trunk端口也需要创建同样数量的类似eth0.10的虚口。这是由于**Bridge的转发表没有VLAN tag的维度**，要实现不同VLAN独立转发，只能使用多个Bridge实例实现转发表的隔离.
+
+## 2. VxLAN
+VxLAN（Virtual Extensible Local Area Network，虚拟局域网扩展）是基于隧道（Tunnel）的一种网络虚拟化技术.
+
+隧道是一个虚拟的点对点的连接，提供了一条通路使封装的数据报文能够在这个通路上传输，并且在通路的两端分别对数据报文进行封装及解封装。某个协议的报文要想穿越IP网络在隧道中传输，必须要经过封装与解封装两个过程。隧道提供了一种某一特定网络技术的PDU穿过不具备该技术转发能力的网络的手段，如组播数据包穿过不支持组播的网络.
+
+**VxLAN将二层报文用三层协议进行封装，可以对二层网络在三层范围内进行扩展**, 比如把二层网络的整个数据帧封装在UDP报文中，送到VxLAN隧道对端。隧道对端的虚拟或者物理网络设备再将其解封装，取出里面的二层网络数据帧发送给真正的目的节点.
+
+VxLAN协议头使用了24bit表示VLAN ID，可以支持1600多万个VLAN ID。RFC协议7348号中定义了VxLAN协议。
+
+VxLAN应用于数据中心内部，使虚拟机可以在互相连通的三层网络范围内迁移，而不需要改变IP地址和MAC地址，保证业务的连续性。
+
+## 3. 通用路由封装GRE
+GRE（RFC1701）也是基于隧道的一种网络虚拟化技术. 与VxLAN相比，GRE使用的是IP报文而非UDP作为传输协议。同时，不同于VxLAN只能封装二层以太网数据帧，GRE可以封装多种不同的协议，包括IP报文（RFC2784,RFC2890）、ARP、以太网帧（NVGRE,RFC 7637）等.
+
+相比于VxLAN,GRE更加灵活，可以支持的协议也更多。但是目前物理网卡支持GRE协议的还不是很多，大部分GRE协议的处理还要依靠主机CPU，会增加CPU的负载。
+
+## 4. 通用网络虚拟化封装（Geneve）
+为了应对 VLAN 只能有4094的上限，利用隧道技术，产生了诸如 VxLAN、NVGRE、STT（无状态传输隧道）等多种技术来实现虚拟网络的隔离要求。但是这类技术互相不能兼容，所以提出了通用网络虚拟化封装 Geneve（Generic Network Virtualization Encapsulation）.
+
+Geneve技术的RFC正式标准还没产生，还处于IETF草案的阶段。Geneve主要的目的是适应虚拟网络技术的发展和隔离要求，定义一种通用的网络虚拟化隧道封装协议，能够尽可能地兼容目前的VxLAN、NVGRE等正式RFC标准的功能，并且提供高可扩展性来应对以后虚拟网络技术的发展。
+
+Geneve综合了VxLAN和NVGRE两者的特点，首先使用了UDP作为传输协议，同时吸收了GRE可以封装多种不同类型的数据包的优点。

@@ -282,6 +282,12 @@ vfs有4中主要的数据结构:
 - asound : alsa声卡驱动接口
 - buddyinfo : buddy内存分配信息
 - bus : 包含总线子系统的信息, 比如pci总线或各自系统的usb接口
+
+	- input : 输入设备
+
+		- devices : 目前检测到的输入设备, 比如键盘
+
+			设备的Handlers中的event<N>与`/dev/input/event<N>`对应.
 - cgroups : 查看系统支持的cgruop subsystem(controller)
 - cmdline : 内核启动参数
 - cpuinfo : cpu的信息
