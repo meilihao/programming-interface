@@ -62,7 +62,7 @@ label表示标签的意思，几乎每一个文件系统都有一个标签. 所�
 label是通过从设备中的内容（即数据）获取，所以如果将该内容拷贝至另一个设备中，我们也可以通过blkid来获取磁盘的label.
 
 ### by-uuid
-UUID是给每个文件系统唯一标识的一种机制，这个标识是在**分区格式化时通过文件系统工具生成**，比如mkfs，这个唯一标识可以起到解决冲突的作用. 所有GNU/Linux文件系统（包括swap和原始加密设备的LUKS头）都支持UUID. FAT和NTFS文件系统并不支持UUID，但是在/dev/disk/by-uuid目录下还是存在着一个更为简单的UID（唯一标识）.
+UUID是给每个**文件系统**唯一标识的一种机制，这个标识是在**分区格式化时通过文件系统工具生成**，比如mkfs，这个唯一标识可以起到解决冲突的作用. 所有GNU/Linux文件系统（包括swap和原始加密设备的LUKS头）都支持UUID. FAT和NTFS文件系统并不支持UUID，但是在/dev/disk/by-uuid目录下还是存在着一个更为简单的UID（唯一标识）.
 
     $ ls -l /dev/disk/by-uuid/
     total 0

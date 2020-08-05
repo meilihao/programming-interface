@@ -240,7 +240,33 @@ vfs有4中主要的数据结构:
 `/sys`目录:
 - block : 系统中当前所有的块设备所在，按照功能来说放置在 /sys/class 之下会更合适，但只是由于历史遗留因素而一直存在于/sys/block, 但从 2.6.22 开始就已标记为过时，只有在打开了 CONFIG_SYSFS_DEPRECATED配置下编译才会有这个目录的存在，并且**在 2.6.26 内核中已正式移到 /sys/class/block**, 旧的接口 /sys/block为了向后兼容保留存在，但其中的内容已经变为指向它们在 /sys/devices/ 中真实设备的符号链接文件
 - bus : 总线: pci-e, scsi, usb等, 是内核设备按总线类型分层放置的目录结构，devices 中的所有设备都是连接于某种总线之下，在这里的每一种具体总线之下可以找到每一个具体设备的符号链接，它也是构成 Linux 统一设备模型的一部分
-- class : 按照设备功能分类的设备模型(比如声卡, 显卡, 输入设备, 网卡)组织的一颗树, 再如系统所有输入设备都会出现在 /sys/class/input 之下，而不论它们是以何种总线连接到系统。它也是构成 Linux 统一设备模型的一部分
+- class : 按照设备功能分类的设备模型(比如声卡, 显卡, 输入设备, 网卡)组织的一颗树
+
+	- input : 系统所有输入设备都会出现在这，而不论它们是以何种总线连接到系统。它也是构成 Linux 统一设备模型的一部分
+	- fc_host : 主机HBA卡信息, 通常一张光纤卡有2个光纤口
+
+		- host<H> : 光纤口
+
+			- port_id : HBA端口的 24位交换机端口ID
+			- issues_lip : 重置HBA端口，重新尝试发现存储端口
+	- fc_remote_ports : 主机到存储端口链路信息（包含未给主机分配存储的链路信息）
+
+		- rport-H:B-R : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
+			- port_id : 存储端口的 24位交换机端口ID
+			- node_name : 存储端口的64位node name
+			- port_name : 存储端口的64位port name
+			- dev_loss_tmo : 链路故障等待时间
+
+				故障链路不再处理任何新的IO。默认dev_loss_tmo值视具体HBA卡而定，Qlogic默认是35秒，Emulex默认是30秒。HBA卡自带驱动可以覆盖这个 参数值。dev_loss_tmo最大值600秒，如果dev_loss_tmo值小于0或者大于600，HBA自带超时值生效。
+			- fast_io_fail_tmo : IO故障等待时间. 链路波动情况，IO尝试多长时间
+	- fc_transport : 已分配存储信息
+
+		- targetH:B:T : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
+
+			- port_id : 存储端口的 24位交换机端口ID
+			- node_name : 存储端口的64位node name
+			- port_name : 存储端口的64位port name
+
 - dev : 区分块设备和字符设备的设备信息. 它维护一个按字符设备和块设备的主次号码 (major:minor)链接到真实的设备(/sys/devices下)的符号链接文件，是在内核 2.6.26 首次引入
 - devices : 正确表示所有找到的设备, 是内核对系统中所有设备的分层次表达模型，也是 /sys 文件系统管理设备的最重要的目录结构
 - firmware : 特定于平台的子系统的接口, 如ACPI. 是系统加载固件机制对用户空间的接口，关于固件有专用于固件加载的一套API
