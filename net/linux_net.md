@@ -972,3 +972,120 @@ OpenContrail主要针对私有云与NFV两种应用场景，这里以私有云�
 例如用于虚拟私有云和混合云的 OpenContrail 解决方案。OpenContrail 可以在第三方云提供商的公有云网络中创建虚拟私有云，然后使用 L3 VPN链接（或IPsec连接）将其扩展到现有数据中心、私有云或分支机构中的旧基础架构。之后的工作，无论是在分支机构上的办公网络、数据中心或私有云，都在同一个虚拟网络上，无论在哪个云上都可以通过安全通道互相访问。这种灵活性允许企业选择多个供应商，进而有助于企业IT组织摆脱“影子IT”。
 
 Tungsten Fabric的北向REST API可以被上层应用使用，与OpenStack等上层编排系统集成。实际上OpenStack是Tungsten Fabric重要的集成对象。
+
+# openstack
+OpenStack的6个核心组件，分别是计算（Compute）、对象存储（Object Storage）、认证（Identity）、块存储（Block Storage）、网络（Network）和镜像服务（Image Service）.
+
+1. Compute
+
+Compute 的项目代号是 Nova，它根据需求提供虚拟机服务，比如创建虚拟机或对虚拟机做热迁移等。从概念上看，它对应AWS的EC2服务，而且它实现了对EC2 API 的兼容。如今，Rackspace 和惠普提供商业计算服务正是建立在 Nova 之上的，NASA内部使用的也是Nova。
+
+1. Object Storage
+
+Object Storage的项目代号是Swift，它允许存储或检索对象，也可以认为它允许存储或检索文件，它能以低成本的方式通过RESTful API管理大量无结构数据。它对应AWS的S3服务。如今，KT、Rackspace和Internap都提供基于Swift的商业存储服务，许多公司的内部也使用Swift存储数据。
+
+1. Identity
+
+Identity的项目代号是Keystone，为所有OpenStack服务提供身份验证和授权，跟踪用户及他们的权限，提供一个可用服务及API的列表。
+
+1. Block Storage
+
+Block Storage的项目代号是Cinder，提供块存储服务。Cinder最早由Nova中的nova-volume 服务演化而来，当时由于 Nova 已经变得非常庞大并拥有众多功能，也由于volume服务的需求会进一步增加nova-volume的复杂度，比如增加volume调度，允许多个volume driver同时工作，同时考虑需要nova-volume与其他OpenStack项目交互，例如将Glance中的镜像模板转换成可启动的volume，所以OpenStack新成立了一个项目Cinder扩展nova-volume的功能。Cinder对应AWS EBS块存储服务。
+
+1. Network
+
+Network 的项目代号是 Neutron，用于提供网络连接服务，允许用户创建自己的虚拟网络并连接各种网络设备接口。
+
+Neutron通过插件的方式对众多的网络设备提供商进行支持，例如Cisco、Juniper等，同时也支持很多流行的技术，例如 Openvswitch、OpenDaylight 和 SDN 等。与Cinder类似，Neutron也来源于Nova，即nova-network，它最初的项目代号是Quantum，但由于商标版权冲突问题，后来经过提名投票评选更名为Neutron。
+
+1. Image Service
+
+Image Service的项目代号是Glance，它是OpenStack的镜像服务组件，相对于其他组件来说，Glance 功能比较单一，代码量也比较少。而且由于新功能的开发数量越来越少，社区的活跃度也没有其他组件那么高，但它仍是OpenStack的核心项目。
+
+## 1. 网络资源模型
+对于Neutron来说，各种RESTful API背后就是Neutron的网络资源模型.
+
+### 1. 网络资源抽象
+
+Neutron将其管理的对象称为资源，虽然也使用Network、Subnet等表面上看与传统网络中的概念一样的名词，但由于Neutron管理的范围（数据中心内）和对象的特点（Host内部虚机VM）等原因，与传统网络的概念并不完全相同，甚至有些令人困惑。Neutron管理的核心网络资源包括如下所述。
+
+- Network（网络）：隔离的 L2 广播域，一般为创建它的用户所有，用户可以拥有多个网络。网络是最基础的，子网和端口都需要关联到网络上，网络上可以有多个子网。同一个网络上的主机一般可以通过交换机或路由器连通。
+
+- Subnet（子网）：逻辑上隔离的 L3 域，子网代表了一组IP地址的集合，即背后分配了 IP 的虚拟机。每个子网必须有一个 CIDR（Classless Inter Domain Routing），并关联到一个网络。IP 可以从 CIDR 或用户指定池中选取。子网可能会有一个网关、一组 DHCP、DNS服务器和主机路由。不同子网之间 L3 并不互通，必须通过一个路由器进行通信。
+
+- Port（端口）：虚拟网口是MAC 地址和IP地址的承载体，也是数据流量的出入口。虚拟机、路由器均需要绑定Port。一个Network可以有多个Port，一个Port也可以与一个Network中的一个或多个Subnet关联。
+
+这里的 Subnet 从 Neutron 的实现上来看并不能完全理解为物理网络中的子网概念。Subnet属于网络中的3层概念，指定一段IPv4或IPv6地址并描述其相关的配置信息，它附加在一个二层Network上，指明属于这个Network的虚拟机可使用的IP地址范围。一个Network可以同时拥有一个IPv4 Subnet和一个IPv6 Subnet。除此之外，即使为其配置多个Subnet，也并不能够工作。
+
+目前为止，已经知道Neutron通过L3的抽象Router提供路由器的功能，通过L2的抽象 Network/Subnet 完成对真实二层物理网络的映射，并且 Network 有 Linux Bridge、Open vSwitch等不同的实现方式。此外，在L2中，还提供了一个重要的抽象Port，代表了虚拟交换机上的一个虚拟交换端口，记录其属于哪个网络及对应的IP等信息。当一个Port被创建时，在默认情况下，会为它分配其指定Subnet中可用的IP。当创建虚拟机时，可以为其指定一个Port。
+
+对于L2层抽象Network来说，必然需要映射到真正的物理网络，但Linux Bridge与Open vSwitch等只是虚拟网络的底层实现机制，并不能代表物理网络的拓扑类型，目前Neutron主要实现了如下几种网络类型的支持。
+
+- Flat:Flat类型的网络不支持VLAN，因此不支持二层隔离，所有虚拟机都在一个广播域。
+
+- VLAN：与Flat相比，VLAN类型的网络自然会提供VLAN的支持。
+
+- NVGRE/GRE:NVGRE（Network Virtualization using Generic Routing Encapsulation）是点对点的IP隧道技术，可用于虚拟网络互联。NVGRE允许在GRE内传输以太网帧，而GRE key拆成两部分，前24位作为Tenant ID，后8位作为 Entropy，用于区分隧道两端连接的不同虚拟网络。
+
+- VxLAN:VxLAN（Virtual Extensible LAN）技术的本质是将L2层的数据帧头重新定义后，通过L4层的UDP进行传输。相比于采用物理VLAN实现的网络虚拟化，VxLAN 是 UDP 隧道，可以穿越 IP 网络，使得两个虚拟VLAN可以实现二层联通，并且突破4095的VLAN ID限制，提供多达1600万的虚拟网络容量。
+
+- GENEVE：通用网络虚拟化封装（Generic Network Virtualization Encapsulation）由IETF草案定义。在实现上，GENEVE与VxLAN类似，仍然是Ethernet over UDP，也就是用UDP封装Ethernet。VxLAN header是固定长度的（8个字节，其中包含24bit VNI），与VxLAN不同的是，GENEVE header增加了TLV（Type-Length-Value），由8个字节的固定长度和0~252个字节可变长度的TLV组成。GENEVE header中的TLV代表了可扩展的元数据。
+
+除了上述L2与L3的抽象，Neutron提供了更高层次的一些服务，主要有FWaaS、LBaaS和VPNaaS。
+
+### 2. Provider Network与Tenant Network
+Provider Network（运营商网络）与Tenant Network（租户网络）从本质上来讲都是Neutron的Network资源模型。其中Tenant Network是由租户创建并管理的网络. Provider Network是Neutron创建并用来映射一个外部网络的。这些外部网络并不在 Neutron 的管理范围之内，因此 Provider Network 的作用就是将Neutron内部的虚拟机或网络通过实现的映射与外部网络连通。
+
+Provider Network与Tenant Network区别主要在于：
+
+- 管理的角色与权限不同。Tenant Network由租户创建，而 Provider Network由管理员创建。
+- 创建网络时传入的参数不同。
+
+    - 创建 Provider Network 时，需要同时传入provider-network-type、provider-physical-network和provider-segment三个参数.
+    - 而创建Tenant Network时，租户无法传入上述的三个参数，它们根据Neutron在部署时配置的内容进行自动分配。
+
+### 3. Provider Network与Multi-Segment Network
+Provider与Segment两个概念对于虚拟网络与物理承载网络的映射非常重要，有必要对其做专门的说明.
+
+Segment可以简单理解为对物理网络一部分的描述，比如它可以是物理网络中很多VLAN中的一个VLAN。Neutron仅仅使用下面的结构定义一个Segment：
+```
+{NETWORK_TYPE,PHYSICAL_NETWORK,and SEGMENTATION_ID}
+```
+
+如果 Segment 对应了物理网络中的一个 VLAN，则 SEGMENTATION_ID 就是VLAN 的 VLAN ID，如果 Segment 对应的是 GRE 网络中的一个 Tunnel，则SEGMENTATION_ID就是这个Tunnel的Tunnel ID。Neutron使用这样简单的方式将Segment与物理网络对应起来。
+
+Provider Network的作用就是指创建虚拟网络时Neutron允许指定虚拟网络占用的物理网络资源。这个虚拟网络可以包含多个、多种不同的Provider Network，这也就是Multi-Segment Network。
+
+Multi-Segment Network网络能够灵活地使用现存物理网络作为承载网络，当前有ML2和NSX 插件对其提供了支持.
+
+### 4.Router
+如果说端口是Neutron资源模型的“灵魂”，那么Router就是Neutron资源模型的“发动机”，它承担着路由转发功能。Router的资源模型可以简单抽象为三部分：端口、路由表、路由协议处理单元.
+
+单从外部的内容来看，Router最关键的两个概念就是端口和路由表。Router 使用一个数组表示路由表，每个数组元素的类型是[destination,nexthop]，其中destination表示目的地网段（CIDR）,nexthop表示下一跳的IP地址。
+
+Router 并没有使用某个字段来标识它的端口，而是提供了两个 API 以增加或删除端口。
+
+## 2. 网络实现模型
+Neutron 的模型有两种，一种是抽象的资源模型，另一种是这种抽象模型背后的实现模型。无论一个模型多抽象还是多具体，归根到底总归要有一个实现它的载体，承载Neutron抽象出的网络资源模型的方案，可以称为Neutron的网络实现模型，包含相应的网元、组网及网元对应的配置。
+
+在实际组网时，Neutron有三类节点:
+- Cloud Controller Node（控制节点）
+- Compute Node（计算节点）
+- Network Node（网络节点）
+
+实际三类节点可分别部署在于三台物理服务器上，也可以部署在同一台物理机 Host上，甚至可以部署在一个或多个VM中.
+
+其中，控制节点上部署着身份认证、镜像服务、Nova，以及Neutron的API Server、Nova的调度器等服务；计算节点运行着Nova-compute及一些Neutron的Agent，为VM（虚拟机）的启动和连通服务；网络节点则通过部署一系列 Neutron 的 Agent，为整个OpenStack网络提供DHCP、DNS、通过Router访问Internet的能力等.
+
+在控制层面上，三类节点间均通过Management Network进行控制面的消息传递，同时控制节点通过API Network接收OpenStack用户的管理消息；在数据层面上，计算节点与网络节点间的数据通过Data Network传输，同时访问或接收外部网络的流量需要通过Network节点的External Network。这种根据不同层面和功能使用不同网络进行数据传递的能力，有利于提高Neutron的网络性能及自身的可靠性、可用性及可服务性。
+
+实际上，Neutron 仅仅是一个管理系统（或者说是一个控制系统），它本身并不能实现任何网络功能，仅仅是针对Linux相关功能做一个配置或者驱动而已。Neutron 是借用Linux实现网络功能的。
+
+## 3. Neutron软件架构
+Neutron只有一个主要的服务进程neutron-server，它运行在网络控制节点上，提供RESTful API并作为访问Neutron的入口，neutron-server接收用户HTTP请求，最终由遍布于计算节点和网络节点的各种Agent完成。
+
+Neutron 提供的众多 API 资源对应了各种 Neutron 网络抽象，其中 L2的抽象network/subnet/port被认为是核心资源，其他层次的抽象，包括Router以及众多的高层次服务则是扩展资源（Extension API）。
+
+为了更容易进行扩展，Neutron利用Plugin的方式组织代码，每一个Plugin支持一组API资源并完成特定的操作，这些操作最终由Plugin通过RPC调用相应的Agent完成。
+
+这些Plugin又被做了一些区分，一些提供基础二层虚拟网络支持的Plugin称为Core Plugin，它们必须至少实现L2的三个主要抽象，管理员需要从这些已经实现的Core Plugin中选择一种。除Core Plugin之外的其他Plugin则被称为Service Plugin，比如提供防火墙服务的Firewall Plugin。
