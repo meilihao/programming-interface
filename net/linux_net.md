@@ -517,7 +517,7 @@ DPDK由一系列可用于包处理的软件库组成，能够支持多种类型�
 
 除系统抽象层以外，无锁环、MemPool及Mbuf的管理也是DPDK的核心所在。
 
-DPDK的rte_ring结构提供了一个支持多生产者和多消费者的无锁环。它是一个先进先出（FIFO）队列，简单且高速，支持成批进队列和出队列。它已用于Memory Pool 的管理，同时也可以作为不同执行单元间的通信方式。其结构可以简单地表示为环的形式，生产者和消费者逐自进入各自的Head和Tail指针控制环中对象的移动（入队列，出队列）。
+DPDK的rte_ring结构提供了一个支持多生产者和多消费者的无锁环。它是一个先进先出（FIFO）队列，简单且高速，支持成批进队列和出队列。它已用于Memory Pool 的管理，同时也可以作为不同执行单元间的通信方式。其结构可以简单地表示为环的形式，生产者和消费者逐自进入各自的Head和Tail指针控制环中对象的移动（入队列，出队��）。
 
 DPDK的rte_mempool是负责管理从内存中分配mempool的库。mempool是一个对象池，池中的对象用rte_ring管理。在mempool中还引入了Object Cache（对象缓存）的概念，用于加速对象的分配和释放过程。具体可参见DPDK的开发者手册。
 
@@ -1066,7 +1066,7 @@ Multi-Segment Network网络能够灵活地使用现存物理网络作为承载�
 Router 并没有使用某个字段来标识它的端口，而是提供了两个 API 以增加或删除端口。
 
 ## 2. 网络实现模型
-Neutron 的模型有两种，一种是抽象的资源模型，另一种是这种抽象模型背后的实现模型。无论一个模型多抽象还是多具体，归根到底总归要有一个实现它的载体，承载Neutron抽象出的网络资源模型的方案，可以称为Neutron的网络实现模型，包含相应的网元、组网及网元对应的配置。
+Neutron 的模型有两种，一种是抽象的资源模型，另一种是这种抽象模型背后的实现模型。无论一个模型多抽象还是多具体，归根到底总归要有一个实现它的载体，承载Neutron抽象出的网络资源模型的方案，可以称为Neutron的网络实现模型，包含相应的网元、组网及网元对应的配置���
 
 在实际组网时，Neutron有三类节点:
 - Cloud Controller Node（控制节点）
@@ -1089,3 +1089,67 @@ Neutron 提供的众多 API 资源对应了各种 Neutron 网络抽象，其中 
 为了更容易进行扩展，Neutron利用Plugin的方式组织代码，每一个Plugin支持一组API资源并完成特定的操作，这些操作最终由Plugin通过RPC调用相应的Agent完成。
 
 这些Plugin又被做了一些区分，一些提供基础二层虚拟网络支持的Plugin称为Core Plugin，它们必须至少实现L2的三个主要抽象，管理员需要从这些已经实现的Core Plugin中选择一种。除Core Plugin之外的其他Plugin则被称为Service Plugin，比如提供防火墙服务的Firewall Plugin。
+
+### 1. Neutron Plugin
+Moduler Layer 2（ML2）是 Neutron 在 Havana 版本实现的一个新的Core Plugin，用于替代原有的Core Plugin，比如 Linux Bridge Plugin 和 Open vSwitch Plugin。
+
+Core Plugin负责管理和维护 Neutron 的 network、subnet 和 port 的状态信息，这些信息是全局的，只需要也只能由一个Core Plugin管理。
+
+ML2 作为新一代的Core Plugin，提供了一个框架，允许在 OpenStack 网络中同时使用多种 Layer 2 网络技术，不同的节点可以使用不同的网络实现机制. 采用 ML2 Plugin 后，可以在不同节点上分别部署Linux Bridge Agent、Open vSwitch Agent、Hyper-V Agent及其他第三方Agent。
+
+### 2. Neutron Agent
+ML2 Plugin 的主要工作是管理虚拟网络资源，保证数据正确无误，具体网络设备的设置则由Agent完成，下面即以OVS Agent（Open vSwitch Agent）为例。
+
+基于Plugin提供的信息，OVS Agent负责在计算节点或网络节点上，通过对OVS虚拟交换机的管理将一个Network映射到物理网络。需要OVS Agent执行一些Linux网络和OVS相关的配置与操作，Neutron提供了最为基础的操作接口，从而可以通过Linux Shell命令完成OVS的配置。
+
+对ML2 Plugin来说，OVS只是VLAN、GRE、VxLAN等不同网络拓扑类型的一种底层实现机制。对于 VLAN 类型的网络，首先面对的问题是属于不同 Network的外部流量进入一个节点时，如何对其进行隔离。OVS的VLAN功能可以很好地解决这个问题，但是需要在节点的入口处创建一个 OVS 的 Bridge，通常会被命名为br-ethx，同时将eth0、eth1等物理网络接口挂接到Bridge上。
+
+另一个 VLAN 类型网络需要解决的问题是节点内部不同虚拟网络的隔离，通过Local VLAN来完成。每个节点内部都可以看作是一个小型的虚拟网络拓扑，不同的VM通过Linux Bridge进行桥接，这些Linux Bridge又会挂接在一个内部的OVS Bridge上。基于OVS Bridge，通过内部的VLAN将属于不同Network的VM进行二层流量隔离，对应的VLAN ID又称为LVID（Local VLAN ID）。此外，对于网络节点来说，除了Local VLAN，还需要利用Linux Network Namespace隔离网络协议栈。
+
+# 容器网络
+云原生以容器为核心技术，分为运行时（Runtime）和 Orchestration 两层，Runtime负责容器的计算、存储、网络；Orchestration 负责容器集群的调度、服务发现和资源管理。
+
+往下是基础设施和配置管理。容器可以运行在各种系统上，包括公有云、私有云、物理机等，同时还依赖于自动化部署工具、容器镜像工具、安全工具等运维系统才能工作。
+
+往上是容器平台上的应用层，类似于手机的 App Store，分为数据库和数据分析、流处理、SCM 工具、CI/CD和应用定义几类，每家公司根据业务需求会有不同的应用体系。
+
+Landscape右边有两块：平台和观察分析。平台是指基于容器技术提供的平台级服务，比如常见的 PaaS 服务和 Serverless 服务。观察分析是容器平台的运维，从日志和监控方面给出容器集群当前的运行情况，方便分析和调试。
+
+参考[k8s](https://github.com/meilihao/tour_book/blob/master/container/k8s.md)
+
+## Service Mesh
+Service Mesh的提出与云原生应用程序的大规模普及有关.
+
+Service Mesh是服务与服务之间通信的专用基础设施层.
+
+Service Mesh 可以理解为处于 TCP/IP 之上的一个抽象层，它假设底层的 L3/L4网络能够点对点地传输字节。同时，它也假设网络环境是不可靠的，所以 Service Mesh必须具备处理网络故障的能力。
+
+通常将Service Mesh比作是应用程序或者说微服务间的 TCP/IP，负责服务之间的网络调用、限流、熔断和监控.
+
+## 1. Sidecar模式
+针对复杂的分布式的云原生应用环境，结合Kubernetes集群的微服务模型，Kubernetes社区推出了一系列的容器设计模式，主要有：单容器管理模式，单节点多容器模式多节点多容器模式.
+
+Sidecar模式就是单节点多容器模式的一种，主要利用了同一个Pod中的容器可以共享存储空间的能力.
+
+Sidecar 模式将应用程序的组件部署到单独的进程或容器中，以提供隔离和封装。Sidecar 与父应用程序具有相同的生命周期：与父应用程序一起创建，一起停用。Sidecar模式有时也称为搭档模式。
+
+## 开源Service Mesh方案
+Service Mesh 的开源解决方案主要有：Buoyant 公司推出的 Linkerd,Google、IBM 和Lyft等公司牵头的 Istio.
+
+Linkerd 更加成熟稳定些；Istio 功能更加丰富、设计上更为强大，社区相对也更加强大一些.
+
+### istio
+Kubernetes是目前Istio支持的唯一容器编排框架。使用Istio可以很简单地创建具有负载均衡、服务间认证、监控等功能的服务网络，同时不需要对服务的代码进行任何修改。Istio会在Kubernetes的Pod里注入一个特别的Sidecar Proxy来截获微服务之间的网络流量，以增加对Istio的支持.
+
+Istio Service Mesh在逻辑上被分为数据面和控制面：
+- 数据面由一组部署为 Sidecar 的智能代理（Envoy）组成。这些代理调解和控制微服务之间的所有网络通信以及Mixer。
+- 控制面管理和配置代理来路由流量。此外，控制面通过配置 Mixer 来实施策略并进行遥测。
+
+    Mixer是一个与平台无关的组件，用于从Envoy代理和其他服务处收集遥测数据.
+### linked
+Linkerd是一个被设计用作Service Mesh的开源网络代理，专门用于管理、控制和监控应用程序内部的服务之间通信.
+
+类似负载均衡（Load Balancing）、熔断保护（Circuit Breaking）、健康机制等原本直接内嵌在每个服务中的功能都被剥离出来，交由Linkerd服务来代理，而原本的服务不再需要关心这些，只需要基于Linkerd启动，就拥有这些特性.
+
+## OpenStack容器网络项目Kuryr
+OpenStack的 Kuryr 项目目的是实现容器和虚拟机之间的通信. 目前针对Kubernetes的 kuryr-kubernetes 项目更加活跃.
