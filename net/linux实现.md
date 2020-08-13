@@ -1,4 +1,6 @@
 # net的linux实现
+kernel不涉及L4之上的各层, 这些层的任务由用户空间应用来处理. 同时kernel不涉及物理层(L1).
+
 应用层和内核互通的机制，就是通过 Socket 系统调用. socket属于操作系统的概念，而非网络协议分层的概念. 只不过操作系统选择对于网络协议的实现模式是，二到四层的处理代码在内核里面，七层的处理代码让应用自己去做，两者需要跨内核态和用户态通信，就需要一个系统调用完成这个衔接，这就是 Socket.
 
 > rsockets is a protocol over RDMA that supports a socket-level API for applications.
@@ -89,7 +91,7 @@ ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *
 
 ## 解析 socket 函数
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
 int __sys_socket(int family, int type, int protocol)
 {
 	int retval;
@@ -147,7 +149,7 @@ Socket 系统调用会调用 sock_create 创建一个 struct socket 结构，然
   ...
 
   // 或者from kernel, **推荐**
-  // https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/socket.h#L175
+  // https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/socket.h#L175
   /* Supported address families. */
   #define AF_UNSPEC	0
   #define AF_UNIX		1	/* Unix domain sockets 		*/
@@ -253,13 +255,13 @@ Socket 系统调用会调用 sock_create 创建一个 struct socket 结构，然
   #define PF_MAX		AF_MAX
   ```
 
-> netlink相关的协议在[这里](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/uapi/linux/netlink.h#L9). netlink[支持实现自定义协议](https://www.cnblogs.com/wenqiang/p/6306727.html), 有公司就基于netlink自定义协议实现了cdp功能.
+> netlink相关的协议在[这里](https://elixir.bootlin.com/linux/v5.8.1/source/include/uapi/linux/netlink.h#L9). netlink[支持实现自定义协议](https://www.cnblogs.com/wenqiang/p/6306727.html), 有公司就基于netlink自定义协议实现了cdp功能.
   
 1. type，也即 Socket 的类型. 类型是比较少的
 1. protocol，是协议. 协议数目是比较多的，也就是说，多个协议会属于同一种类型. 常用的 Socket 类型有三种，分别是 SOCK_STREAM、SOCK_DGRAM 和 SOCK_RAW
 
   ```c
-  // https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/net.h#L59
+  // https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/net.h#L59
   /**
   * enum sock_type - Socket types
   * @SOCK_STREAM: stream (connection) socket
@@ -288,10 +290,10 @@ Socket 系统调用会调用 sock_create 创建一个 struct socket 结构，然
 
   SOCK_STREAM 是面向数据流的，协议 IPPROTO_TCP 属于这种类型. SOCK_DGRAM 是面向数据报的，协议 IPPROTO_UDP 属于这种类型. 如果在内核里面看的话，IPPROTO_ICMP 也属于这种类型. SOCK_RAW 是原始的 IP 包，IPPROTO_IP 属于这种类型.
 
-这里重点看 SOCK_STREAM 类型和 IPPROTO_TCP 协议. 为了管理 family、type、protocol 这三个分类层次，内核会创建对应的数据结构. 接下来，打开 [sock_create](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501) 函数看一下, 它会调用 [__sock_create](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501).
+这里重点看 SOCK_STREAM 类型和 IPPROTO_TCP 协议. 为了管理 family、type、protocol 这三个分类层次，内核会创建对应的数据结构. 接下来，打开 [sock_create](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501) 函数看一下, 它会调用 [__sock_create](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501).
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
 /**
  *	__sock_create - creates a socket
  *	@net: net namespace
@@ -417,14 +419,14 @@ out_release:
 EXPORT_SYMBOL(__sock_create);
 ```
 
-__sock_create先是分配了一个 [struct socket](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/net.h#L112) 结构. 接下来要用到 family 参数. 这里有一个 [net_families](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L173) 数组，可以以 family 参数为下标，找到对应的 [struct net_proto_family](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/net.h#L211).
+__sock_create先是分配了一个 [struct socket](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/net.h#L112) 结构. 接下来要用到 family 参数. 这里有一个 [net_families](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L173) 数组，可以以 family 参数为下标，找到对应的 [struct net_proto_family](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/net.h#L211).
 
-> net_families的内容由[`sock_register`](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501)而来, 比如ipv4的`[(void)sock_register(&inet_family_ops)](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1974)`. family的值可参考[这里](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/socket.h#L175).
+> net_families的内容由[`sock_register`](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501)而来, 比如ipv4的`[(void)sock_register(&inet_family_ops)](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1974)`. family的值可参考[这里](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/socket.h#L175).
 
 每一个地址族在net_families数组里面都有一项，里面的内容是 net_proto_family. 即每一种地址族都有自己的 net_proto_family，IP 地址族的 net_proto_family 定义如下，里面最重要的就是，create 函数指向 inet_create.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1111
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1111
 static const struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
 	.create = inet_create,
@@ -432,18 +434,18 @@ static const struct net_proto_family inet_family_ops = {
 };
 ```
 
-回到函数 __sock_create. 接下来, [inet_create](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L248) 会被调用.
+回到函数 __sock_create. 接下来, [inet_create](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L248) 会被调用.
 
 在 inet_create 中，先会看到一个循环 list_for_each_entry_rcu. 在这里，第二个参数 type 开始起作用. 因为循环查看的是 inetsw[sock->type]. 这里的 inetsw 也是一个数组，type 作为下标，里面的内容是 struct inet_protosw，是协议，也即 inetsw 数组对于每个类型有一项，这一项里面是属于这个类型的协议.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L126
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L126
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
  */
 static struct list_head inetsw[SOCK_MAX];
 
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1946
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1946
 static int __init inet_init(void)
 {
 ......
@@ -457,7 +459,7 @@ static int __init inet_init(void)
 }
 ```
 
-inetsw 数组是在系统初始化的时候初始化的，就像上面代码里面实现的一样. 首先，一个循环会将 inetsw 数组的每一项，都初始化为一个链表. 一个 type 类型会包含多个 protocol，因而需要一个链表. 接下来一个循环，是将 [inetsw_array](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1120) 注册到 inetsw 数组里面去. inetsw_array 的定义如下，这个数组里面的内容很重要，后面会用到它们.
+inetsw 数组是在系统初始化的时候初始化的，就像上面代码里面实现的一样. 首先，一个循环会将 inetsw 数组的每一项，都初始化为一个链表. 一个 type 类型会包含多个 protocol，因而需要一个链表. 接下来一个循环，是将 [inetsw_array](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1120) 注册到 inetsw 数组里面去. inetsw_array 的定义如下，这个数组里面的内容很重要，后面会用到它们.
 
 回到 inet_create 的 list_for_each_entry_rcu 循环中. 到这里就好理解了，这是在 inetsw 数组中，根据 type 找到属于这个类型的列表，然后依次比较列表中的 struct inet_protosw 的 protocol 是不是用户指定的 protocol；如果是，就得到了符合用户指定的 family->type->protocol 的 struct inet_protosw *answer 对象.
 
@@ -465,7 +467,7 @@ inetsw 数组是在系统初始化的时候初始化的，就像上面代码里�
 
 接下来，创建一个 struct sock *sk 对象. 这里比较让人困惑. socket 和 sock 看起来几乎一样，容易让人混淆，这里需要说明一下，**socket 是用于负责对上给用户提供接口，并且和文件系统关联, 而 sock，负责向下对接内核网络协议栈**.
 
-在 sk_alloc 函数中，struct inet_protosw *answer 结构的 tcp_prot 赋值给了 struct sock *sk 的 sk_prot 成员. [tcp_prot](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L2638) 的定义如下，里面定义了很多的函数，都是 sock 之下内核协议栈的动作.
+在 sk_alloc 函数中，struct inet_protosw *answer 结构的 tcp_prot 赋值给了 struct sock *sk 的 sk_prot 成员. [tcp_prot](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L2638) 的定义如下，里面定义了很多的函数，都是 sock 之下内核协议栈的动作.
 
 在 inet_create 函数中，接下来创建一个 struct inet_sock 结构，这个结构一开始就是 struct sock，然后扩展了一些其他的信息，剩下的代码就填充这些信息. 这一幕会经常看到，将一个结构放在另一个结构的开始位置，然后扩展一些成员，通过对于指针的强制类型转换，来访问这些成员.
 
@@ -473,7 +475,7 @@ socket 的创建至此结束.
 
 ## 解析 bind 函数
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
 /*
  *	Bind a name to a socket. Nothing much to do here since it's
  *	the protocol's responsibility to handle the local address.
@@ -511,15 +513,15 @@ SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 }
 ```
 
-在 bind 中，sockfd_lookup_light 会根据 fd 文件描述符，找到 struct socket 结构. 然后将 sockaddr 从用户态拷贝到内核态，然后调用 struct socket 结构里面 ops 的 bind 函数. 根据前面创建 socket 的时候的设定，调用的是 [inet_stream_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1015) 的 bind 函数，也即调用 [inet_bind](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L435).
+在 bind 中，sockfd_lookup_light 会根据 fd 文件描述符，找到 struct socket 结构. 然后将 sockaddr 从用户态拷贝到内核态，然后调用 struct socket 结构里面 ops 的 bind 函数. 根据前面创建 socket 的时候的设定，调用的是 [inet_stream_ops](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1015) 的 bind 函数，也即调用 [inet_bind](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L435).
 
-bind 里面会[调用 sk_prot 的 get_port 函数](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L525)，也即 inet_csk_get_port 来检查端口是否冲突，是否可以绑定. 如果允许，则会设置 struct inet_sock 的本方的地址 inet_saddr 和本方的端口 inet_sport，对方的地址 inet_daddr 和对方的端口 inet_dport 都初始化为 0.
+bind 里面会[调用 sk_prot 的 get_port 函数](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L525)，也即 inet_csk_get_port 来检查端口是否冲突，是否可以绑定. 如果允许，则会设置 struct inet_sock 的本方的地址 inet_saddr 和本方的端口 inet_sport，对方的地址 inet_daddr 和对方的端口 inet_dport 都初始化为 0.
 
 bind 的逻辑相对比较简单，就到这里了.
 
 ## 解析 listen 函数
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
 /*
  *	Perform a listen. Basically, we allow the protocol to do anything
  *	necessary for a listen, and if that works, we mark the socket as
@@ -553,11 +555,11 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 }
 ```
 
-在 listen 中，还是通过 sockfd_lookup_light，根据 fd 文件描述符，找到 struct socket 结构. 接着，我们调用 struct socket 结构里面 ops 的 listen 函数. 根据上面创建 socket 的时候的设定，调用的是 inet_stream_ops 的 listen 函数，也即调用 [inet_listen](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L196).
+在 listen 中，还是通过 sockfd_lookup_light，根据 fd 文件描述符，找到 struct socket 结构. 接着，我们调用 struct socket 结构里面 ops 的 listen 函数. 根据上面创建 socket 的时候的设定，调用的是 inet_stream_ops 的 listen 函数，也即调用 [inet_listen](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L196).
 
-如果这个 socket 还不在 TCP_LISTEN 状态，会调用 [inet_csk_listen_start](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/inet_connection_sock.c#L909) 进入监听状态.
+如果这个 socket 还不在 TCP_LISTEN 状态，会调用 [inet_csk_listen_start](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/inet_connection_sock.c#L909) 进入监听状态.
 
-inet_csk_listen_start里面建立了一个新的结构 [inet_connection_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/inet_connection_sock.h#L87)，这个结构一开始是 struct inet_sock，inet_csk 其实做了一次强制类型转换，扩大了结构.
+inet_csk_listen_start里面建立了一个新的结构 [inet_connection_sock](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/inet_connection_sock.h#L87)，这个结构一开始是 struct inet_sock，inet_csk 其实做了一次强制类型转换，扩大了结构.
 
 struct inet_connection_sock 结构比较复杂. 如果打开它，就能看到处于各种状态的队列，各种超时时间、拥塞控制等字眼.
 
@@ -575,7 +577,7 @@ struct inet_connection_sock 结构比较复杂. 如果打开它，就能看到�
 
 ## 解析 accept 函数
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
 /*
  *	For accept, we attempt to create a new socket, set up the link
  *	with the client, wake up the client, then return the new
@@ -621,9 +623,9 @@ SYSCALL_DEFINE3(accept, int, fd, struct sockaddr __user *, upeer_sockaddr,
 
 accept 函数的实现，印证了 socket 的原理中说的那样，原来的 socket 是监听 socket，这里会找到原来的 struct socket，并基于它去创建一个新的 newsock. 这才是连接 socket. 除此之外，还会创建一个新的 struct file 和 fd，并关联到 socket.
 
-这里面还会调用 struct socket 的 sock->ops->accept，也即会调用 inet_stream_ops 的 accept 函数，也即 [inet_accept](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L732).
+这里面还会调用 struct socket 的 sock->ops->accept，也即会调用 inet_stream_ops 的 accept 函数，也即 [inet_accept](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L732).
 
-inet_accept 会调用 struct sock 的 sk1->sk_prot->accept，也即 tcp_prot 的 accept 函数 [inet_csk_accept](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/inet_connection_sock.c#L454).
+inet_accept 会调用 struct sock 的 sk1->sk_prot->accept，也即 tcp_prot 的 accept 函数 [inet_csk_accept](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/inet_connection_sock.c#L454).
 
 inet_csk_accept 的实现，印证了上面讲的两个队列的逻辑. 如果 icsk_accept_queue 为空，则调用 inet_csk_wait_for_connect 进行等待；等待的时候，调用 schedule_timeout，让出 CPU，并且将进程状态设置为 TASK_INTERRUPTIBLE. 如果再次 CPU 醒来，会接着判断 icsk_accept_queue 是否为空，同时也会调用 signal_pending 看有没有信号可以处理. 一旦 icsk_accept_queue 不为空，就从 inet_csk_wait_for_connect 中返回，在队列中取出一个 struct sock 对象赋值给 newsk.
 
@@ -635,7 +637,7 @@ inet_csk_accept 的实现，印证了上面讲的两个队列的逻辑. 如果 i
 三次握手一般是由客户端调用 connect 发起.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L1839
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1839
 /*
  *	Attempt to connect to a socket with the server address.  The address
  *	is in user space so we verify it is OK and move it to kernel space.
@@ -695,13 +697,13 @@ SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr,
 }
 ```
 
-connect 函数的实现一开始先根据 fd 文件描述符，找到 struct socket 结构. 接着，会调用 struct socket 结构里面 ops 的 connect 函数，根据前面创建 socket 的时候的设定，调用 inet_stream_ops 的 connect 函数，也即调用 [inet_stream_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L716).
+connect 函数的实现一开始先根据 fd 文件描述符，找到 struct socket 结构. 接着，会调用 struct socket 结构里面 ops 的 connect 函数，根据前面创建 socket 的时候的设定，调用 inet_stream_ops 的 connect 函数，也即调用 [inet_stream_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L716).
 
-在 inet_stream_connect -> [__inet_stream_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L606) 里面，会发现，如果 socket 处于 SS_UNCONNECTED 状态，那就调用 struct sock 的 sk->sk_prot->connect，也即 tcp_prot 的 connect 函数 [tcp_v4_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L197).
+在 inet_stream_connect -> [__inet_stream_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L606) 里面，会发现，如果 socket 处于 SS_UNCONNECTED 状态，那就调用 struct sock 的 sk->sk_prot->connect，也即 tcp_prot 的 connect 函数 [tcp_v4_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L197).
 
-在 tcp_v4_connect 函数中，[ip_route_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/route.h#L306) 其实是做一个路由的选择. 为什么呢？因为三次握手马上就要发送一个 SYN 包了，这就要凑齐源地址、源端口、目标地址、目标端口. 目标地址和目标端口是服务端的，已经知道源端口是客户端随机分配的，源地址应该用哪一个呢？这时候要选择一条路由，看从哪个网卡出去，就应该填写哪个网卡的 IP 地址. 接下来，在发送 SYN 之前，先将客户端 socket 的状态设置为 TCP_SYN_SENT, 然后初始化 TCP 的 seq num，也即 write_seq，然后调用 [tcp_connect](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L3640) 进行发送.
+在 tcp_v4_connect 函数中，[ip_route_connect](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/route.h#L306) 其实是做一个路由的选择. 为什么呢？因为三次握手马上就要发送一个 SYN 包了，这就要凑齐源地址、源端口、目标地址、目标端口. 目标地址和目标端口是服务端的，已经知道源端口是客户端随机分配的，源地址应该用哪一个呢？这时候要选择一条路由，看从哪个网卡出去，就应该填写哪个网卡的 IP 地址. 接下来，在发送 SYN 之前，先将客户端 socket 的状态设置为 TCP_SYN_SENT, 然后初始化 TCP 的 seq num，也即 write_seq，然后调用 [tcp_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L3640) 进行发送.
 
-在 tcp_connect 中，有一个新的结构 [struct tcp_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/tcp.h#L142)，如果打开它，会发现它是 struct inet_connection_sock 的一个扩展，struct inet_connection_sock 在 struct tcp_sock 开头的位置，通过强制类型转换访问，故伎重演又一次. struct tcp_sock 里面维护了更多的 TCP 的状态，同样是遇到了再分析.
+在 tcp_connect 中，有一个新的结构 [struct tcp_sock](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/tcp.h#L142)，如果打开它，会发现它是 struct inet_connection_sock 的一个扩展，struct inet_connection_sock 在 struct tcp_sock 开头的位置，通过强制类型转换访问，故伎重演又一次. struct tcp_sock 里面维护了更多的 TCP 的状态，同样是遇到了再分析.
 
 接下来 tcp_init_nondata_skb 初始化一个 SYN 包，tcp_transmit_skb 将 SYN 包发送出去，inet_csk_reset_xmit_timer 设置了一个 timer，如果 SYN 发送不成功，则再次发送.
 
@@ -710,7 +712,7 @@ connect 函数的实现一开始先根据 fd 文件描述符，找到 struct soc
 回到 __inet_stream_connect 函数，在调用 sk->sk_prot->connect 之后，inet_wait_for_connect 会一直等待客户端收到服务端的 ACK. 而我们知道，服务端在 accept 之后，也是在等待中. 网络包是如何接收的呢？对于解析的详细过程，还是在会在之后讲解，这里为了解析三次握手，简单的看网络包接收到 TCP 层做的部分事情.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1737
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1737
 /* thinking of making this const? Don't.
  * early_demux can change based on sysctl.
  */
@@ -725,15 +727,15 @@ static struct net_protocol tcp_protocol = {
 };
 ```
 
-kernel会通过 struct net_protocol 结构中的 handler 进行接收，调用的函数是 tcp_v4_rcv. 接下来的调用链为 tcp_v4_rcv->tcp_v4_do_rcv->tcp_rcv_state_process. [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L6183)，顾名思义，是用来处理接收一个网络包后引起状态变化的.
+kernel会通过 struct net_protocol 结构中的 handler 进行接收，调用的函数是 tcp_v4_rcv. 接下来的调用链为 tcp_v4_rcv->tcp_v4_do_rcv->tcp_rcv_state_process. [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L6183)，顾名思义，是用来处理接收一个网络包后引起状态变化的.
 
-目前服务端是处于 TCP_LISTEN 状态的，而且发过来的包是 SYN，因而就有了上面的代码，调用 icsk->icsk_af_ops->conn_request 函数. struct inet_connection_sock 对应的操作是 [inet_connection_sock_af_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/inet_connection_sock.h#L33)的[ipv4_specific](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L2113)，按照下面的定义，其实调用的是 [tcp_v4_conn_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L1455).
+目前服务端是处于 TCP_LISTEN 状态的，而且发过来的包是 SYN，因而就有了上面的代码，调用 icsk->icsk_af_ops->conn_request 函数. struct inet_connection_sock 对应的操作是 [inet_connection_sock_af_ops](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/inet_connection_sock.h#L33)的[ipv4_specific](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L2113)，按照下面的定义，其实调用的是 [tcp_v4_conn_request](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L1455).
 
-tcp_v4_conn_request 会调用 [tcp_conn_request](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L6609)，这个函数也比较长，里面调用了 send_synack，但实际调用的是 [tcp_v4_send_synack](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L963). 具体发送的过程不去管它，看注释能知道，这是收到了 SYN 后，回复一个 SYN-ACK，回复完毕后，服务端处于 TCP_SYN_RECV.
+tcp_v4_conn_request 会调用 [tcp_conn_request](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L6609)，这个函数也比较长，里面调用了 send_synack，但实际调用的是 [tcp_v4_send_synack](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L963). 具体发送的过程不去管它，看注释能知道，这是收到了 SYN 后，回复一个 SYN-ACK，回复完毕后，服务端处于 TCP_SYN_RECV.
 
 这个时候，轮到客户端接收网络包了. 都是 TCP 协议栈，所以过程和服务端没有太多区别，还是会走到 tcp_rcv_state_process 函数的，只不过由于客户端目前处于 TCP_SYN_SENT 状态，就进入了下面的代码分支.
 
-tcp_rcv_synsent_state_process 会调用 [tcp_send_ack](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L3789)，发送一个 ACK-ACK，发送后客户端处于 TCP_ESTABLISHED 状态.
+tcp_rcv_synsent_state_process 会调用 [tcp_send_ack](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L3789)，发送一个 ACK-ACK，发送后客户端处于 TCP_ESTABLISHED 状态.
 
 又轮到服务端接收网络包了，还是归 tcp_rcv_state_process 函数处理. 由于服务端目前处于状态 TCP_SYN_RECV 状态，因而又走了另外的分支. 当收到这个网络包的时候，服务端也处于 TCP_ESTABLISHED 状态，三次握手结束.
 
@@ -749,7 +751,7 @@ tcp_rcv_synsent_state_process 会调用 [tcp_send_ack](https://elixir.bootlin.co
 ## 解析 socket 的 Write 操作
 socket 对于用户来讲，是一个文件一样的存在，拥有一个文件描述符. 因而对于网络包的发送，可以使用对于 socket 文件的写入系统调用，也就是 write 系统调用. write 系统调用对于一个文件描述符的操作，大致过程都是类似的. 对于每一个打开的文件都有一个 struct file 结构，write 系统调用会最终调用 stuct file 结构指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L149
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L149
 /*
  *	Socket files have a set of 'special' operations as well as the generic file ones. These don't appear
  *	in the operation structures but are done directly via the socketcall() multiplexor.
@@ -775,24 +777,24 @@ static const struct file_operations socket_file_ops = {
 };
 ```
 
-按照文件系统的写入流程，调用的是 [sock_write_iter](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L982).
+按照文件系统的写入流程，调用的是 [sock_write_iter](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L982).
 
-在 sock_write_iter 中，通过 VFS 中的 struct file，将创建好的 socket 结构拿出来，然后调用 sock_sendmsg. 而 sock_sendmsg 会调用 [sock_sendmsg_nosec](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L650).
+在 sock_write_iter 中，通过 VFS 中的 struct file，将创建好的 socket 结构拿出来，然后调用 sock_sendmsg. 而 sock_sendmsg 会调用 [sock_sendmsg_nosec](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L650).
 
-sock_sendmsg_nosec里调用了 socket 的 ops 的 sendmsg，据 inet_stream_ops 的定义，这里调用的是 [inet_sendmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L807).
+sock_sendmsg_nosec里调用了 socket 的 ops 的 sendmsg，据 inet_stream_ops 的定义，这里调用的是 [inet_sendmsg](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L807).
 
 这里面，从 socket 结构中，可以得到更底层的 sock 结构，然后调用 sk_prot 的 sendmsg 方法即tcp_sendmsg.
 
 ## 解析 tcp_sendmsg 函数
-根据 tcp_prot 的定义，实际调用的是 [tcp_sendmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L1436).
+根据 tcp_prot 的定义，实际调用的是 [tcp_sendmsg](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L1436).
 
-tcp_sendmsg->[tcp_sendmsg_locked](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L1185), tcp_sendmsg_locked 的实现还是很复杂的，这里面做了这样几件事情.
+tcp_sendmsg->[tcp_sendmsg_locked](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L1185), tcp_sendmsg_locked 的实现还是很复杂的，这里面做了这样几件事情.
 
-msg 是用户要写入的数据，这个数据要拷贝到内核协议栈里面去发送；在内核协议栈里面，网络包的数据都是由 struct sk_buff 维护的，因而第一件事情就是找到一个空闲的内存空间，将用户要写入的数据，拷贝到 struct sk_buff 的管辖范围内. 而第二件事情就是发送 [struct sk_buff](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/skbuff.h#L711).
+msg 是用户要写入的数据，这个数据要拷贝到内核协议栈里面去发送；在内核协议栈里面，网络包的数据都是由 struct sk_buff 维护的，因而第一件事情就是找到一个空闲的内存空间，将用户要写入的数据，拷贝到 struct sk_buff 的管辖范围内. 而第二件事情就是发送 [struct sk_buff](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/skbuff.h#L711).
 
 在 tcp_sendmsg_locked 中，首先通过强制类型转换，将 sock 结构转换为 struct tcp_sock，这个是维护 TCP 连接状态的重要数据结构.
 
-接下来是 tcp_sendmsg_locked 的第一件事情，把数据拷贝到 struct sk_buff. 先声明一个变量 copied，初始化为 0，这表示拷贝了多少数据. 紧接着是一个循环，[while (msg_data_left(msg))](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L1271)，也即如果用户的数据没有发送完毕，就一直循环. 循环里声明了一个 copy 变量，表示这次拷贝的数值，在循环的最后有 copied += copy，将每次拷贝的数量都加起来. 这里只需要看一次循环做了哪些事情:
+接下来是 tcp_sendmsg_locked 的第一件事情，把数据拷贝到 struct sk_buff. 先声明一个变量 copied，初始化为 0，这表示拷贝了多少数据. 紧接着是一个循环，[while (msg_data_left(msg))](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L1271)，也即如果用户的数据没有发送完毕，就一直循环. 循环里声明了一个 copy 变量，表示这次拷贝的数值，在循环的最后有 copied += copy，将每次拷贝的数量都加起来. 这里只需要看一次循环做了哪些事情:
 1. 第一步，tcp_write_queue_tail 从 TCP 写入队列 sk_write_queue 中拿出最后一个 struct sk_buff，在这个写入队列中排满了要发送的 struct sk_buff，为什么要拿最后一个呢？这里面只有最后一个，可能会因为上次用户给的数据太少，而没有填满.
 1. 第二步，tcp_send_mss 会计算 MSS，也即 Max Segment Size. 这是什么呢？这个意思是说，在网络上传输的网络包的大小是有限制的，而这个限制在最底层开始就有. MTU（Maximum Transmission Unit，最大传输单元）是二层的一个定义. 以以太网为例，MTU 为 1500 个 Byte，前面有 6 个 Byte 的目标 MAC 地址，6 个 Byte 的源 MAC 地址，2 个 Byte 的类型，后面有 4 个 Byte 的 CRC 校验，共 1518 个 Byte. 在 IP 层，一个 IP 数据报在以太网中传输，如果它的长度大于该 MTU 值，就要进行分片传输.
 
@@ -812,13 +814,13 @@ struct sk_buff 是存储网络包的重要的数据结构，在应用层数据�
 
 ![](/misc/img/net/9ad34c3c748978f915027d5085a858b8.png)
 
-1. 于是就有了第四步. 在注释 [/* Where to copy to? */](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L1314) 后面有个 if-else 分支. if 分支就是 skb_add_data_nocache 将数据拷贝到连续的数据区域. else 分支就是 skb_copy_to_page_nocache 将数据拷贝到 struct skb_shared_info 结构指向的不需要连续的页面区域.
-1. 第五步，就是要发送网络包了. 第一种情况是积累的数据报数目太多了，因而需要通过调用 __tcp_push_pending_frames 发送网络包. 第二种情况是，这是第一个网络包，需要马上发送，调用 tcp_push_one. 无论 __tcp_push_pending_frames 还是 tcp_push_one，都会调用 [tcp_write_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L2426) 发送网络包.
+1. 于是就有了第四步. 在注释 [/* Where to copy to? */](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L1314) 后面有个 if-else 分支. if 分支就是 skb_add_data_nocache 将数据拷贝到连续的数据区域. else 分支就是 skb_copy_to_page_nocache 将数据拷贝到 struct skb_shared_info 结构指向的不需要连续的页面区域.
+1. 第五步，就是要发送网络包了. 第一种情况是积累的数据报数目太多了，因而需要通过调用 __tcp_push_pending_frames 发送网络包. 第二种情况是，这是第一个网络包，需要马上发送，调用 tcp_push_one. 无论 __tcp_push_pending_frames 还是 tcp_push_one，都会调用 [tcp_write_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L2426) 发送网络包.
 
 至此，tcp_sendmsg 解析完了.
 
 ## 解析 tcp_write_xmit 函数
-接下来看，[tcp_write_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L2426) 是如何发送网络包的.
+接下来看，[tcp_write_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L2426) 是如何发送网络包的.
 
 这里面主要的逻辑是一个循环，用来处理发送队列，只要队列不空，就会发送.
 
@@ -826,7 +828,7 @@ struct sk_buff 是存储网络包的重要的数据结构，在应用层数据�
 
 第一个概念是 TSO（TCP Segmentation Offload）. 如果发送的网络包非常大，就像上面说的一样，要进行分段. 分段这个事情可以由协议栈代码在内核做，但是缺点是比较费 CPU，另一种方式是延迟到硬件网卡去做，需要网卡支持对大数据包进行自动分段，可以降低 CPU 负载.
 
-在代码中，tcp_init_tso_segs 会调用 tcp_set_skb_tso_segs. 这里面有这样的语句：[DIV_ROUND_UP(skb->len, mss_now)](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L1285). 也就是 sk_buff 的长度除以 mss_now，应该分成几个段. 如果算出来要分成多个段，接下来就是要看，是在这里（协议栈的代码里面）分好，还是等待到了底层网卡再分.
+在代码中，tcp_init_tso_segs 会调用 tcp_set_skb_tso_segs. 这里面有这样的语句：[DIV_ROUND_UP(skb->len, mss_now)](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L1285). 也就是 sk_buff 的长度除以 mss_now，应该分成几个段. 如果算出来要分成多个段，接下来就是要看，是在这里（协议栈的代码里面）分好，还是等待到了底层网卡再分.
 
 于是，调用函数 tcp_mss_split_point，开始计算切分的 limit。这里面会计算 max_len = mss_now * max_segs，根据现在不切分来计算 limit，所以下一步的判断中，大部分情况下 tso_fragment 不会被调用，等待到了底层网卡来切分.
 
@@ -857,28 +859,28 @@ struct sk_buff 是存储网络包的重要的数据结构，在应用层数据�
 
 在网络包的交互过程中，接收方会将第二部分的大小，作为 AdvertisedWindow 发送给发送方，发送方就可以根据它来调整发送速度了. 在 tcp_snd_wnd_test 函数中，会判断 sk_buff 中的 end_seq 和 tcp_wnd_end(tp) 之间的关系，也即这个 sk_buff 是否在滑动窗口的允许范围之内. 如果不在范围内，说明发送要受限制了，就要把 is_rwnd_limited 设置为 true.
 
-接下来，[tcp_mss_split_point](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L1826) 函数要被调用了.
+接下来，[tcp_mss_split_point](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L1826) 函数要被调用了.
 
 tcp_mss_split_point里面除了会判断上面讲的，是否会因为超出 mss 而分段，还会判断另一个条件，就是是否在滑动窗口的运行范围之内，如果小于窗口的大小，也需要分段，也即需要调用 tso_fragment.
 
-tcp_write_xmit在一个循环的最后，是调用 [tcp_transmit_skb](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L1251)，真的去发送一个网络包.
+tcp_write_xmit在一个循环的最后，是调用 [tcp_transmit_skb](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L1251)，真的去发送一个网络包.
 
-tcp_transmit_skb -> [__tcp_transmit_skb](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_output.c#L1078), __tcp_transmit_skb 这个函数比较长，主要做了两件事情，第一件事情就是填充 TCP 头.
+tcp_transmit_skb -> [__tcp_transmit_skb](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L1078), __tcp_transmit_skb 这个函数比较长，主要做了两件事情，第一件事情就是填充 TCP 头.
 
 tcp header里面有源端口，设置为 inet_sport，有目标端口，设置为 inet_dport；有序列号，设置为 tcb->seq；有确认序列号，设置为 tp->rcv_nxt. 把所有的 flags 设置为 tcb->tcp_flags. 设置选项为 opts. 设置窗口大小为 tp->rcv_wnd.
 
-全部设置完毕之后，就会调用 icsk_af_ops 的 queue_xmit 方法，icsk_af_ops 指向 [ipv4_specific](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L2113)，也即调用的是 ip_queue_xmit 函数.
+全部设置完毕之后，就会调用 icsk_af_ops 的 queue_xmit 方法，icsk_af_ops 指向 [ipv4_specific](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L2113)，也即调用的是 ip_queue_xmit 函数.
 
 ## 解析 ip_queue_xmit 函数
-从 [ip_queue_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/ip.h#L234) 函数开始，就进入 IP 层的发送逻辑了.
+从 [ip_queue_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/ip.h#L234) 函数开始，就进入 IP 层的发送逻辑了.
 
-ip_queue_xmit -> [__ip_queue_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L451).
+ip_queue_xmit -> [__ip_queue_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L451).
 
 在 __ip_queue_xmit 中，也即 IP 层的发送函数里面，有三部分逻辑.
 
 第一部分，选取路由，也即要发送这个包应该从哪个网卡出去. 这件事情主要由 ip_route_output_ports 函数完成.
 
-接下来的调用链为：ip_route_output_ports->ip_route_output_flow->__ip_route_output_key->ip_route_output_key_hash->[ip_route_output_key_hash_rcu](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/route.c#L2502).
+接下来的调用链为：ip_route_output_ports->ip_route_output_flow->__ip_route_output_key->ip_route_output_key_hash->[ip_route_output_key_hash_rcu](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/route.c#L2502).
 
 ip_route_output_key_hash_rcu 先会调用 fib_lookup. FIB 全称是 Forwarding Information Base，转发信息表, 其实就是咱们常说的路由表.
 
@@ -891,7 +893,7 @@ fib_table_lookup 的代码逻辑比较复杂，好在注释比较清楚. 因为�
 为了更方面的做这个事情，使用了 Trie 树这种结构. 比如有一系列的字符串：{bcs#, badge#, baby#, back#, badger#, badness#}. 之所以每个字符串都加上 #，是希望不要一个字符串成为另外一个字符串的前缀. 然后我们把它们放在 Trie 树中，如下图所示：
 ![](/misc/img/net/3f0a99cf1c47afcd0bd740c4b7802511.png)
 
-对于将 IP 地址转成二进制放入 trie 树，也是同样的道理，可以很快进行路由的查询. 找到了路由，就知道了应该从哪个网卡发出去. 然后，ip_route_output_key_hash_rcu 会调用 __mkroute_output，创建一个 struct rtable，表示找到的路由表项. 这个结构是由 [rt_dst_alloc](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/route.c#L1620) 函数分配的.
+对于将 IP 地址转成二进制放入 trie 树，也是同样的道理，可以很快进行路由的查询. 找到了路由，就知道了应该从哪个网卡发出去. 然后，ip_route_output_key_hash_rcu 会调用 __mkroute_output，创建一个 struct rtable，表示找到的路由表项. 这个结构是由 [rt_dst_alloc](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/route.c#L1620) 函数分配的.
 
 最终返回 struct rtable 实例，第一部分也就完成了.
 
@@ -899,9 +901,9 @@ fib_table_lookup 的代码逻辑比较复杂，好在注释比较清楚. 因为�
 
 在ip header里面，服务类型设置为 tos，标识位里面设置是否允许分片 frag_off. 如果不允许，而遇到 MTU 太小过不去的情况，就发送 ICMP 报错. TTL 是这个包的存活时间，为了防止一个 IP 包迷路以后一直存活下去，每经过一个路由器 TTL 都减一，减为零则“死去”. 设置 protocol，指的是更上层的协议，这里是 TCP. 源地址和目标地址由 ip_copy_addrs 设置. 最后，设置 options.
 
-第三部分，就是调用 [ip_local_out](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L119) 发送 IP 包.
+第三部分，就是调用 [ip_local_out](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L119) 发送 IP 包.
 
-ip_local_out -> [__ip_local_out](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L98), 然后里面调用了 nf_hook. 这是什么呢？nf 的意思是 Netfilter，这是 Linux 内核的一个机制，用于在网络发送和转发的关键节点上加上 hook 函数，这些函数可以截获数据包，对数据包进行干预. 一个著名的实现，就是内核模块 ip_tables. 在用户态，还有一个客户端程序 iptables，用命令行来干预内核的规则.
+ip_local_out -> [__ip_local_out](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L98), 然后里面调用了 nf_hook. 这是什么呢？nf 的意思是 Netfilter，这是 Linux 内核的一个机制，用于在网络发送和转发的关键节点上加上 hook 函数，这些函数可以截获数据包，对数据包进行干预. 一个著名的实现，就是内核模块 ip_tables. 在用户态，还有一个客户端程序 iptables，用命令行来干预内核的规则.
 
 ![](/misc/img/net/75c8257049eed99499e802fcc2eacf4d.png)
 
@@ -921,42 +923,42 @@ nat 表主要处理网络地址转换，可以进行 SNAT（改变源地址）�
 
 在这里，网络包马上就要发出去了，因而是 NF_INET_LOCAL_OUT，也即 ouput 链，如果用户曾经在 iptables 里面写过某些规则，就会在 nf_hook 这个函数里面起作用.
 
-ip_local_out 再调用 [dst_output](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/dst.h#L433)，就是真正的发送数据.
+ip_local_out 再调用 [dst_output](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/dst.h#L433)，就是真正的发送数据.
 
-这里调用的就是 struct rtable 成员 dst 的 ouput 函数. 在 rt_dst_alloc 中，可以看到，output 函数指向的是 [ip_output](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L421).
+这里调用的就是 struct rtable 成员 dst 的 ouput 函数. 在 rt_dst_alloc 中，可以看到，output 函数指向的是 [ip_output](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L421).
 
-在 ip_output 里面，又看到了熟悉的 NF_HOOK. 这一次是 NF_INET_POST_ROUTING，也即 POSTROUTING 链，处理完之后，调用 [ip_finish_output](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L309).
+在 ip_output 里面，又看到了熟悉的 NF_HOOK. 这一次是 NF_INET_POST_ROUTING，也即 POSTROUTING 链，处理完之后，调用 [ip_finish_output](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L309).
 
 ## 解析 ip_finish_output 函数
-从 ip_finish_output 函数开始，发送网络包的逻辑由第三层到达第二层. ip_finish_output 最终调用 [ip_finish_output2](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_output.c#L185).
+从 ip_finish_output 函数开始，发送网络包的逻辑由第三层到达第二层. ip_finish_output 最终调用 [ip_finish_output2](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_output.c#L185).
 
 在 ip_finish_output2 中，先找到 struct rtable 路由表里面的下一跳，下一跳一定和本机在同一个局域网中，可以通过二层进行通信，因而通过 ip_neigh_for_gw -> __ipv4_neigh_lookup_noref，查找如何通过二层访问下一跳.
 
-__ipv4_neigh_lookup_noref 是从本地的 [ARP 表](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/arp.c#L151)中查找下一跳的 MAC 地址.
+__ipv4_neigh_lookup_noref 是从本地的 [ARP 表](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/arp.c#L151)中查找下一跳的 MAC 地址.
 
-如果在 ARP 表中没有找到相应的项，则调用 [__neigh_create](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/neighbour.c#L668) 进行创建.
+如果在 ARP 表中没有找到相应的项，则调用 [__neigh_create](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/neighbour.c#L668) 进行创建.
 
 __neigh_create 先调用 neigh_alloc，创建一个 struct neighbour 结构，用于维护 MAC 地址和 ARP 相关的信息. 这个名字也很好理解，大家都是在一个局域网里面，可以通过 MAC 地址访问到，当然是邻居了.
 
 在 neigh_alloc 中，先分配一个 struct neighbour 结构并且初始化. 这里面比较重要的有两个成员，一个是 arp_queue，所以上层想通过 ARP 获取 MAC 地址的任务，都放在这个队列里面. 另一个是 timer 定时器，设置成过一段时间就调用 neigh_timer_handler，来处理这些 ARP 任务.
 
-__neigh_create 然后调用了 arp_tbl 的 constructor 函数，也即调用了 [arp_constructor](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/arp.c#L220)，在这里面定义了 ARP 的操作 [arp_hh_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/arp.c#L137).
+__neigh_create 然后调用了 arp_tbl 的 constructor 函数，也即调用了 [arp_constructor](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/arp.c#L220)，在这里面定义了 ARP 的操作 [arp_hh_ops](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/arp.c#L137).
 
 __neigh_create 最后是将创建的 struct neighbour 结构放入一个哈希表，从里面的代码逻辑比较容易看出，这是一个数组加链表的链式哈希表，先计算出哈希值 hash_val，得到相应的链表，然后循环这个链表找到对应的项，如果找不到就在最后插入一项.
 
-回到 ip_finish_output2，在 __neigh_create 之后，会调用 [neigh_output](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/neighbour.h#L501) 发送网络包.
+回到 ip_finish_output2，在 __neigh_create 之后，会调用 [neigh_output](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/neighbour.h#L501) 发送网络包.
 
-按照上面对于 struct neighbour 的操作函数 arp_hh_ops 的定义，output 调用的是 [neigh_resolve_output](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/neighbour.c#L1469).
+按照上面对于 struct neighbour 的操作函数 arp_hh_ops 的定义，output 调用的是 [neigh_resolve_output](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/neighbour.c#L1469).
 
 在 neigh_resolve_output 里面，首先 neigh_event_send 触发一个事件，看能否激活 ARP.
 
 在 __neigh_event_send 中，激活 ARP 分两种情况.
 
-第一种情况是马上激活，也即 immediate_probe. 另一种情况是延迟激活则仅仅设置一个 timer, 然后将 ARP 包放在 arp_queue 上. 如果马上激活，就直接调用 neigh_probe；如果延迟激活，则定时器到了就会触发 neigh_timer_handler，在这里面还是会调用 [neigh_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/neighbour.c#L1000). 就来看 neigh_probe 的实现，在这里面会从 arp_queue 中拿出 ARP 包来，然后调用 struct neighbour 的 solicit 操作.
+第一种情况是马上激活，也即 immediate_probe. 另一种情况是延迟激活则仅仅设置一个 timer, 然后将 ARP 包放在 arp_queue 上. 如果马上激活，就直接调用 neigh_probe；如果延迟激活，则定时器到了就会触发 neigh_timer_handler，在这里面还是会调用 [neigh_probe](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/neighbour.c#L1000). 就来看 neigh_probe 的实现，在这里面会从 arp_queue 中拿出 ARP 包来，然后调用 struct neighbour 的 solicit 操作.
 
-按照上面对于 struct neighbour 的操作函数 arp_hh_ops 的定义，solicit 调用的是 arp_solicit，在这里可以找到对应于 [arp_send_dst](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/arp.c#L298) 的调用，创建并发送一个 arp 包，得到结果放在 struct dst_entry 里面.
+按照上面对于 struct neighbour 的操作函数 arp_hh_ops 的定义，solicit 调用的是 arp_solicit，在这里可以找到对应于 [arp_send_dst](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/arp.c#L298) 的调用，创建并发送一个 arp 包，得到结果放在 struct dst_entry 里面.
 
-回到 neigh_resolve_output 中，当 ARP 发送完毕，就可以调用 [dev_queue_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L4162) 发送二层网络包了.
+回到 neigh_resolve_output 中，当 ARP 发送完毕，就可以调用 [dev_queue_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L4162) 发送二层网络包了.
 
 就像在学硬盘块设备的时候学过，每个块设备都有队列，用于将内核的数据放到队列里面，然后设备驱动从队列里面取出后，将数据根据具体设备的特性发送给设备。网络设备也是类似的，对于发送来说，有一个发送队列 struct netdev_queue *txq. 这里还有另一个变量叫做 struct Qdisc，这个是什么呢？如果在一台 Linux 机器上运行 ip addr，我们能看到对于一个网卡，都有下面的输出.
 
@@ -974,7 +976,7 @@ pfifo_fast 分为三个先入先出的队列，称为三个 Band. 根据网络�
 
 通过命令行 tc qdisc show dev eth0，可以输出结果 priomap，也是十六个数字. 在 0 到 2 之间，和 TOS 的十六种类型对应起来. 不同的 TOS 对应不同的队列。其中 Band 0 优先级最高，发送完毕后才轮到 Band 1 发送，最后才是 Band 2.
 
-接下来，[__dev_xmit_skb](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L3734) 开始进行网络包发送.
+接下来，[__dev_xmit_skb](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L3734) 开始进行网络包发送.
 
 __dev_xmit_skb 会将请求放入队列，然后调用 __qdisc_run 处理队列中的数据. qdisc_restart 用于数据的发送. 根据注释中的说法，qdisc 的另一个功能是用于控制网络包的发送速度，因而如果超过速度，就需要重新调度，则会调用 __netif_schedule.
 
@@ -982,7 +984,7 @@ __netif_schedule 会调用 __netif_reschedule，发起一个软中断 NET_TX_SOF
 
 在系统初始化的时候，会定义软中断的处理函数. 例如，NET_TX_SOFTIRQ 的处理函数是 net_tx_action，用于发送网络包. 还有一个 NET_RX_SOFTIRQ 的处理函数是 net_rx_action，用于接收网络包.
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L10616
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L10616
 /*
  *	Initialize the DEV module. At boot time this walks the device list and
  *	unhooks any devices that fail to initialise (normally hardware not
@@ -1002,19 +1004,19 @@ static int __init net_dev_init(void)
 }
 ```
 
-这里先来解析一下 [net_tx_action](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L4838).
+这里先来解析一下 [net_tx_action](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L4838).
 
-会发现，net_tx_action 还是调用了 qdisc_run，还是会调用 __qdisc_run，然后调用 [qdisc_restart](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/sched/sch_generic.c#L357) 发送网络包.
+会发现，net_tx_action 还是调用了 qdisc_run，还是会调用 __qdisc_run，然后调用 [qdisc_restart](https://elixir.bootlin.com/linux/v5.8.1/source/net/sched/sch_generic.c#L357) 发送网络包.
 
-再看qdisc_restart 的实现. qdisc_restart 将网络包从 Qdisc 的队列中拿下来，然后调用 [sch_direct_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/sched/sch_generic.c#L285) 进行发送.
+再看qdisc_restart 的实现. qdisc_restart 将网络包从 Qdisc 的队列中拿下来，然后调用 [sch_direct_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/sched/sch_generic.c#L285) 进行发送.
 
-在 sch_direct_xmit 中，调用 [dev_hard_start_xmit](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L3562) 进行发送，如果发送不成功，会返回 NETDEV_TX_BUSY. 这说明网络卡很忙，于是就调用 dev_requeue_skb，重新放入队列.
+在 sch_direct_xmit 中，调用 [dev_hard_start_xmit](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L3562) 进行发送，如果发送不成功，会返回 NETDEV_TX_BUSY. 这说明网络卡很忙，于是就调用 dev_requeue_skb，重新放入队列.
 
 在 dev_hard_start_xmit 中，是一个 while 循环. 每次在队列中取出一个 sk_buff，调用 xmit_one 发送. 接下来的调用链为：xmit_one->netdev_start_xmit->__netdev_start_xmit.
 
-这个时候，已经到了设备驱动层了. kernel里能看到，[drivers/net/ethernet/intel/ixgb/ixgb_main.c 里面有对于这个网卡的操作的定义](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L335).
+这个时候，已经到了设备驱动层了. kernel里能看到，[drivers/net/ethernet/intel/ixgb/ixgb_main.c 里面有对于这个网卡的操作的定义](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L335).
 
-在ixgb_main.c里面，可以找到对于 ndo_start_xmit 的定义，调用 [ixgb_xmit_frame](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1478).
+在ixgb_main.c里面，可以找到对于 ndo_start_xmit 的定义，调用 [ixgb_xmit_frame](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1478).
 
 在 ixgb_xmit_frame 中，会得到这个网卡对应的适配器，然后将其放入硬件网卡的队列中.
 
@@ -1051,7 +1053,7 @@ static int __init net_dev_init(void)
 以之前发送网络包时的网卡 drivers/net/ethernet/intel/ixgb/ixgb_main.c 为例子，来进行解析.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L95
+// https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L95
 static struct pci_driver ixgb_driver = {
 	.name     = ixgb_driver_name,
 	.id_table = ixgb_pci_tbl,
@@ -1089,12 +1091,12 @@ ixgb_init_module(void)
 
 module_init(ixgb_init_module);
 
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/pci.h#L1374
+// https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/pci.h#L1374
 /* pci_register_driver() must be a macro so KBUILD_MODNAME can be expanded */
 #define pci_register_driver(driver)		\
 	__pci_register_driver(driver, THIS_MODULE, KBUILD_MODNAME)
 
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L1400
+// https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L1400
 /**
  * __pci_register_driver - register a new pci driver
  * @drv: the driver structure to register
@@ -1125,48 +1127,48 @@ int __pci_register_driver(struct pci_driver *drv, struct module *owner,
 EXPORT_SYMBOL(__pci_register_driver);
 ```
 
-每个PCI设备驱动都有一个[pci_driver](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/pci.h#L848)变量，它描述了一个PCI驱动的信息. 每个PCI设备都由一组参数唯一地标识，这些参数保存在结构体pci_driver的[pci_device_id](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/mod_devicetable.h#L38)中.
+每个PCI设备驱动都有一个[pci_driver](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/pci.h#L848)变量，它描述了一个PCI驱动的信息. 每个PCI设备都由一组参数唯一地标识，这些参数保存在结构体pci_driver的[pci_device_id](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/mod_devicetable.h#L38)中.
 
-ixgb_init_module ->pci_register_driver->__pci_register_driver->[driver_register](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/driver.c#L147)->[bus_add_driver](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/bus.c#L594) -> [driver_attach](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L1065) -> [bus_for_each_dev#fn(dev, data)](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/bus.c#L292) ->[__driver_attach](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L1005) -> [device_driver_attach](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L963)->[driver_probe_device](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L683)->[really_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L466)->[`dev->bus->probe(dev)`](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/base/dd.c#L466) , 因为`__pci_register_driver()`中设置了[`drv->driver.bus = &pci_bus_type;`](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L1620)->[pci_device_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L413)->[__pci_device_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L376)->[pci_call_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L332)->[ local_pci_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/pci/pci-driver.c#L287)
+ixgb_init_module ->pci_register_driver->__pci_register_driver->[driver_register](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/driver.c#L147)->[bus_add_driver](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/bus.c#L594) -> [driver_attach](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L1065) -> [bus_for_each_dev#fn(dev, data)](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/bus.c#L292) ->[__driver_attach](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L1005) -> [device_driver_attach](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L963)->[driver_probe_device](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L683)->[really_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L466)->[`dev->bus->probe(dev)`](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/base/dd.c#L466) , 因为`__pci_register_driver()`中设置了[`drv->driver.bus = &pci_bus_type;`](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L1620)->[pci_device_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L413)->[__pci_device_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L376)->[pci_call_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L332)->[ local_pci_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/pci/pci-driver.c#L287)
 
-在网卡驱动程序初始化的时候，会调用 ixgb_init_module，注册一个驱动 ixgb_driver，并且调用它的 probe 函数 [ixgb_probe](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L363).
+在网卡驱动程序初始化的时候，会调用 ixgb_init_module，注册一个驱动 ixgb_driver，并且调用它的 probe 函数 [ixgb_probe](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L363).
 
-在 ixgb_probe 中，会创建一个 [struct net_device](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/netdevice.h#L1843) 表示这个网络设备，并且 [netif_napi_add](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L6597) 函数为这个网络设备注册一个轮询 poll 函数 [ixgb_clean](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1757)，将来一旦出现网络包的时候，就是要通过它来轮询了. 当一个网卡被激活的时候，会调用函数 [ixgb_open](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L598)->[ixgb_up](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L176)，在这里面注册一个硬件的中断处理函数[ixgb_intr](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1725).
+在 ixgb_probe 中，会创建一个 [struct net_device](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/netdevice.h#L1843) 表示这个网络设备，并且 [netif_napi_add](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L6597) 函数为这个网络设备注册一个轮询 poll 函数 [ixgb_clean](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1757)，将来一旦出现网络包的时候，就是要通过它来轮询了. 当一个网卡被激活的时候，会调用函数 [ixgb_open](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L598)->[ixgb_up](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L176)，在这里面注册一个硬件的中断处理函数[ixgb_intr](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1725).
 
-如果一个网络包到来，触发了硬件中断，就会调用 ixgb_intr，这里面会调用 [__napi_schedule](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L6278).
+如果一个网络包到来，触发了硬件中断，就会调用 ixgb_intr，这里面会调用 [__napi_schedule](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L6278).
 
-__napi_schedule 是处于中断处理的关键部分，在它被调用的时候，中断是暂时关闭的，但是处理网络包是个复杂的过程，需要到延迟处理部分，所以 ____napi_schedule 将当前设备放到 struct softnet_data 结构的 poll_list 里面，说明在延迟处理部分可以接着处理这个 poll_list 里面的网络设备. 然后 ____napi_schedule 触发一个软中断 NET_RX_SOFTIRQ，通过软中断触发中断处理的延迟处理部分，也是常用的手段. 软中断 NET_RX_SOFTIRQ 对应的中断处理函数是 [net_rx_action](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L6729).
+__napi_schedule 是处于中断处理的关键部分，在它被调用的时候，中断是暂时关闭的，但是处理网络包是个复杂的过程，需要到延迟处理部分，所以 ____napi_schedule 将当前设备放到 struct softnet_data 结构的 poll_list 里面，说明在延迟处理部分可以接着处理这个 poll_list 里面的网络设备. 然后 ____napi_schedule 触发一个软中断 NET_RX_SOFTIRQ，通过软中断触发中断处理的延迟处理部分，也是常用的手段. 软中断 NET_RX_SOFTIRQ 对应的中断处理函数是 [net_rx_action](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L6729).
 
-在 net_rx_action 中，会得到 [struct softnet_data](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/netdevice.h#L3095) 结构，这个结构在发送的时候也遇到过. 当时它的 output_queue 用于网络包的发送，这里的 poll_list 用于网络包的接收.
+在 net_rx_action 中，会得到 [struct softnet_data](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/netdevice.h#L3095) 结构，这个结构在发送的时候也遇到过. 当时它的 output_queue 用于网络包的发送，这里的 poll_list 用于网络包的接收.
 
-在 net_rx_action 中，接下来是一个循环，在 poll_list 里面取出网络包到达的设备，然后调用 napi_poll 来轮询这些设备，napi_poll 会调用最初设备初始化的时候，注册的 poll 函数，对于 ixgb_driver，对应的函数是 ixgb_clean. ixgb_clean 会调用 [ixgb_clean_rx_irq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1933).
+在 net_rx_action 中，接下来是一个循环，在 poll_list 里面取出网络包到达的设备，然后调用 napi_poll 来轮询这些设备，napi_poll 会调用最初设备初始化的时候，注册的 poll 函数，对于 ixgb_driver，对应的函数是 ixgb_clean. ixgb_clean 会调用 [ixgb_clean_rx_irq](https://elixir.bootlin.com/linux/v5.8.1/source/drivers/net/ethernet/intel/ixgb/ixgb_main.c#L1933).
 
 在网络设备的驱动层，有一个用于接收网络包的 rx_ring. 它是一个环，从网卡硬件接收的包会放在这个环里面. 这个环里面的 buffer_info[]是一个数组，存放的是网络包的内容. i 和 j 是这个数组的下标，在 ixgb_clean_rx_irq 里面的 while 循环中，依次处理环里面的数据. 在ixgb_clean_rx_irq里面，看到了 i 和 j 加一之后，如果超过了数组的大小，就跳回下标 0，就说明这是一个环. ixgb_check_copybreak 函数将 buffer_info 里面的内容，拷贝到 struct sk_buff *skb，从而可以作为一个网络包进行后续的处理，然后调用 netif_receive_skb.
 
 ## 网络协议栈的二层逻辑
 从 netif_receive_skb 函数开始，我们就进入了内核的网络协议栈.
 
-接下来的调用链为：netif_receive_skb->netif_receive_skb_internal->__netif_receive_skb->[__netif_receive_skb_core](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/dev.c#L5074). 在 __netif_receive_skb_core 中，先是处理了二层的一些逻辑, 例如，对于 VLAN 的处理，接下来要想办法交给第三层.
+接下来的调用链为：netif_receive_skb->netif_receive_skb_internal->__netif_receive_skb->[__netif_receive_skb_core](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/dev.c#L5074). 在 __netif_receive_skb_core 中，先是处理了二层的一些逻辑, 例如，对于 VLAN 的处理，接下来要想办法交给第三层.
 
 在网络包 struct sk_buff 里面，二层的头里面有一个 protocol，表示里面一层，也即三层是什么协议. deliver_ptype_list_skb 在一个协议列表中逐个匹配. 如果能够匹配到，就返回.
 
-这些协议的注册在网络协议栈初始化的时候， [inet_init 函数调用 dev_add_pack(&ip_packet_type)](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L2055)，添加了 IP 协议. 协议被放在一个链表里面.
+这些协议的注册在网络协议栈初始化的时候， [inet_init 函数调用 dev_add_pack(&ip_packet_type)](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L2055)，添加了 IP 协议. 协议被放在一个链表里面.
 
-假设这个时候的网络包是一个 IP 包，则在这个链表里面一定能够找到 ip_packet_type，在 __netif_receive_skb_core 中会调用 [ip_packet_type 的 func 函数](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1940)即[ip_rcv](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_input.c#L530).
+假设这个时候的网络包是一个 IP 包，则在这个链表里面一定能够找到 ip_packet_type，在 __netif_receive_skb_core 中会调用 [ip_packet_type 的 func 函数](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1940)即[ip_rcv](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_input.c#L530).
 
 ## 网络协议栈的 IP 层
 从 ip_rcv 函数开始，处理逻辑就从二层到了三层，IP 层.
 
-在 ip_rcv 中，得到 IP 头，然后又遇到了NF_HOOK，这次因为是接收网络包，第一个 hook 点是 NF_INET_PRE_ROUTING，也就是 iptables 的 PREROUTING 链. 如果里面有规则，则执行规则，然后调用 [ip_rcv_finish](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_input.c#L414).
+在 ip_rcv 中，得到 IP 头，然后又遇到了NF_HOOK，这次因为是接收网络包，第一个 hook 点是 NF_INET_PRE_ROUTING，也就是 iptables 的 PREROUTING 链. 如果里面有规则，则执行规则，然后调用 [ip_rcv_finish](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_input.c#L414).
 
-ip_rcv_finish 得到网络包对应的路由表，然后调用 dst_input，在 dst_input 中，调用的是 struct rtable 的成员的 dst 的 input 函数. 在 rt_dst_alloc 中，可以看到，input 函数指向的是 [ip_local_deliver](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_input.c#L240).
+ip_rcv_finish 得到网络包对应的路由表，然后调用 dst_input，在 dst_input 中，调用的是 struct rtable 的成员的 dst 的 input 函数. 在 rt_dst_alloc 中，可以看到，input 函数指向的是 [ip_local_deliver](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_input.c#L240).
 
-在 ip_local_deliver 函数中，如果 IP 层进行了分段，则进行重新的组合. 接下来就是熟悉的 NF_HOOK。hook 点在 NF_INET_LOCAL_IN，对应 iptables 里面的 INPUT 链。在经过 iptables 规则处理完毕后，会调用 [ip_local_deliver_finish](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/ip_input.c#L226).
+在 ip_local_deliver 函数中，如果 IP 层进行了分段，则进行重新的组合. 接下来就是熟悉的 NF_HOOK。hook 点在 NF_INET_LOCAL_IN，对应 iptables 里面的 INPUT 链。在经过 iptables 规则处理完毕后，会调用 [ip_local_deliver_finish](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/ip_input.c#L226).
 
-在 IP 头中，有一个字段 protocol 用于指定里面一层的协议，在这里应该是 TCP 协议. 于是，从 [inet_protos](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/protocol.c#L27) 数组中，找出 TCP 协议对应的处理函数. 这个数组里面的内容是 [struct net_protocol](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/net/protocol.h#L37).
+在 IP 头中，有一个字段 protocol 用于指定里面一层的协议，在这里应该是 TCP 协议. 于是，从 [inet_protos](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/protocol.c#L27) 数组中，找出 TCP 协议对应的处理函数. 这个数组里面的内容是 [struct net_protocol](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/protocol.h#L37).
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1946
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1946
 static int __init inet_init(void)
 {
 	...
@@ -1177,7 +1179,7 @@ static int __init inet_init(void)
 	...
 }
 
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1737
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1737
 /* thinking of making this const? Don't.
  * early_demux can change based on sysctl.
  */
@@ -1204,7 +1206,7 @@ static struct net_protocol udp_protocol = {
 };
 ```
 
-在系统初始化的时候，网络协议栈的初始化调用的是 inet_init，它会调用 inet_add_protocol，将 TCP 协议对应的处理函数 tcp_protocol、UDP 协议对应的处理函数 udp_protocol，放到 inet_protos 数组中. 在上面的网络包的接收过程中，会取出 TCP 协议对应的处理函数 tcp_protocol，然后调用 handler 函数，也即 [tcp_v4_rcv](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L1873) 函数.
+在系统初始化的时候，网络协议栈的初始化调用的是 inet_init，它会调用 inet_add_protocol，将 TCP 协议对应的处理函数 tcp_protocol、UDP 协议对应的处理函数 udp_protocol，放到 inet_protos 数组中. 在上面的网络包的接收过程中，会取出 TCP 协议对应的处理函数 tcp_protocol，然后调用 handler 函数，也即 [tcp_v4_rcv](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L1873) 函数.
 
 ## 网络协议栈的 TCP 层
 从 tcp_v4_rcv 函数开始, 处理逻辑就从 IP 层到了 TCP 层.
@@ -1230,15 +1232,15 @@ static struct net_protocol udp_protocol = {
 
 如果有一个用户态进程等待读取数据呢？就先调用 tcp_prequeue，也即赶紧放入 prequeue 队列，并且离开软中断的处理过程. 在这个函数里面，会看到对于 sysctl_tcp_low_latency 的判断，也即是不是要低时延地处理网络包.
 
-如果把 sysctl_tcp_low_latency 设置为 0，那就要放在 prequeue 队列中暂存，这样不用等待网络包处理完毕，就可以离开软中断的处理过程，但是会造成比较长的时延. 如果把 sysctl_tcp_low_latency 设置为 1，还是调用 [tcp_v4_do_rcv](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_ipv4.c#L1613).
+如果把 sysctl_tcp_low_latency 设置为 0，那就要放在 prequeue 队列中暂存，这样不用等待网络包处理完毕，就可以离开软中断的处理过程，但是会造成比较长的时延. 如果把 sysctl_tcp_low_latency 设置为 1，还是调用 [tcp_v4_do_rcv](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L1613).
 
-在 tcp_v4_do_rcv 中，分两种情况，一种情况是连接已经建立，处于 TCP_ESTABLISHED 状态，调用 [tcp_rcv_established](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L5588). 另一种情况，就是其他的状态，调用 [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L6183).
+在 tcp_v4_do_rcv 中，分两种情况，一种情况是连接已经建立，处于 TCP_ESTABLISHED 状态，调用 [tcp_rcv_established](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L5588). 另一种情况，就是其他的状态，调用 [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L6183).
 
 ![](/misc/img/net/385ff4a348dfd2f64feb0d7ba81e2bc6.png)
 
 在 tcp_rcv_state_process 中，如果对着 TCP 的状态图进行比对，能看到，对于 TCP 所有状态的处理，其中和连接建立相关的状态，已经分析过，所以重点关注连接状态下的工作模式.
 
-在连接状态下，会调用 tcp_rcv_established. 在这个函数里面，会调用 [tcp_data_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L4797)，将其放入 sk_receive_queue 队列进行处理.
+在连接状态下，会调用 tcp_rcv_established. 在这个函数里面，会调用 [tcp_data_queue](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L4797)，将其放入 sk_receive_queue 队列进行处理.
 
 在 tcp_data_queue 中，对于收到的网络包，要分情况进行处理.
 
@@ -1254,7 +1256,7 @@ static struct net_protocol udp_protocol = {
 
 乱序的包不能进入 sk_receive_queue 队列. 因为一旦进入到这个队列，意味着可以发送给用户进程. 然而，按照 TCP 的定义，用户进程应该是按顺序收到包的，没有排好序，就不能给用户进程. 所以，7、8 不能进入 sk_receive_queue 队列，只能暂时放在 out_of_order_queue 乱序队列中.
 
-当 5、6 到达的时候，5、6 先进入 sk_receive_queue 队列. 这个时候再来看 out_of_order_queue 乱序队列中的 7、8，发现能够接上. 于是，7、8 也能进入 sk_receive_queue 队列了. [tcp_ofo_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp_input.c#L4506) 函数就是做这个事情的.
+当 5、6 到达的时候，5、6 先进入 sk_receive_queue 队列. 这个时候再来看 out_of_order_queue 乱序队列中的 7、8，发现能够接上. 于是，7、8 也能进入 sk_receive_queue 队列了. [tcp_ofo_queue](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L4506) 函数就是做这个事情的.
 
 至此第一种情况处理完毕.
 
@@ -1281,7 +1283,7 @@ static struct net_protocol udp_protocol = {
 
 read 系统调用对于一个文件描述符的操作，大致过程都是类似的，最终它会调用到用来表示一个打开文件的结构 stuct file 指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L149
+// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L149
 /*
  *	Socket files have a set of 'special' operations as well as the generic file ones. These don't appear
  *	in the operation structures but are done directly via the socketcall() multiplexor.
@@ -1307,13 +1309,13 @@ static const struct file_operations socket_file_ops = {
 };
 ```
 
-按照文件系统的读取流程，调用的是 [sock_read_iter](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L960).
+按照文件系统的读取流程，调用的是 [sock_read_iter](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L960).
 
-在 sock_read_iter 中，通过 VFS 中的 struct file，将创建好的 socket 结构拿出来，然后调用 [sock_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L900)，sock_recvmsg 会调用 [sock_recvmsg_nosec](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/socket.c#L883).
+在 sock_read_iter 中，通过 VFS 中的 struct file，将创建好的 socket 结构拿出来，然后调用 [sock_recvmsg](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L900)，sock_recvmsg 会调用 [sock_recvmsg_nosec](https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L883).
 
-sock_recvmsg_nosec里调用了 socket 的 ops 的 recvmsg，根据 [inet_stream_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L1015) 的定义，这里调用的是 [inet_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/af_inet.c#L835).
+sock_recvmsg_nosec里调用了 socket 的 ops 的 recvmsg，根据 [inet_stream_ops](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L1015) 的定义，这里调用的是 [inet_recvmsg](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L835).
 
-在inet_recvmsg里面，从 socket 结构，可以得到更底层的 sock 结构，然后调用 sk_prot 的 recvmsg 方法, 根据 tcp_prot 的定义，调用的是 [tcp_recvmsg](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/ipv4/tcp.c#L2015).
+在inet_recvmsg里面，从 socket 结构，可以得到更底层的 sock 结构，然后调用 sk_prot 的 recvmsg 方法, 根据 tcp_prot 的定义，调用的是 [tcp_recvmsg](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L2015).
 
 tcp_recvmsg 这个函数比较长，里面逻辑也很复杂，好在里面有一段注释概括了这里面的逻辑. 注释里面提到了三个队列，receive_queue 队列、prequeue 队列和 backlog 队列. 这里面，需要把前一个队列处理完毕，才处理后一个队列.
 
@@ -1325,7 +1327,7 @@ tcp_recvmsg 的整个逻辑也是这样执行的：这里面有一个 while 循�
 
 如果 sysctl_tcp_low_latency 设置为 1，也即没有 prequeue 队列，或者 prequeue 队列为空，则需要处理 backlog 队列，在 release_sock 函数中处理.
 
-[release_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/sock.c#L3062) 会调用 [__release_sock](https://elixir.bootlin.com/linux/v5.8-rc4/source/net/core/sock.c#L2534)，这里面会依次处理队列中的网络包.
+[release_sock](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/sock.c#L3062) 会调用 [__release_sock](https://elixir.bootlin.com/linux/v5.8.1/source/net/core/sock.c#L2534)，这里面会依次处理队列中的网络包.
 
 最后，哪里都没有网络包，只好调用 sk_wait_data，继续等待在哪里，等待网络包的到来.
 

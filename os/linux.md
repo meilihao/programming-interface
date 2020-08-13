@@ -1,4 +1,7 @@
 # linux
+参考:
+- [kernel changelog](https://kernelnewbies.org/LinuxVersions)
+- [Linux and glibc API changes](https://man7.org/tlpi/api_changes/index.html)
 
 ## ko
 Linux内核是单内核（monolithic kernel），也就是所有的内核功能都集成在一个内核空间内. 但是kernel内核又有微内核的设计即具有模块功能，可以将磁盘驱动程序、文件系统等独立的内核功能制作成模块，并动态添加到内核空间或者删除.
@@ -214,6 +217,8 @@ $ sudo make install
     - iio – 工业I/O子系统，包括各种使用不同物理接口(i2c, spi, etc)传感器的驱动
     - infiniband – 支持多并发链接的”转换线缆”技术的硬件设备驱动
     - input – input设备子系统，包括各种输入设备的驱动，键盘、混合设备、鼠标、触摸屏、游戏接口、游戏操作杆、触控rmi4、触摸面板、串口IO输入设备
+
+        - keyboard 键盘驱动
     - interconnect
     - iommu
     - ipack
@@ -350,7 +355,10 @@ $ sudo make install
 
 > 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
 
-> 获取最新kernel的config: 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
+#### 获取最新kernel的config
+1. 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
+
+1. 在[fedora buildsystem](https://koji.fedoraproject.org/koji/packageinfo?packageID=8)搜索kernel, 选择指定版本的kernel, 根据指定的Source, 比如`https://src.fedoraproject.org/rpms/kernel.git#426b17af14a269cc24d57e3d1346cd06ba40e98e`, 转到`https://src.fedoraproject.org/rpms/kernel/tree/426b17af14a269cc24d57e3d1346cd06ba40e98e`下载指定的config即可.
 
 ### 编译kernel & 替换linux内核
 ```
