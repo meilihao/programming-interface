@@ -372,8 +372,9 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 		- drop_caches : 强制释放memory的磁盘缓存, 不推荐使用, 内存不够时还是加内存的好
 		
 			写入1, 释放页面缓存; 写入2, 释放目录文件和inodes; 写入3, 释放页面缓存, 目录文件和inodes
-- tty : 各个虚拟终端和与它连接的物理设备信息.
+- sysrq-trigger : 触发sysrq的触发器
 - sysvipc : 有关 System V IPC 对象的信息
+- tty : 各个虚拟终端和与它连接的物理设备信息
 - uptime : 系统的总的运行时间和空闲时间
 - version : kernel版本信息
 - vmstat : 虚拟内存统计表

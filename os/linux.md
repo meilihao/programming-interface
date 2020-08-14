@@ -2,6 +2,8 @@
 参考:
 - [kernel changelog](https://kernelnewbies.org/LinuxVersions)
 - [Linux and glibc API changes](https://man7.org/tlpi/api_changes/index.html)
+- [Linux Performance tools map](http://www.brendangregg.com/linuxperf.html)
+- [linux kernel map](https://makelinux.github.io/kernel/map/)
 
 ## ko
 Linux内核是单内核（monolithic kernel），也就是所有的内核功能都集成在一个内核空间内. 但是kernel内核又有微内核的设计即具有模块功能，可以将磁盘驱动程序、文件系统等独立的内核功能制作成模块，并动态添加到内核空间或者删除.
@@ -479,6 +481,31 @@ make 选项:
     crash工具启动时如果不给它传递kdump文件，那么它默认就是调试当前内存中的内核. `su root`然后直接在命令行输入`crash vmlinux-4.4.0-87-generic`即可.
 
     在ubuntu系统中，通过安装linux-crashdump工具，我们可以捕捉kdump. Kdump是一个Linux内核崩溃转储机制，这个机制的原理是在内存中保留一块区域，这块区域用来存放capture kernel，当前的内核发生crash后，通过kexec把保留区域的capture kernel运行起来，由capture kernel负责把crash kernel的完整信息--包括CPU寄存器、堆栈数据等--转储到文件中，文件的存放位置可以是本地磁盘，也可以是网络.
+- sysrq
+
+    要使用sysrq需要kernel config的`CONFIG_MAGIC_SYSRQ`.
+
+    设置sysrq的方法:
+    1. sysctl -w kernel.sysrq=1
+    1. echo 1 > /proc/sys/kernel/sysrq, sysrq使用位图表示, 1表示所以sysrq键都可用
+
+    发送sysrq方法:
+    1. alt+sysrq+<命令键> # 如有热键冲突则需要先解决冲突
+    1. echo <命令键> >/proc/sysrq-trigger # 必须root权限, sudo也不行
+
+    常用sysrq命令键:
+    - b reboot : 立即重新启动系统
+    - c : 故意让系统崩溃(在使用netdump或者diskdump的时候有用)
+    - d : 输出所有lock
+    - l : 输出系统中所有cpu的栈
+    - m : 导出关于内存分配的信息
+    - p : 到处当前CPU寄存器信息和标志位的信息
+    - q : 所有计时器的信息
+    - t : 导出线程状态信息
+    - s sync : 立即同步所有挂载的文件系统
+    - u : 立即重新挂载所有的文件系统为只读
+    - o : 立即关机(如果机器配置并支持此项功能)
+    - z : 输出ftrace的缓冲区
 
 # kernel启动
 内核的启动从入口函数 start_kernel() 开始, 在 ${kernel_root}/init/main.c 文件中,start_kernel 相当于内核的main 函数.
