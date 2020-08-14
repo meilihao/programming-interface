@@ -205,31 +205,6 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 ## initramfs
 解决找init的问题
 
-## vfs
-虚拟文件系统(Virtual Files System, VFS) 是驻留在用户进程和各种类型的linux 文件系统之间的一个抽象接口层.
-vfs提供了访问文件系统对象的通用对象模型(比如索引节点, 文件对象, 分页缓存, 目录条目等等)和方法, 对用户进程隐藏了实现每个文件系统的差异.
-
-脏页(dirty page): 磁盘上的数据与内存中的数据不一致, 此时内存中的数据就是脏页, 需要尽快同步到磁盘中, 以防止意外丢失.
-
-[块层](https://zhuanlan.zhihu.com/p/25096747)处理所有与块设备操作相关的活动, 其关键数据结构是bio(block input output)结构. 它处理bio请求, 并放入`i/o`请求队列.
-bio结构是在文件系统层和块层之间的一个接口.
-
-vfs有4中主要的数据结构:
-1. superblock
-
-	用于保存系统中已安装的文件系统信息.
-1. inode(索引节点)
-	
-	用于保存具体文件的一般信息.
-1. dentry(目录项)
-
-	用于保存文件名, 上级目录等信息.
-1. file(文件)
-
-	用于保存已打开的文件与进程间进行交互的信息.
-
-它们对应的操作对象分别是super_operations, indoe_operations, dentry_operations, file_operations, fs只要实现了这4个对象的操作方法即可注册到kernel.
-
 ## 特殊文件系统
 
 ### /sys
