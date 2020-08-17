@@ -51,13 +51,15 @@
 
     **每次需要编译的包使用完成后需要删除**.
 
-    根据[lfs 的 `Files Mirrors`](http://www.linuxfromscratch.org/mirrors.html#files)下载所需的版本的[all packages, **推荐**](http://mirrors-usa.go-parts.com/lfs/lfs-packages/lfs-packages-8.4.tar), 该tar已打包所有所需, 各包的作用在[这里](https://lctt.github.io/LFS-BOOK/lfs-systemd/prologue/package-choices.html).
+    根据[lfs 的 `Files Mirrors`](http://www.linuxfromscratch.org/mirrors.html#files)下载所需的版本的[all packages, **推荐**](https://mirror-hk.koddos.net/lfs/lfs-packages/lfs-packages-8.4.tar), 该tar已打包所有所需, 各包的作用在[这里](https://lctt.github.io/LFS-BOOK/lfs-systemd/prologue/package-choices.html).
 
     其他下载方式(**不推荐**): 根据相应版本的wget-list和md5sums逐个下载, 比如这里的[8.4](http://mirrors-usa.go-parts.com/lfs/lfs-packages/8.4/wget-list), 命令如下:
     ```
     $ wget --input-file=wget-list --continue --directory-prefix=sources # 支持断点恢复
     $ md5sum -c md5sums        # 校验下载
     ```
+
+    > 也可使用[中国科学技术大学镜像站提供的 LFS 软件包mirror](http://mirrors.ustc.edu.cn/lfs/lfs-packages/)
 
 ## 2. 第一次编译
 将`$LFS/tools`软连接到`/tools`
