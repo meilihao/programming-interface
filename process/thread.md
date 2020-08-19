@@ -5,6 +5,8 @@
 
 > 多线程程序可通过gcc的`-D_REENRANT`使得函数使用线程安全(可重入)版本, 选项`-pthread`=`-lpthread -D_REENTRANT`. 最典型的是在一个多线程程序里，默认情况下，只有一个errno变量供所有的线程共享, 此时就需要该选项.
 
+> 线程安全: 当多个线程访问某个对象时，这个对象始终都能表现出正确的行为，那么就称这个对象是线程安全的.
+
 pthread_create, 创建线程, 一共有四个参数:
 1. 线程对象
 1. 线程的属性
@@ -32,6 +34,8 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);`修改
 1. semaphore(信号量)
 
    信号量的值不能小于0, 且信号量为0时, `sem_wait()`会阻塞.
+
+> 两个或多个线程同时对一共享数据进行修改，从而影响程序运行的正确性时，这种就被称为竞态条件(race condition).
 
 ## 线程数据
 分3类:
