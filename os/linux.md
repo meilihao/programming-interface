@@ -364,7 +364,7 @@ $ sudo make install
 
 ### 编译kernel & 替换linux内核
 ```
-# sudo apt-get install libncurses5-dev libssl-dev build-essential openssl bison flex bc
+# sudo apt-get install libncurses5-dev libssl-dev build-essential openssl bison flex bc cpio
 # wget https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.3.11.tar.xz
 # xz -d linux-5.3.11.tar.xz
 # tar -xf linux-5.3.11.tar
@@ -528,3 +528,32 @@ systemd 是所有进程的父进程. 它负责将 Linux 主机带到一个用户
 
 > /etc/systemd/system/default.target没有则使用/usr/lib/systemd/system/default.target
 > target查看: systemctl get-default
+
+## kernel编译
+### LFS kernel 5.8.1 编译报"[kernel/Makefile:144: kernel/kheaders_data.tar.xz] Error 127"
+`.config` from https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.8.1/amd64/linux-headers-5.8.1-050801-generic_5.8.1-050801.202008111432_amd64.deb
+
+解决步骤:
+1. 使用`MAKEFLAGS=j1 make V=1`编译获取调试输出
+
+    ```log
+    need-modorder=1
+    sh ./kernel/gen_kheaders.sh kernel/kheaders_data.tar.xz
+    GEN     kernel/kheaders_data.tar.xz
+    ```
+1. 对`./kernel/gen_kheaders.sh`开启`set -x`, 重复步骤1.
+
+    ```log
+    + for f in $dir_list
+    + find include/ -name '*.h'
+    + cpio --quiet -pd /tmp/tmp.4Vqzgnf9tT.kernel/kernel/kheaders_data.tar.xz.tmp
+    make[1]: *** [kernel/Makefile:144: kernel/kheaders_data.tar.xz] Error 127
+    ```
+1.  检查cpio是否存在
+
+    ```log
+    # cpio
+    bash: cpio: command not found
+    ```
+
+> 网上的查到的结论也是缺cpio.
