@@ -557,3 +557,12 @@ systemd 是所有进程的父进程. 它负责将 Linux 主机带到一个用户
     ```
 
 > 网上的查到的结论也是缺cpio.
+
+### /bin/sh: lz4c: command not found
+```log
+# make
+/bin/sh: lz4c: command not found
+make[2]: *** [arch/x86/boot/compressed/Makefile:147: arch/x86/boot/compressed/vmlinux.bin.lz4] Error 127
+```
+
+解决方法: `apt install liblz4-tool`
