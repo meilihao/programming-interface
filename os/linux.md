@@ -376,6 +376,16 @@ $ sudo make install
 # sudo reboot
 ```
 
+#### 编译核心与核心模块
+- make vmlinux：未经压缩的核心
+- make modules：仅核心模块
+- make bzImage：经压缩过的核心（预设）
+- make all：进行上述三个动作
+
+比较常用的是modules和bzImage，bzImage可以制作出压缩过的核心.
+
+通常会用`make -j N clean bzImage modules`连续动作来编译. clean用于清除之前的编译缓存.
+
 > distcc和ccache可加速编译kernel.
 
 > 编译并安装已有版本的kernel会覆盖同版本的kernel相关文件(kernel image, kernel modules等), 而CONFIG_LOCALVERSION可解决该问题, 因为该项指定的字符会成为version的一部分而避免发生覆盖.
@@ -529,6 +539,15 @@ systemd 是所有进程的父进程. 它负责将 Linux 主机带到一个用户
 > /etc/systemd/system/default.target没有则使用/usr/lib/systemd/system/default.target
 > target查看: systemctl get-default
 
+## vmlinuz、initrd.img和System.map
+vmlinuz是可引导的、压缩的内核. “vm”代表 “Virtual Memory”. Linux 支持虚拟内存, 能够使用硬盘空间作为虚拟内存，因此得名“vm”.vmlinuz是可执行的Linux内核，它位于/boot/vmlinuz，它一般是一个软链接.
+
+> vmlinux是未压缩的内核.
+
+initrd就是一个带有根文件系统的虚拟RAM盘，里面包含了根目录‘/’，以及其他的目录,比如：bin，dev，proc，sbin，sys等linux启动时必须的目录，以及在bin目录下加入了一下必须的可执行命令. 被成为最小根文件系统.
+
+System.map: 内核符号映射表，顾名思义就是将内核中的符号（也就是内核中的函数）和它的地址能联系起来的一个列表。是所有符号及其对应地址的一个列表.
+
 ## 制作linux 启动盘 by Syslinux
 Syslinux是一个启动加载器的集合, 包含了一系列的bootloaders, 用于引导启动os:
 - SYSLINUX : fat fs bootloader
@@ -536,6 +555,30 @@ Syslinux是一个启动加载器的集合, 包含了一系列的bootloaders, 用
 - PEXLINUX : network pxe bootloader
 - ISOLINUX : iso-9660 for cd/dvd bootloading
 
+### isolinux.cfg
+光盘安装系统启动过程:
+1. 读取MBR： isolinux/boot.cat # boot.cat的作用就相当于启动流程中的MBR的446字节
+1. 读取isolinux/isolinux.bin # isolinux.bin的作用等价于grub的第二阶段
+1. 加载配置文件： isolinux/isolinux.cfg # 这个文件就是启动菜单；自定义启动菜单可以修改此文件
+1. 根据配置文件定义调用内核文件
+
+    加载内核： isolinuz/vmlinuz向内核传递参数： append initrd=initrd.img
+1. 装载根文件系统，并启动anaconda ###anaconda就是kickstart文件
+
+```conf
+# 第一行，DEFAULT vesamenu.c32，必须的，因为要用到菜单功能，必须有这个vesamenu.c32文件
+# com32/menu/vesamenu.c32 (graphical) or com32/menu/menu.c32 (textmode only)
+# 1, 向用户提示输入选择，直接回车就是缺省选项了; 0,不向用户提示输入选择
+DEFAULT vesamenu.c32
+prompt=1
+# 60 = 6s
+TIMEOUT 60
+label linux   # label定义了启动系统可供选择的模式
+  menu label ^Install or upgrade an existing system
+  menu default
+  kernel vmlinuz
+  append initrd=initrd.img
+```
 ## kernel编译
 ### LFS kernel 5.8.1 编译报"[kernel/Makefile:144: kernel/kheaders_data.tar.xz] Error 127"
 `.config` from https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.8.1/amd64/linux-headers-5.8.1-050801-generic_5.8.1-050801.202008111432_amd64.deb

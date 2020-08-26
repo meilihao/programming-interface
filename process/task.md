@@ -3,6 +3,10 @@
 
 task_struct即进程描述符(process descriptor)也叫进程控制块(PCB))存在任务队列(task list, 双向循环链表)中.
 
+Linux下，进程与线程的最大不同是进程拥有独立的内存地址空间，而线程与其他线程共享内存地址空间. 除此之外，进程与线程的实现基本相同，都有task_struct结构，都被分配PID.
+
+内核线程没有独立的地址空间，它们完成特定工作并接受内核的调度，不同于一般用户进程，它们不接收kill命令发送的信号.
+
 ## 成员
 ![task member](/misc/img/process/task.png)
 
