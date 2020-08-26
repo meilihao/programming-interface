@@ -529,6 +529,13 @@ systemd 是所有进程的父进程. 它负责将 Linux 主机带到一个用户
 > /etc/systemd/system/default.target没有则使用/usr/lib/systemd/system/default.target
 > target查看: systemctl get-default
 
+## 制作linux 启动盘 by Syslinux
+Syslinux是一个启动加载器的集合, 包含了一系列的bootloaders, 用于引导启动os:
+- SYSLINUX : fat fs bootloader
+- EXTLINUX : ext2/3/4, btrfs, xfs fs bootloader
+- PEXLINUX : network pxe bootloader
+- ISOLINUX : iso-9660 for cd/dvd bootloading
+
 ## kernel编译
 ### LFS kernel 5.8.1 编译报"[kernel/Makefile:144: kernel/kheaders_data.tar.xz] Error 127"
 `.config` from https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.8.1/amd64/linux-headers-5.8.1-050801-generic_5.8.1-050801.202008111432_amd64.deb

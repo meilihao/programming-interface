@@ -138,13 +138,8 @@
 在`6. 安装基本系统软件`前备份`$LFS/lfs`, 避免之后的流程出错可供还原.
 
 5. `6.9.1. 安装 Glibc`
-`../lib/ld-linux-x86-64.so.2`不明, 在宿主机用了locate查找得到.
 
-```sh
-(lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64
-(lfs chroot) root:/tools/lib# cp ld-linux-x86-64.so.2 /lib64/ld-lsb-x86-64.so.3
-```
-因此`ln -sfv ../lib`应是指`/tools/lib`
+参考FAQ的`chroot: failed to run command '/usr/bin/env': No such file or directory`
 
 6. `6.21. GCC-9.1.0`
 `ln -sv ../usr/bin/cpp /lib` -> `ln -sv /usr/bin/cpp /lib`
@@ -254,3 +249,57 @@ su: Cannot drop the controlling terminal
 
 ### 6.25. Attr-2.4.48 make报错`gcc: error: ./.libs/libattr.so: No such file or directory`
 未知
+
+### chroot: failed to run command '/usr/bin/env': No such file or directory
+> 10.0-systemd # 7.4. Entering the Chroot Environment
+原因是`/usr/bin/env`不存在或`/usr/bin/env`的动态依赖库不存在.
+
+分析:
+1. 确认`/usr/bin/env`是否存在
+
+    ```bash
+    # ll $LFS/usr/bin/env
+    -rwxr-xr-x 1 root root 271880 Aug 20 23:18 /mnt/lfs/usr/bin/env*
+    ```
+1. 确认`/usr/bin/env`的依赖so是否存在
+
+    ```bash
+    # ldd $LFS/usr/bin/env
+    linux-vdso.so.1 (0x00007fff83842000)
+    libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f30d06f5000)
+    /lib64/ld-linux-x86-64.so.2 (0x00007f30d08ec000)
+    # ll $LFS/lib64/ld-linux-x86-64.so.2
+    lrwxrwxrwx 1 root root 27 Aug 21 10:54 /mnt/lfs/lib64/ld-linux-x86-64.so.2 -> /usr/lib64/ld-linux-x86-64.so.2
+    # ll $LFS/usr/lib64/ld-linux-x86-64.so.2
+    ls: cannot access '/mnt/lfs/usr/lib64/ld-linux-x86-64.so.2': No such file or directory
+    ```
+1. 根据`/usr/lib64/ld-linux-x86-64.so.2`回查, 发现是`5.5. Glibc-2.32`时设置错误导致
+
+
+    ```bash
+    case $(uname -m) in
+    i?86)   ln -sfv ld-linux.so.2 $LFS/lib/ld-lsb.so.3
+    ;;
+    x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64
+            ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64/ld-lsb-x86-64.so.3
+    ;;
+    esac
+    ```
+
+    当时理解为是要连接host的ld-linux-x86-64.so.2, 没想到是chroot时用的, 因此错误地设置成了:
+    ```bash
+    ln -sfv /usr/lib64/ld-linux-x86-64.so.2 $LFS/lib64
+    ln -sfv /usr/lib64/ld-linux-x86-64.so.2 $LFS/lib64/ld-lsb-x86-64.so.3
+    ``` 
+
+## build iso
+参考:
+- [+Create a Custom Debian Live Environment (CD or USB)](https://willhaley.com/blog/custom-debian-live-environment/)
+- [iocoder/archfs](https://github.com/iocoder/archfs)
+- [Create a custom live Debian 9 and 10 the pro way](https://www.bustawin.com/create-a-custom-live-debian-9-the-pro-way/)
+- [debian-from-scratch](https://github.com/scottwilliambeasley/debian-from-scratch)
+- [create custom debian buster live](https://www.paranoids.at/create-custom-debian-buster-live/)
+- [DebianCustomCD](https://wiki.debian.org/DebianCustomCD)
+- [LiveCDCustomizationFromScratch](https://help.ubuntu.com/community/LiveCDCustomizationFromScratch)
+- [pinguybuilder](https://fosspost.org/create-linux-distribution-based-on-ubuntu/)
+- [How to create a custom Ubuntu live from scratch](https://itnext.io/how-to-create-a-custom-ubuntu-live-from-scratch-dd3b3f213f81)
