@@ -357,6 +357,8 @@ $ sudo make install
 
 > 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
 
+测试内核启动: `qemu-system-x86_64 -kernel  /home/chen/test/mnt/lfs/boot/vmlinuz-5.8.1-lfs-10.0-systemd-rc1 -initrd ../rootfs.gz -append "rw root=/dev/ram0  ramdisk_size=40960"`
+
 #### 获取最新kernel的config
 1. 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
 
