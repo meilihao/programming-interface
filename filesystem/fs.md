@@ -182,11 +182,18 @@ umount用于卸载文件系统, 但不能卸载正处于"busy"状态的文件系
 ## lost+found
 fsck(文件系统一致性检查工具)找到一个无法确定其父目录的文件时就会将其放入其中.
 
-## ramdisk
+## ramdisk(已淘汰)
 将一部分固定大小的内存当作分区来使用.
 
+以一块固定大小的内存作为一个block设备创建文件系统，其中的内容只存在于内存中，修改它的内容不会记录到磁盘中. 它用内存模拟了block设备，所以其中的内容还要先加载到page cache中，本身它是内存，创建的page cache也是内存，这产生了对很多内存的浪费.
+
+am disk被弃用的另外一个原因是环回设备(loopback)引入. 环回设备提供了一种更加灵活、方便的从文件而不是从内存块中创建综合块设备的方法.
+
+## ramfs
+ramfs是空间规模动态变化的RAM文件系统，是用来实现Linux缓存机制(缓存page cache and dentry cache)的文件系统, 不是用swap.
+
 ## tmpfs
-驻留于内存中的虚拟文件系统. 其可使用swap.
+tmpfs是ramfs的衍生物，是驻留于内存中的虚拟文件系统, 可限制缓存大小、其可使用swap.
 
 创建命令: `mount -t tmpfs ${source} ${target} [-o size=<n>m]`, 无需预先mkfs. source是要创建的tmpfs的名称.
 

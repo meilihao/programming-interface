@@ -546,7 +546,69 @@ vmlinuz是可引导的、压缩的内核. “vm”代表 “Virtual Memory”. L
 
 initrd就是一个带有根文件系统的虚拟RAM盘，里面包含了根目录‘/’，以及其他的目录,比如：bin，dev，proc，sbin，sys等linux启动时必须的目录，以及在bin目录下加入了一下必须的可执行命令. 被成为最小根文件系统.
 
-System.map: 内核符号映射表，顾名思义就是将内核中的符号（也就是内核中的函数）和它的地址能联系起来的一个列表。是所有符号及其对应地址的一个列表.
+initrd是传递给内核用于挂载根文件系统的文件，现在它分为两种，一种是image格式zip压缩包，这是最原始的作用，传入的是ramdisk，另一种是cpio格式，传入的是initramfs(**常用且推荐**)，内核在解析时会自动解析它的格式，从而按照不同的方式进行处理.
+
+> initramfs支持两种方式，可以和kernel编译在一起，也可以以initrd的方式传入. initramfs会通过switch_root切换到真实的rootfs上.
+
+System.map: 内核符号映射表，顾名思义就是将内核中的符号（也就是内核中的函数）和它的地址能联系起来的一个列表. 是所有符号及其对应地址的一个列表.
+
+## rootfs
+root分区挂载的方式:
+1.ramdisk挂载
+
+    cmdline传入root=/dev/ramX，initrd=addr,size
+1.物理分区挂载
+
+    cmdline传入root=/dev/mmcblk0
+1.initramfs挂载
+
+    这种方式不需要传入"root=XXX"，因为这个roofs是内核自带的，但是要保证其中填充了内容，特别是根目录要存在init程序. 如果根目录没有init程序，那么根目录会挂载失败，当然也可以通过传入"rdinit=/XXX"来指定其他的程序名，只要这个名字存在也同样能挂载rootfs. 如果initramfs是独立于kernel存在的cpio压缩包，那么同样需要initrd=addr,size来传递给内核
+
+### initramfs
+参考:
+- [initramfs](http://xstarcd.github.io/wiki/Linux/initramfs.html)
+
+
+#### 缘由 : "鸡生蛋，还是蛋生鸡"的悖论
+bios和uefi携带的驱动有限, 只能识别有些种类的fs, 比如ext4, fat32等, 它们常用于efi, boot分区. 即bios/uefi可直接加载这里分区的内容.
+
+但内核要想成功挂载rootfs，首先必须能识别rootfs所在设备的物理类型，还要读懂rootfs的文件系统类型. 所以，这就需要rootfs所在块设备驱动，需要相应的文件系统驱动，可能需要逻辑卷相关模块，还可能需要特殊的数据解密驱动.
+
+这些驱动模块，如果放在rootfs中，就不能使用！因为承载rootfs的根文件系统设备还没就绪；如果放在内核image中，内核镜像可能会太臃肿，而且每增加支持一种新设备或文件系统，就要重新编译一次内核镜像，耦合太紧；再加上内核较严格的软件许可证制度，而很多设备厂商有一定的知识产权保护要求，这些驱动模块也许不方便放入内核镜像(另，Android采用了另外一种机制HAL规避知识产权冲突).
+
+因此有了initramfs机制, 提供一个初始化最小文件系统(initial fs)来解决这个悖论.
+
+#### 手动创建initramfs
+
+CONFIG_INITRAMFS_SOURCE为空时编译的kernel不带initramfs.
+
+> CONFIG_INITRAMFS_SOURCE默认即为空.
+
+CONFIG_INITRAMFS_SOURCE支持三种参数:
+1. 一个已经做好的cpio.gz的路径
+1. 指定给内核一个text的配置文件或者文件夹(一个已经为制作cpio.gz准备好所有内容的文件夹)
+1. 使用configuration文件initramfs_list来告诉内核initramfs在哪里
+
+制作和加载独立的initramfs时，首先需要保证内核选项使能：`CONFIG_BLK_DEV_INITRD=y`.
+
+常见的是通过提取busybox的rootfs来制作initramfs:
+```bash
+cd rootfs
+find . | cpio -H newc -ov --owner root:root > ../initramfs.cpio
+cd ..
+gzip initramfs.cpio
+```
+
+最后会生成一个initramfs.cpio.zip的压缩包文件，这个就是想要的initramfs.
+
+可用`sudo lsinitramfs ${initramfs}`查看生成的initramfs内容.
+
+#### 使用initramfs-tools-core
+`LC_ALL="en_US.UTF-8" mkinitramfs -o /boot/initrd.img ${kernel_version}`,  mkinitramfs是需要提供创建initramfs的kernel版本号，如果是给当前kernel制作initramfs，可以用uname -r查看当前的版本号, 提供kernel版本号的主要目的是为了在initramfs中添加指定kernel的驱动模块, 此时mkinitramfs会把/lib/modules/${kernel_version}/目录下的一些启动会用到的模块添加到initramfs中.
+
+更新当前kernel的initramfs: `update-initramfs -u`
+
+> 在fedora/centos/rhel下面一般是用mkinitrd,而在Ubuntu/Debian下是用mkintramfs, 两者类似.
 
 ## 制作linux 启动盘 by Syslinux
 Syslinux是一个启动加载器的集合, 包含了一系列的bootloaders, 用于引导启动os:
@@ -616,3 +678,39 @@ make[2]: *** [arch/x86/boot/compressed/Makefile:147: arch/x86/boot/compressed/vm
 ```
 
 解决方法: `apt install liblz4-tool`
+
+### zcat /boot/initrd.img报错"gzip: /boot/initrd.img: not in gzip format"
+参考:
+- [夾帶 microcode 的 initrd 解法](https://www.ubuntu-tw.org/modules/newbb/viewtopic.php?viewmode=compact&order=ASC&topic_id=108548&forum=11)
+
+os: ubuntu 20.04.1
+
+```
+$ file -L /boot/initrd.img
+/boot/initrd.img: ASCII cpio archive (SVR4 with no CRC)
+$ cpio -idvm < /boot/initrd.img # 发现解压出的大小仍然不对, 仅解出了部分内容, 推测其他内容应该还有另外的压缩方式.
+$ sudo unmkinitramfs /boot/initrd.img # 解压成功, **推荐**
+```
+
+或参考上面的文章手动解码(不推荐):
+```
+$ grep 'TRAILER!!!' -a -b -o initrd.img
+31294:TRAILER!!!
+3035934:TRAILER!!!
+3080689:TRAILER!!!
+50221283:TRAILER!!!
+```
+
+因此initrd.img的结构大致上是这样的:
+```log
+GenuineIntel.bin 第一层
+----------------------- TRAILER!!!
+AuthenticAMD.bin 第二层
+----------------------- TRAILER!!!
+gz 或 xz 或 lzma 或 lz4 第三层
+----------------------- TRAILER!!!
+cpio 第四层
+----------------------- TRAILER!!!
+```
+
+也可通过`hexdump -C initrd.img  -n 51200 > a.log && vim a.log`搜索第一个`TRAILER!!!`来验证
