@@ -357,7 +357,7 @@ $ sudo make install
 
 > 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
 
-测试内核启动: `qemu-system-x86_64 -kernel  /home/chen/test/mnt/lfs/boot/vmlinuz-5.8.1-lfs-10.0-systemd-rc1 -initrd ../rootfs.gz -append "rw root=/dev/ram0  ramdisk_size=40960"`
+测试内核启动: `qemu-system-x86_64 -kernel  /home/chen/test/mnt/lfs/boot/vmlinuz-5.8.1-lfs-10.0-systemd-rc1 -initrd ../rootfs.gz -append "rw root=/dev/ram0  ramdisk_size=40960"`, 这里的root是指最终的根文件系统, `../rootfs.gz`为当前系统的`/boot/initrd.img`.
 
 #### 获取最新kernel的config
 1. 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.
@@ -716,3 +716,11 @@ cpio 第四层
 ```
 
 也可通过`hexdump -C initrd.img  -n 51200 > a.log && vim a.log`搜索第一个`TRAILER!!!`来验证
+
+### "VFS: Unable to mount root fs on unknown"
+linux启动时报该错, 是因为没有配置initrd/initramfs.
+
+### 测试kernel是否可以启动
+qemu test uefi+kernel: `qemu-system-x86_64 -bios "/usr/share/ovmf/OVMF.fd" -enable-kvm -m 512 -kernel vmlinuz ［-initrd initrd.img]`
+
+建议内存最小是512M, 之前试过256M, 但卡在了uefi的界面.

@@ -1,4 +1,7 @@
 # virt
+参考:
+ -[QEMU开源实战(四)](https://juejin.im/post/6844904113197547533)
+
 KVM 在内核里面需要有一个模块，来设置当前 CPU 是 Guest OS 在用，还是 Host OS 在用.
 
 KVM 内核模块通过 /dev/kvm 暴露接口，用户态程序可以通过 ioctl 来访问这个接口.
