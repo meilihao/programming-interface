@@ -724,3 +724,8 @@ linux启动时报该错, 是因为没有配置initrd/initramfs.
 qemu test uefi+kernel: `qemu-system-x86_64 -bios "/usr/share/ovmf/OVMF.fd" -enable-kvm -m 512 -kernel vmlinuz ［-initrd initrd.img]`
 
 建议内存最小是512M, 之前试过256M, 但卡在了uefi的界面.
+
+### .config配置
+```config
+CONFIG_EFI_VARS=n # from [Linux 内核中有关 UEFI 的配置选项](https://wiki.archlinux.org/index.php/Unified_Extensible_Firmware_Interface)
+```
