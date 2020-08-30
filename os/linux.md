@@ -364,6 +364,12 @@ $ sudo make install
 
 1. 在[fedora buildsystem](https://koji.fedoraproject.org/koji/packageinfo?packageID=8)搜索kernel, 选择指定版本的kernel, 根据指定的Source, 比如`https://src.fedoraproject.org/rpms/kernel.git#426b17af14a269cc24d57e3d1346cd06ba40e98e`, 转到`https://src.fedoraproject.org/rpms/kernel/tree/426b17af14a269cc24d57e3d1346cd06ba40e98e`下载指定的config即可.
 
+##### .config配置
+```config
+CONFIG_EFI_VARS=n # from [Linux 内核中有关 UEFI 的配置选项](https://wiki.archlinux.org/index.php/Unified_Extensible_Firmware_Interface)
+CONFIG_LOCALVERSION="-amd64-desktop" # kernel `make modules_install`时在`/lib/modules`下生成的文件名后缀, 比如`/lib/modules/5.4.50-amd64-desktop`
+```
+
 ### 编译kernel & 替换linux内核
 ```
 # sudo apt-get install libncurses5-dev libssl-dev build-essential openssl bison flex bc cpio
@@ -576,7 +582,6 @@ root分区挂载的方式:
 参考:
 - [initramfs](http://xstarcd.github.io/wiki/Linux/initramfs.html)
 
-
 #### 缘由 : "鸡生蛋，还是蛋生鸡"的悖论
 bios和uefi携带的驱动有限, 只能识别有些种类的fs, 比如ext4, fat32等, 它们常用于efi, boot分区. 即bios/uefi可直接加载这里分区的内容.
 
@@ -609,14 +614,25 @@ gzip initramfs.cpio
 
 最后会生成一个initramfs.cpio.zip的压缩包文件，这个就是想要的initramfs.
 
-可用`sudo lsinitramfs ${initramfs}`查看生成的initramfs内容.
+可用`sudo lsinitramfs ${initramfs}`查看生成的initramfs内容. unmkinitramfs可解压initramfs image.
 
-#### 使用initramfs-tools-core
+#### 使用initramfs-tools by `apt install initramfs-tools`
 `LC_ALL="en_US.UTF-8" mkinitramfs -o /boot/initrd.img ${kernel_version}`,  mkinitramfs是需要提供创建initramfs的kernel版本号，如果是给当前kernel制作initramfs，可以用uname -r查看当前的版本号, 提供kernel版本号的主要目的是为了在initramfs中添加指定kernel的驱动模块, 此时mkinitramfs会把/lib/modules/${kernel_version}/目录下的一些启动会用到的模块添加到initramfs中.
 
 更新当前kernel的initramfs: `update-initramfs -u`
 
 > 在fedora/centos/rhel下面一般是用mkinitrd,而在Ubuntu/Debian下是用mkintramfs, 两者类似.
+
+或使用`update-initramfs -c -k 5.8.1 -v`, `5.8.1`是kernel_version在`/lib/modules`下的文件夹名, **已测试**.
+
+#### build initramfs by busybox
+通常使用轻量级的busybox来制作initramfs, 查看其使用的libc版本:
+1. 以qemu+kernel+initrd的方式进入initramfs
+1. `find / -name "libc*"
+1. 执行找到的`/usr/lib/x86_64-linux-gun/libc.so.6`即可, 得到: "glibc 2.28.8"
+
+
+后续参考[busybox制作initramfs以及切换rootfs](https://blog.csdn.net/m0_38096844/article/details/97786761), 未测试.
 
 ## 制作linux 启动盘 by Syslinux
 Syslinux是一个启动加载器的集合, 包含了一系列的bootloaders, 用于引导启动os:
@@ -731,7 +747,19 @@ qemu test uefi+kernel: `qemu-system-x86_64 -enable-kvm -m 512 -kernel vmlinuz �
 
 建议内存最小是512M, 之前试过256M, 但卡在了uefi的界面.
 
-### .config配置
-```config
-CONFIG_EFI_VARS=n # from [Linux 内核中有关 UEFI 的配置选项](https://wiki.archlinux.org/index.php/Unified_Extensible_Firmware_Interface)
+### kernel panic - not syncing: No working init found.  Try passing init= option to kernel
+os: Deepin 20
+kernel: 5.4.50-amd64-desktop
+
+同台电脑的另一个kernel是正常的:  vmlinuz-5.3.0-3-amd64 + initrd.img-5.3.0-3-amd64
+
+将initrd.img-5.4.50-amd64-desktop解压后发现存在"main/init".
+
+通过`qemu-system-x86_64 -nographic -enable-kvm -m 512 -kernel vmlinuz-5.4.50-amd64-desktop -initrd initrd.img-5.4.50-amd64-desktop -append console=ttyS0`将日志输出到终端, 找到错误日志:
+```log
+[    2.000673] Run /init as init process
+[    2.001336] Failed to execute /init (error -2)
+...
 ```
+
+检查调试initramfs中的`${initramfs_uncompress}/main/init`即可.
