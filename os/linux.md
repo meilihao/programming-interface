@@ -566,6 +566,12 @@ root分区挂载的方式:
 
     这种方式不需要传入"root=XXX"，因为这个roofs是内核自带的，但是要保证其中填充了内容，特别是根目录要存在init程序. 如果根目录没有init程序，那么根目录会挂载失败，当然也可以通过传入"rdinit=/XXX"来指定其他的程序名，只要这个名字存在也同样能挂载rootfs. 如果initramfs是独立于kernel存在的cpio压缩包，那么同样需要initrd=addr,size来传递给内核
 
+### 构建根文件系统的工具
+- debian/ubuntu : debootstrap
+- fedora : febootstrap
+- LFS(linux form scratch)
+- busybox
+
 ### initramfs
 参考:
 - [initramfs](http://xstarcd.github.io/wiki/Linux/initramfs.html)
@@ -721,7 +727,7 @@ cpio 第四层
 linux启动时报该错, 是因为没有配置initrd/initramfs.
 
 ### 测试kernel是否可以启动
-qemu test uefi+kernel: `qemu-system-x86_64 -bios "/usr/share/ovmf/OVMF.fd" -enable-kvm -m 512 -kernel vmlinuz ［-initrd initrd.img]`
+qemu test uefi+kernel: `qemu-system-x86_64 -enable-kvm -m 512 -kernel vmlinuz ［-initrd initrd.img]`
 
 建议内存最小是512M, 之前试过256M, 但卡在了uefi的界面.
 
