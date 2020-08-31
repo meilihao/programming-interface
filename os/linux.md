@@ -459,6 +459,8 @@ make 选项:
     常用的解决竞争的方法是自旋锁和信号量.
 1. 要考虑可移植的重要性
 
+> 查看了[kernel releases](https://www.kernel.org/category/releases.html)的doc, 发现Longterm是以0.5 version的模式递增的.
+
 ### 提交kernel patch流程
 1. 在`.git/config`配置`sendemail`
 
