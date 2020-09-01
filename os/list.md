@@ -7,6 +7,10 @@
 1. [yifengyou/learn-linux](https://github.com/yifengyou/learn-linux)
 1. [os-elephant源码及学习笔记](https://github.com/yifengyou/os-elephant)
 
+实践:
+1. [从零开始制作 Linux](https://juejin.im/entry/6844903600305635335)
+1. [alfs_docker : 编译lfs-10.0-systemd](https://gitee.com/chenhao/alfs_docker)
+
 ## lib
 - [+深度剖析 Linux 共享库的“位置无关”实现原理](https://tinylab.org/shlib-pic/)
 
