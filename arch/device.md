@@ -126,3 +126,18 @@ Device-mapper-multipath显示映射到非持久标识符：`Host:Channel:Target:
      \_ 6:0:0:1 sdf 8:80  [active][undef]
 
 Device-mapper-multipath在系统上自动维护每个基于wwid的设备名称和其对应的/dev/sd名称的正确映射. 这些名称即使是在路径发生改变时也是持久的，并且当从不同的系统访问设备时它们仍然是一致的.
+
+## tty
+参考:
+- [Linux TTY/PTS概述](https://segmentfault.com/a/1190000009082089)
+
+```bash
+# toe -a # 查看支持的tty
+# tty # 查看当前终端绑定的tty
+/dev/pts/1
+# echo aaa > /dev/pts/1 # 往tty直接写入数据跟写标准输出是一样的效果
+aaa
+# stty -a # 查看当前tty的配置
+```
+
+当pts/1收到input的输入后，会检查当前前端进程组是哪一个，然后将输入放到进程组的leader的输入缓存中，这样相应的leader进程就可以通过read函数得到用户的输入. 因此这是有时看到`/proc/<pid>/fd/0 -> /dev/pts/1`, 但`echo aaa > /dev/pts/1`并不起作用的原因, 目前也没法方法跨pgid写pts.
