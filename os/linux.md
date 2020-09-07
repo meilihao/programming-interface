@@ -364,6 +364,8 @@ $ sudo make install
 
 1. 在[fedora buildsystem](https://koji.fedoraproject.org/koji/packageinfo?packageID=8)搜索kernel, 选择指定版本的kernel, 根据指定的Source, 比如`https://src.fedoraproject.org/rpms/kernel.git#426b17af14a269cc24d57e3d1346cd06ba40e98e`, 转到`https://src.fedoraproject.org/rpms/kernel/tree/426b17af14a269cc24d57e3d1346cd06ba40e98e`下载指定的config即可.
 
+1. 从[arch linux-headers](https://www.archlinux.org/packages/core/x86_64/linux-headers/)的构建仓库中获取.
+
 ##### .config配置
 ```config
 CONFIG_EFI_VARS=n # from [Linux 内核中有关 UEFI 的配置选项](https://wiki.archlinux.org/index.php/Unified_Extensible_Firmware_Interface)
@@ -765,3 +767,14 @@ kernel: 5.4.50-amd64-desktop
 ```
 
 检查调试initramfs中的`${initramfs_uncompress}/main/init`即可.
+
+### make modules_prepare用法
+```bash
+# mkdir /usr/src/linux-headers-5.8.7
+# cp .config /usr/src/linux-headers-5.8.7
+# cd ${KernelRoot}
+# make mrproper
+# make O=/usr/src/linux-headers-5.8.7 modules_prepare
+```
+
+make modules_prepare应在make之前执行, 问题是modules_prepare还是有include或软链接到${KernelRoot}, 具体处理方法可参考[5.8.7.arch1-1 PKGBUILD](https://github.com/archlinux/svntogit-packages/blob/packages/linux/trunk/PKGBUILD).
