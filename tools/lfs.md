@@ -2,6 +2,7 @@
 参考:
 - [Linux From Scratch SVN-20200815 中文翻译版](https://bf.mengyan1223.wang/lfs/zh_CN/)
 - [LCTT/LFS-BOOK](https://github.com/LCTT/LFS-BOOK)
+- [alfs_docker](https://github.com/meilihao/alfs_docker)
 
 > 编译过程不要随意关机或退出环境, 否则再次进入编译环境进行操作时会碰到未知错误.
 >
