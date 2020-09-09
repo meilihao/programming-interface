@@ -44,7 +44,12 @@ EOF
 # gcc -fdump-tree-cfg-graph  test.c # 仅生成cfg dot
 # gcc -fdump-tree-all-graph  test.c # 生成所有相关的dot
 # gcc -fdump-tree-original-graph  test.c
+# gcc -fdump-tree-original-raw  test.c # ast dump
 # gcc -fdump-tree-original-raw-graph  test.c # 同上区别???
+# gcc -fdump-tree-gimple  test.c # gimple dump
+# gcc -fdump-tree-cfg  test.c # cfg dump
+# gcc -fdump-rtl-expand  test.c # rtl dump
+# gcc -S test.c || objdump -d a.out # assembly dumps
 # dot -Tpng test.c.012t.cfg.dot -o test.c.012t.cfg.png # need `apt install graphviz`, 将文本格式描述的图转成真正的图. 文件名称中的cfg是指Control Flow Graph.
 # ll
 ...
