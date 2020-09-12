@@ -8,6 +8,8 @@
 
 ![在以太网上比较NVMe-oF Target和iSCSI Target](/misc/img/io/Image00099.jpg)
 
+Linux-IO Target(LIO)是linux原生实现了iscsi target, 是趋势.
+
 # multipath
 ```sh
 # yum install device-mapper-multipath -y
