@@ -1,4 +1,7 @@
 # iscsi
+参考:
+- [JohnHufferd-IP Storage Protocols-V3.pdf](/misc/pdf/JohnHufferd-IP Storage Protocols-V3.pdf)
+
 概念:
 - backstore(后端存储)：后端真正的存储设备（实物）
 - target(目标)：共享磁盘名（虚拟）
