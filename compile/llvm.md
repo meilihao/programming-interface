@@ -1,9 +1,11 @@
-# llvm
+# llvm 
+> llvm version: 10.0.1 from `clang -v`
+
 LLVM这个名字源于Lower Level Virtual Machine， 但这个项目并不局限于创建一个虚拟机， 它已经发展成为当今炙手可热的编译器基础框架.
 
 它是一系列紧密联系的底层工具链组件的统称（例如链接、编译、调试等）:
-- `clang-10 -v` : c/c++编译前端
-- `opt-10 --version` : 旨在IR级的优化器和分析器
+- `clang -v` : c/c++编译前端
+- `opt --version` : 旨在IR级的优化器和分析器
 
 	将LLVM源文件作为输入，对其运行指定的优化或分析，然后输出优化文件或分析结果. opt的功能取决于是否给出了-analyze选项
 
@@ -11,12 +13,12 @@ LLVM这个名字源于Lower Level Virtual Machine， 但这个项目并不局限
 	# opt –view-cfg const.bc
 	# opt -view-callgraph file.bc
 	```
-- llvm-dis-10 : 将LLVM位码解码成LLVM汇编码
-- llvm-as-10 : 将人工可读的LLVM IR文件（称为LLVM汇编码）转换为LLVM位码
-- llvm-link-10 : 将几个LLVM位码链接在一起，以产生一个包含所有输入的LLVM位码
-- llvm-mc-10 : 能够将汇编指令并生成诸如ELF、MachO和PE等对象格式的目标文件. 它也可以反汇编相同的对象，从而转储这些指令的相应的汇编信息和内部LLVM机器指令数据结构
-- lli-10 : LLVM IP的解释器和JIT编译器
-- llc-10 : 一个通过特定后端将LLVM位码转换成目标机器汇编语言文件或目标文件的工具, 可以通过传递参数来选择优化级别、打开调试选项以及启用或禁用特定于目标的优化
+- llvm-dis : 将LLVM位码解码成LLVM汇编码
+- llvm-as : 将人工可读的LLVM IR文件（称为LLVM汇编码）转换为LLVM位码
+- llvm-link : 将几个LLVM位码链接在一起，以产生一个包含所有输入的LLVM位码
+- llvm-mc : 能够将汇编指令并生成诸如ELF、MachO和PE等对象格式的目标文件. 它也可以反汇编相同的对象，从而转储这些指令的相应的汇编信息和内部LLVM机器指令数据结构
+- lli : LLVM IP的解释器和JIT编译器
+- llc : 一个通过特定后端将LLVM位码转换成目标机器汇编语言文件或目标文件的工具, 可以通过传递参数来选择优化级别、打开调试选项以及启用或禁用特定于目标的优化
 
 它的设计就是基于库的, 即一系列接口清晰的可重用库.
 
@@ -34,6 +36,7 @@ LLVM IR(Intermediate Representation, 中间码)是基于静态单赋值(Static S
 贯穿LLVM编译的各个阶段. 事实上， LLVM IR致力于成为一种足够底层的通用IR，只有这样， 高级语言的诸多特性才能够得以实现.
 
 > LLVM IR 被设计成在编译优化层用来做中间分析和转换的载体.
+> [DragonEgg(目测已停止,  It requires LLVM-3.3 and gcc 4.5 or newer)](https://dragonegg.llvm.org/)是一个GCC插件()， 它使得GCC能够使用LLVM优化器和代码生成器来取代GCC自己的优化器和代码生成器.
 
 ## opt
 ```bash
@@ -52,7 +55,7 @@ define i32 @caller() {
     ret i32 %A
 }
 EOF
-# opt-10 -S -instcombine testfile.ll -o output1.ll # 指令合并
+# opt -S -instcombine testfile.ll -o output1.ll # 指令合并
 # cat output1.ll 
 ; ModuleID = 'testfile.ll'
 source_filename = "testfile.ll"
@@ -69,7 +72,7 @@ define i32 @caller() {
   %A = call i32 @test(i32 123, i32 456)
   ret i32 %A
 }
-# opt-10 -S -deadargelim testfile.ll -o output2.ll # 进行无用参数消除（ dead-argument-elimination） 优化
+# opt -S -deadargelim testfile.ll -o output2.ll # 进行无用参数消除（ dead-argument-elimination） 优化
 # cat output2.ll 
 ; ModuleID = 'testfile.ll'
 source_filename = "testfile.ll"
@@ -112,8 +115,8 @@ int mult() {
     return c;
 }
 EOF
-$ clang-10 -emit-llvm -S multiply.c -o multiply.ll # 将C语言代码转换成LLVM IR, 可明白C语言代码是如何映射到LLVM IR的.
-$ clang-10 -cc1 -emit-llvm multiply.c -o multiply.ll2 # 或通过cc1生成IR
+$ clang -emit-llvm -S multiply.c -o multiply.ll # 将C语言代码转换成LLVM IR, 可明白C语言代码是如何映射到LLVM IR的.
+$ clang -cc1 -emit-llvm multiply.c -o multiply.ll2 # 或通过cc1生成IR
 ```
 
 工作原理:
@@ -133,7 +136,7 @@ define i32 @mult(i32 %a, i32 %b) #0 {
   ret i32 %1
 }
 EOF
-$ llvm-as-10 test.ll -o test.bc # 把test.ll文件的LLVM IR转为bitcode格式
+$ llvm-as test.ll -o test.bc # 把test.ll文件的LLVM IR转为bitcode格式
 ```
 
 工作原理:
@@ -147,7 +150,7 @@ llvm bitcode信息可参考[这里](http://llvm.org/docs/BitCodeFormat.html#abst
 
 ### 将LLVM bitcode转换为目标平台汇编码
 ```bash
-$ llc-10 test.bc -o test.s # 把LLVM bitcode转换为汇编码
+$ llc test.bc -o test.s # 把LLVM bitcode转换为汇编码
 $ cat test.s
 $ clang -S test.bc -o test2.s –fomit-frame-pointer # 或通过Clang从bitcode文件格式生成汇编码， 需要使用`-S`参数. 此时输出的test.s文件和之前样例的一样. 另外, 使用了fomit-framepointer参数， 是因为Clang默认不消除帧指针而llc却默认消除
 ```
@@ -159,7 +162,7 @@ llc命令把LLVM 输入编译为特定架构的汇编语言，如果我们在之
 
 ### 将LLVM bitcode转回为LLVM IR
 ```bash
-$ llvm-dis-10 test.bc -o test3.ll # 把bitcode文件转换为llvm ir
+$ llvm-dis test.bc -o test3.ll # 把bitcode文件转换为llvm ir
 ```
 
 工作原理
@@ -167,7 +170,7 @@ llvm-dis命令即是LLVM反汇编器, 它使用LLVM bitcode文件作为输入，
 
 ### 转换LLVM IR
 ```bash
-$ opt-10 -mem2reg -S multiply.ll -o multiply1.ll # 运行mem2reg Pass， 它会帮助我们明白C指令是如何映射到IR指令的
+$ opt -mem2reg -S multiply.ll -o multiply1.ll # 运行mem2reg Pass， 它会帮助我们明白C指令是如何映射到IR指令的
 ```
 
 工作原理
@@ -218,11 +221,11 @@ int main() {
     return num;
 }
 EOF
-$ clang-10 -emit-llvm -S test1.c -o test1.ll
-$ clang-10 -emit-llvm -S test2.c -o test2.ll
-$ llvm-as-10 test1.ll -o test1.bc
-$ llvm-as-10 test2.ll -o test2.bc
-$ llvm-link-10 test1.bc test2.bc -o output.bc # 使用llvm-link命令链接两个LLVM bitcode文件
+$ clang -emit-llvm -S test1.c -o test1.ll
+$ clang -emit-llvm -S test2.c -o test2.ll
+$ llvm-as test1.ll -o test1.bc
+$ llvm-as test2.ll -o test2.bc
+$ llvm-link test1.bc test2.bc -o output.bc # 使用llvm-link命令链接两个LLVM bitcode文件
 ```
 
 工作原理
@@ -239,3 +242,37 @@ number is 10
 
 工作原理
 lli工具命令执行LLVM bitcode格式程序， 它使用LLVM bitcode格式作为输入并且使用即时编译器（ JIT） 执行. 当然， 如果当前的架构不存在JIT编译器， 会用解释器执行. 如果lli能够采用JIT编译器， 那么它能高效地使用所有代码生成器参数， 如llc.
+
+## clang
+```bash
+$ cat << EOF > test.c
+#include<stdio.h>
+int main() {
+  printf("hello world\n");
+  return 0;
+}
+EOF
+$ clang test.c # 编译出可执行程序
+$ ./a.out
+$ cat << EOF > test.c
+#define MAX 100
+void func() {
+  int a[MAX];
+}
+EOF
+$ clang test.c -E # 通过添加`-E`参数, 用作预处理器
+# 1 "test.c"
+# 1 "<built-in>" 1
+# 1 "<built-in>" 3
+# 341 "<built-in>" 3
+# 1 "<command line>" 1
+# 1 "<built-in>" 2
+# 1 "test.c" 2
+
+void func() {
+  int a[100];
+}
+$ clang -cc1 test.c -ast-dump # 生成test.c文件的抽象语法树, 并输出到stdout
+$ clang test.c -S -emit-llvm -o - # 生成LLVM IR
+$ clang test.c -S -o - # 生成汇编
+```
