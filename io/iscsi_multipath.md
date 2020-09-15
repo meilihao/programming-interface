@@ -2,12 +2,13 @@
 参考:
 - [JohnHufferd-IP Storage Protocols-V3.pdf](/misc/pdf/JohnHufferd-IP Storage Protocols-V3.pdf)
 
-概念:
-- backstore(后端存储)：后端真正的存储设备（实物）
-- target(目标)：共享磁盘名（虚拟）
-        target共享名的要求：iqn规范
-            iqn规范 = iqn.yyyy-mm.主机域名反写:任意字串,  例: iqn.2018-02.com.example:data
-- lun(逻辑单元)：Logic Unit Number ，绑定、关联存储设备
+iscsi 架构基于客户/服务器模型，其主要功能是在TCP/IP网络上的主机系统（启动器initlator）和存储设备（目标 target） 之间进行大量的数据封装和可靠传输过程，此外，iscsi 提供了在IP网络封装SCSI命令，切运行在TCP上.
+
+ISCSI架构上分为服务端（target）与客户端（initiator）：
+- ISCSI target ：就是存储设备端，存放磁盘,RAID的设备或模拟的scsi设备等，目的在提供其他主机使用的磁盘
+- ISCSI initiator： 就是能够使用target的客户端，通常是服务器，只有装有iscsi initiator的相关功能后才能使用ISCSI target 提供的磁盘
+
+iscsi在传输数据的时候考虑了安全性，可以通过IPSEC 对流量加密，并且iscsi提供CHAP认证机制以及ACL访问控制，但是在访问iscsi-target的时候需要IQN（iscsi完全名称，区分唯一的initiator和target设备），格式iqn.年月.域名后缀(反着写)：[target服务器的名称或IP地址等形式].
 
 ![在以太网上比较NVMe-oF Target和iSCSI Target](/misc/img/io/Image00099.jpg)
 
