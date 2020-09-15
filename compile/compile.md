@@ -117,7 +117,6 @@ multstore:
 1. 反汇编使用的指令命名与gcc生成的汇编代码有差别: 它省略了很多指令的后缀`q`, 且給call和ret指令添加了`q`后缀.
 
 ## 交叉编译
-<<<<<<< HEAD
 参考:
 - [深入理解交叉编译(Cross Compile)](https://www.jianshu.com/p/62613863aed0)
 
