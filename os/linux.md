@@ -621,6 +621,7 @@ root分区挂载的方式:
 参考:
 - [initramfs](http://xstarcd.github.io/wiki/Linux/initramfs.html)
 - [用qemu运行一个小小Linux系统](https://my.oschina.net/u/3258476/blog/1550537)
+- [Build and run minimal Linux / Busybox systems in Qemu](https://gist.github.com/chrisdone/02e165a0004be33734ac2334f215380e)
 
 #### 缘由 : "鸡生蛋，还是蛋生鸡"的悖论
 bios和uefi携带的驱动有限, 只能识别有些种类的fs, 比如ext4, fat32等, 它们常用于efi, boot分区. 即bios/uefi可直接加载这里分区的内容.
