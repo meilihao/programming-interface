@@ -386,6 +386,41 @@ CONFIG_LOCALVERSION="-amd64-desktop" # kernel `make modules_install`时在`/lib/
 # sudo reboot
 ```
 
+##### [最简.config for v5.8.9](https://gist.github.com/chrisdone/02e165a0004be33734ac2334f215380e)
+运行`qemu-system-x86_64 -kernel arch/x86/boot/bzImage`
+
+```log
+$ make allnoconfig
+$ make menuconfig
+General setup ---> Initial RAM filesystem and RAM disk (initramfs/initrd) support ---> yes
+General setup ---> Configure standard kernel features ---> Enable support for printk ---> yes
+64-bit kernel ---> yes
+Executable file formats / Emulations ---> Kernel support for ELF binaries ---> yes
+Executable file formats / Emulations ---> Kernel support for scripts starting with #! ---> yes
+Device Drivers ---> Generic Driver Options ---> Maintain a devtmpfs filesystem to mount at /dev ---> yes
+Device Drivers ---> Generic Driver Options ---> Automount devtmpfs at /dev, after the kernel mounted the rootfs ---> yes
+Device Drivers ---> Character devices ---> Enable TTY ---> yes
+Device Drivers ---> Character devices ---> Serial drivers ---> 8250/16550 and compatible serial support ---> yes
+Device Drivers ---> Character devices ---> Serial drivers ---> Console on 8250/16550 and compatible serial port ---> yes
+File systems ---> Pseudo filesystems ---> /proc file system support ---> yes
+File systems ---> Pseudo filesystems ---> sysfs file system support ---> yes
+$ time make -j2 bzImage # 不到4m
+$ qemu-system-x86_64 -kernel arch/x86/boot/bzImage
+```
+
+最最精简的.config:
+```log
+$ make allnoconfig
+$ make menuconfig
+General setup ---> Configure standard kernel features ---> Enable support for printk ---> yes
+64-bit kernel ---> yes # 如果不需要64bit支持, 这个也可不要
+Device Drivers ---> Character devices ---> Enable TTY ---> yes
+$ time make -j2 bzImage # 不到4m
+$ qemu-system-x86_64 -kernel arch/x86/boot/bzImage
+```
+
+> `make tinyconfig`生成的bzImage, 没法用`qemu-system-x86_64 -kernel`运行
+
 #### 编译核心与核心模块
 - make vmlinux：未经压缩的核心
 - make modules：仅核心模块
@@ -585,6 +620,8 @@ root分区挂载的方式:
 ### initramfs
 参考:
 - [initramfs](http://xstarcd.github.io/wiki/Linux/initramfs.html)
+- [用qemu运行一个小小Linux系统](https://my.oschina.net/u/3258476/blog/1550537)
+- [Build and run minimal Linux / Busybox systems in Qemu](https://gist.github.com/chrisdone/02e165a0004be33734ac2334f215380e)
 
 #### 缘由 : "鸡生蛋，还是蛋生鸡"的悖论
 bios和uefi携带的驱动有限, 只能识别有些种类的fs, 比如ext4, fat32等, 它们常用于efi, boot分区. 即bios/uefi可直接加载这里分区的内容.
@@ -778,3 +815,16 @@ kernel: 5.4.50-amd64-desktop
 ```
 
 make modules_prepare应在make之前执行, 问题是modules_prepare还是有include或软链接到${KernelRoot}, 具体处理方法可参考[5.8.7.arch1-1 PKGBUILD](https://github.com/archlinux/svntogit-packages/blob/packages/linux/trunk/PKGBUILD).
+
+### CONFIG_PVH
+参考:
+- [QEMU 4.0 boots uncompressed Linux x86_64 kernel](https://stefano-garzarella.github.io/posts/2019-08-23-qemu-linux-kernel-pvh/)
+
+Prerequisites
+- QEMU >= 4.0
+- Linux kernel >= 4.21
+
+  CONFIG_PVH=y enabled
+  vmlinux uncompressed image
+
+`CONFIG_PVH=y`时`qemu-system-x86_64 -kernel vmlinux -nographic -append "console=ttyS0"`可运行, 否则`-kernel`必须使用bzImage.
