@@ -14,6 +14,8 @@ iscsi在传输数据的时候考虑了安全性，可以通过IPSEC 对流量加
 
 Linux-IO Target(LIO)是linux原生实现了iscsi target, 是趋势.
 
+iscsi数据包PDU格式见[这里](https://www.cnblogs.com/pipci/p/11622014.html).
+
 # multipath
 ```sh
 # yum install device-mapper-multipath -y
