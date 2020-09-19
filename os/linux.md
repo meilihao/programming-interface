@@ -311,7 +311,7 @@ $ sudo make install
 - fs：vfs和所支持的各种文件系统，如EXT、FAT、NTFS、JFFS2等
 - include：内核 API 级別头文件，与系统相关的头文件放置在 include/linux 子目录下
 - init：内核初始化代码著名的 stait_kemel() 就位于 init/main.c 文件中
-- ipc：进程间通信的代码
+- ipc：linux支持的进程间通信的实现
 - kernel：内核最核心的部分，包括进程调度、定时器等，而和平台相关的一部分代码放在 arch/*/kemel 目录下
 - lib：库文件代码
 - mm：内存管理代码，和平台相关的一部分代码放在arch/*/mm目录下
@@ -348,6 +348,8 @@ $ sudo make install
 - `make gconfig` : 基于gtk+的图形工具
 - `make xconfig` : 基于qt的图形工具
 - `make defconfig` : 使用本机arch对应的默认配置创建一个`.config`, 之后可用`make menuconfig`调整
+- `make allyesconfig` : 生成将所有设置项启用并静态链接到kernel的.config
+- `make allnoconfig` : 生成将允许范围内的设置项设为无效的.config
     
     每种arch的默认`.config`在`arch/<arch>/config/defconfig`
 
@@ -443,8 +445,6 @@ $ qemu-system-x86_64 -kernel arch/x86/boot/bzImage
 - help : 显示可以使用的make命令
 - tags : 生成tag文件, 可是vim等editor的tag jump功能可用(比如函数跳转), 便于源码浏览
 - cscope : 生成用于cscope的索引文件. cscope是基于字符界面的源码浏览器
-- allyesconfig : 生成将所有设置项启用并静态链接到kernel的.config
-- allnoconfig : 生成将允许范围内的设置项设为无效的.config
 - allmodconfig : 生成将所有能编为module的设置项设为m的.config
 - <dir> : 编译dir及其以下的所有文件
 - <dir>/<file>.o : 仅生成指定的目标文件
