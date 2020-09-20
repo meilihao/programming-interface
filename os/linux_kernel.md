@@ -5,6 +5,8 @@ init/main.c是kernel启动的起点, 但不像普通c程序那样入口是`main(
 
 start_kernel()分析:
 - [init_task](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L840) : [0号进程的task_strcut](https://elixir.bootlin.com/linux/v5.9-rc5/source/include/linux/sched/task.h#L48), 具体实现在[init/init_task.c](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/init_task.c#L64)
+
+	[init_task最终会变成idle进程](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L708).
 - [trap_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L890) : 中断向量的初始化
 - [mm_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L891) : 内存管理的初始化
 - [sched_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L903) : 调度模块的初始化
