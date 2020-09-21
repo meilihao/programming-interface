@@ -828,3 +828,36 @@ Prerequisites
   vmlinux uncompressed image
 
 `CONFIG_PVH=y`时`qemu-system-x86_64 -kernel vmlinux -nographic -append "console=ttyS0"`可运行, 否则`-kernel`必须使用bzImage.
+
+### 关于Linux编译优化几个必须掌握的姿势
+Linux内核如果用O0编译，是无法编译过的，Linux的内核编译，要么是O2，要么是Os，这点从Linux的Makefile里面可以看出.
+
+> kernel用O0编译不过，是因为kernel本身也没有想用O0能够编译过，它的设计里面包含了编译会优化的假想.
+
+```makefile
+ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+KBUILD_CFLAGS += -O2
+else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
+KBUILD_CFLAGS += -O3
+else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
+KBUILD_CFLAGS += -Os
+endif
+```
+
+O2倾向于基于速度的优化，Os倾向于基于size更小的优化, O3目前社区不推荐.
+```bash
+$ gcc -c -Q -O2 --help=optimizers > /tmp/O2-opts
+$ gcc -c -Q -Os --help=optimizers > /tmp/Os-opts
+$ meld /tmp/O2-opts /tmp/Os-opts 
+```
+
+就2项有差别. O2和Os都使能了inline small函数和called once的函数，但是O2里面-finline-functions是关闭的,而Os里面是开的; O2里面optimize-strlen是开的，Os里面这个选项是关闭的. 相关选项的含义可以通过"man gcc"查看.
+
+
+> 如果在全局优化的情况下，想针对某个局部避免优化，可以尝试用noinline，__attribute__((optimize("O0")))等进行外科手术式地调整.
+
+#### 去掉编译内核的优化选项
+1. 上面优化的位置替换成`KBUILD_CFLAGS    += -O1`, 只做基本的优化
+1. .config
+
+    Kernel hacking -> Compile-time checks and compiler options -> Enable full Section mismatch analysis = y : CONFIG_DEBUG_SECTION_MISMATCH这个宏本来是检测代码/数据段类型属性不匹配的，定义后同时有个功能是禁止将只有一个地方调用的函数变为inline函数
