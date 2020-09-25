@@ -8,6 +8,8 @@ start_kernel()分析:
 
 	[init_task最终会变成idle进程](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L708).
 - [trap_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L890) : 中断向量的初始化
+
+	其中的[cpu_init()](https://elixir.bootlin.com/linux/v5.9-rc6/source/arch/x86/kernel/traps.c#L1082) -> [syscall_init()](https://elixir.bootlin.com/linux/v5.9-rc6/source/arch/x86/kernel/cpu/common.c#L1902) -> [wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64)](https://elixir.bootlin.com/linux/v5.9-rc5/source/arch/x86/kernel/cpu/common.c#L1705)设置了syscall(即内嵌汇编中的syscall指令)的入口[entry_SYSCALL_64](https://elixir.bootlin.com/linux/v5.9-rc5/source/arch/x86/entry/entry_64.S#L95)
 - [mm_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L891) : 内存管理的初始化
 - [sched_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L903) : 调度模块的初始化
 - [arch_call_rest_init()](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/main.c#L1048) : 0号进程, 它创建了1号进程init和其他一些服务进程
