@@ -18,6 +18,11 @@ struct task_struct *group_leader;
 ```
 任何一个进程,如果只有主线程,那pid是自己,tgid是自己,group_leader指向的还是自己; 但如果一个进程创建了其他线程, 那么线程有自己的pid,tgid就是进程的主线程的pid,group_leader指向的就是进程的主线程.
 
+### `struct list_head		tasks;`
+用于管理进程数据结构的双向链表`[struct list_head](https://elixir.bootlin.com/linux/v5.9-rc6/source/include/linux/types.h#L178) tasks`是一个很关键的进程链表.
+
+struct list_head tasks 把所有的进程用双向链表链起来. 双向链表的第一个节点为 [init_task](https://elixir.bootlin.com/linux/v5.9-rc5/source/init/init_task.c#L64).
+
 ### signal处理
 ```c
 // task_struct 中关于信号处理的字段
@@ -96,8 +101,12 @@ TASK_RUNNING并不是说进程正在运行, 而是`运行中+在运行队列中�
 	进程在睡眠(即被阻塞), 等待某些条件达成. 一旦这些条件达成, kernel就会把进程状态设置为TASK_RUNNING. 处于此状态的进程会被信号唤醒而随时准备投入运行.
 
     **这是一种浅睡眠的状态,虽然在睡眠,等待I/O完成, 进程被信号唤醒后,不是继续刚才的操作,而是进行信号处理**. 当然也可以根据自己的意愿,来写信号处理函数,例如收到某些信号,就放弃等待这个I/O操作完成,直接退出,也可收到某些信息,继续等待
+
+    > 可以被信号和wake_up()唤醒
 - TASK_UNINTERRUPTIBLE ,不可中断的睡眠状态
     这是一种深度睡眠状态,**不可被信号唤醒**,只能死等I/O操作完成. 一旦I/O操作因为特殊原因不能完成,这个时候,谁也叫不醒这个进程了(kill本身也是一个信号,既然这个状态不可被信号唤醒,kill信号也被忽略了).除非重启电脑,没有其他办法. 因此,这其实是一个比较危险的事情,除非极其有把握,不然还是不要设置成该状态.
+
+    > 只能被wake_up()唤醒
 
 于是就有了一种新的进程睡眠状态,TASK_KILLABLE,可以终止的新睡眠状态. 进程处于这种状态中,它的运行原理类似TASK_UNINTERRUPTIBLE,只不过可以响应致命信号.从定义可以看出,TASK_WAKEKILL用于在接收到致命信号时唤醒进程,而TASK_KILLABLE相当于这两位都设置了.
 
@@ -301,6 +310,8 @@ cap_ambient是比较新加入内核的,就是为了解决cap_inheritable鸡肋�
 struct mm_struct *mm; // 进程的虚拟地址空间, 含用户态的页表结构.
 struct mm_struct *active_mm;
 ```
+
+`struct mm_struct`是和进程地址空间、内存管理相关的数据结构. 每个进程都有若干个数据段、代码段、堆栈段等，它们都是由这个数据结构统领起来的.
 
 大多数计算机上系统的全部虚拟地址空间分为两个部分: 供用户态程序访问的虚拟地址空间和供内核访问的内核空间. 每当内核执行上下文切换时, 虚拟地址空间的用户层部分都会切换, 以便当前运行的进程匹配, 而内核空间不会放生切换.
 
@@ -3574,6 +3585,9 @@ void				*stack; // 内核栈
 /* CPU-specific state of this task: */
 struct thread_struct		thread; // 在 Linux 中，真的参与进程切换的寄存器很少，主要的就是栈顶寄存器. 于是，在 task_struct 里面保留了要切换进程的时候需要修改的寄存器
 ```
+
+[struct thread_struct](https://elixir.bootlin.com/linux/v5.9-rc5/source/arch/x86/include/asm/processor.h#L489)是用来保存进程上下文中 CPU 相关的一些状态信息的数据结构, 在进程切换
+时起着很重要的作用.
 
 #### 用户态函数栈
 在用户态中,程序的执行往往是一个函数调用另一个函数(通过指令跳转), 函数调用都是通过栈来进行的.
