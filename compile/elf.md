@@ -39,7 +39,7 @@ typedef struct elf64_hdr {
   Elf64_Half e_phnum;     // Number of program headers
   Elf64_Half e_shentsize; // Size of section headers
   Elf64_Half e_shnum;     // Number of section headers
-  Elf64_Half e_shstrndx;  // Section header string table index
+  Elf64_Half e_shstrndx;  // Section header string table index // .shstrtab在段表中的下标
 } Elf64_Ehdr;
 ```
 
@@ -67,7 +67,7 @@ typedef struct elf64_shdr {
   Elf64_Off sh_offset;    /* Section file offset */ 如果该段存在于文件中, 则表示在文件中的偏移; 否则无意义, 比如对bss段
   Elf64_Xword sh_size;    /* Size of section in bytes */
   Elf64_Word sh_link;   /* Index of another section */
-  Elf64_Word sh_info;   /* Additional section information */
+  Elf64_Word sh_info;   /* Additional section information */ sh_link和sh_info仅在段类型是与链接相关的, 比如重定位表, 符号表等情况下有意义.
   Elf64_Xword sh_addralign; /* Section alignment */ 某些段对段地址对齐有要求, 即sh_addr % (2^sh_addralign) =0
   Elf64_Xword sh_entsize; /* Entry size if section holds table */ 某些段包含了一些固定大小的项, 比如符号表, 此时表示每个项的大小. 如果为0, 表示该段不包含固定大小的项
 } Elf64_Shdr;
@@ -75,6 +75,22 @@ typedef struct elf64_shdr {
 ```
 
 段名只在链接和编译中有意义, 但它不能真正地表示段的类型, 真正决定段属性的是[sh_type](https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/sections.html)和sh_flags.
+
+sh_type:
+- SHT_DYNAMIC, 0x6 : 动态链接信息. 一个目标文件应只有一个该节, 但是将来可以放宽此限制
+- SHT_DYNSYM,  0xb : 动态链接符号表. 当前目标文件可以具有SHT_SYMTAB类型的部分或SHT_DYNSYM类型的部分，但不能同时具有两者, 将来可能会放宽此限制
+- SHT_FINI_ARRAY,  0xf : 包含指向终止函数的指针数组, 数组中的每个指针都被视为无参数的过程，并且返回void
+- SHT_HASH,  0x5 : 一个符号哈希表. 当前一个目标文件应仅具有一个哈希表，但是将来可以放宽此限制
+- SHT_INIT_ARRAY,  0xe :  指向初始化函数的指针的数组，数组中的每个指针都被视为无参数的过程，并且返回void
+- SHT_NOBITS,  0x8 : 该段在文件中没有内容(比如.bss)，但与SHT_PROGBITS相似, 尽管本节不包含任何字节，但sh_offset成员包含概念性文件偏移量
+- SHT_NOTE,  0x7 : 包含以某种方式标记文件的信息
+- SHT_NULL,  0x0 : 无效段
+- SHT_PREINIT_ARRAY, 0x10 : 包含指向在所有其他初始化函数之前调用的函数的指针数组，数组中的每个指针都被视为无参数的过程，且返回值是空的
+- SHT_PROGBITS,  0x1 : 程序段, 即保存程序定义的信息，其格式和含义仅由程序确定. 数据段, 代码段都是这种类型
+- SHT_REL, 0x9 : 重定位表, 包含重定位信息, 没有显式加载项的重定位条目. 一个目标文件可能具有多个重定位部分
+- SHT_RELA,  0x4 :  重定位表, 包含重定位信息, 有显式加载项的重定位条目. 一个目标文件可能具有多个重定位部分
+- SHT_STRTAB,  0x3 : 字符串表, 一个目标文件可能具有多个字符串表节
+- SHT_SYMTAB,  0x2 : 符号表, 当前目标文件可以具有SHT_SYMTAB类型的部分或SHT_DYNSYM类型的部分，但不能同时具有两者, 将来可能会放宽此限制. 通常，SHT_SYMTAB提供用于链接编辑的符号，尽管它也可以用于动态链接. 作为完整的符号表，它可能包含许多动态链接不需要的符号.
 
 sh_flags会在`readelf -S xxx`的尾部显示:
 - alloc : 该段在进程空间需要分配空间
@@ -98,7 +114,27 @@ sh_flags会在`readelf -S xxx`的尾部显示:
     1. 部分立即数会直接存放在`.text`中
     1. 对于字符串常量，编译器会去掉重复的常量，让程序的每个字符串常量只有一份
     1. `.rodata`是在多个进程间是共享的，这可以提高空间利用率
-- .symtab:符号表,保存了符号信息, 可通过`readelf -s xxx`查看
+- .symtab:符号表,保存了符号信息, 基本信息可通过`readelf -s xxx`查看, 具体信息可通过`nm`或`readelf -s xxx`查看
+
+  在链接中, 将函数和变量统称为符号(symbol), 函数名和变量名是符号名(symbol name).
+  符号表中定义的每个符号有一个对应的值叫符号值. 对于变量和函数, 符号值就是它们的地址.
+
+  ```c
+  // https://elixir.bootlin.com/linux/v5.9-rc7/source/include/uapi/linux/elf.h#L193
+  typedef struct elf64_sym {
+    Elf64_Word st_name;   /* Symbol name, index in string tbl */ 符号名
+    unsigned char st_info;  /* Type and binding attributes */  符号类型和绑定信息(低4bit是类型, 高28bit是符号绑定信息)
+    unsigned char st_other; /* No defined meaning, 0 */ 未使用
+    Elf64_Half st_shndx;    /* Associated section index */ 符号所在的段
+    Elf64_Addr st_value;    /* Value of the symbol */ 符号值
+    Elf64_Xword st_size;    /* Associated symbol size */ 符号大小. 对于明确数据类型的符号, 该值为其大小. 0表示该符号大小为0或未知
+  } Elf64_Sym;
+  ```
+
+  符号绑定见[ELF64_ST_BIND](https://docs.oracle.com/cd/E19683-01/816-1386/chapter6-79797/index.html)
+  符号类型见[ELF64_ST_TYPE](https://docs.oracle.com/cd/E19683-01/816-1386/chapter6-79797/index.html)
+
+  符号修饰是为了防止符号名冲突. c++使用namespace解决多模块的符号冲突, `c++filt`可用于解析被修饰过的名称. c++中的`extern "C"`用于声明一个C的符号, 即其中的内容会当做c语言处理, 使用c语言的修改规则. `__cpluspulus`宏可以让声明同时兼容c和c++.
 - .strtab:用于存储elf文件中用到的各种字符串, 比如存储变量名，函数名, 是被`.symtab`引用的符号名称
 
     例如, `char* szPath="/root"`, `void func()`的变量名szPath和函数名func就存储在`.strtab`段.
@@ -110,7 +146,7 @@ sh_flags会在`readelf -S xxx`的尾部显示:
 - 以`.rec`开头的 sections 里面装载了需要重定位的符号
 
     - .rel.text : 针对`.text`段的重定位表，还有rel.data(针对data段的重定位表).
-- .rel.text : 用于链接过程，做完链接后会被删除
+- .rel.text : 针对".text"段的重定位表. 用于链接过程，做完链接后会被删除
 - .plt/.got : 动态链接的跳转表和全局入口.
 - .note.* : 编译器信息
 - .line : 调试时的行号表, 即源代码行号与编译后指令的对应表
