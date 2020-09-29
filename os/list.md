@@ -29,6 +29,8 @@
 - 操作系统概论(Operating Systems Comcepts)
 - 操作系统: 精髓与设计原理(Operating Systems: Internals and Design Principles)
 
+- [三言两语聊Kernel：从Linux到FreeBSD](http://laoar.github.io/blogs/325/)
+
 ## debug
 - [一文汇总Linux 系统动态追踪(高级调试)技术](http://news.eeworld.com.cn/mp/ymc/a85336.jspx)
 - [Linux内核调试方法总结](https://www.cnblogs.com/alantu2018/p/8997149.html)

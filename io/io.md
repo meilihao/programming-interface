@@ -180,6 +180,11 @@ SCSI磁盘路径在Linux上有3中表现方式:
 - server端使用`echo 1 > /sys/block/device-name/device/delete`删除磁盘
 - server端`echo 1 > /sys/class/scsi_device/h:c:t:l/device/delete`删除磁盘
 
+## 测速
+参考:
+- [Linux 下的 I/O 测试(fio、dd)](https://github.com/penglongli/blog/issues/72)
+- [性能测试](https://docs.ucloud.cn/uphost/io_uphost)
+
 ## FAQ
 ### Synchronized I/O file integrity completion和synchronized I/O data integrity completion
 SUSv3 定义的两种不同类型的同步 I/O 完成,二者之间的区别涉及用于描述文件的元数据(关于数据的数据).
