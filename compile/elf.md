@@ -23,33 +23,67 @@ ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 > ELF 规格也允许定义一个解释器(ELF 程序头部的 PT_INTERP 元素)来运行程序. 如果定义了解释器,内核则基于指定解释器可执行文件的各段来构建进程映像,转而由解释器负责加载和执行程序.
 
-ELF 文件的头是用于描述整个文件的. 这个文件格式在内核中有定义,分别为 `[struct elf32_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L244) 和 [struct elf64_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L221)`:
+ELF 文件的头(elf header)是用于描述整个文件的, 包含了描述整个文件的基本属性, 可通过`readelf -h xxx`查看. 这个文件格式在内核中有定义,分别为 `[struct elf32_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L244) 和 [struct elf64_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L221)`:
 ```c
 typedef struct elf64_hdr {
   unsigned char	e_ident[EI_NIDENT];	/* ELF "magic number" */
-  Elf64_Half e_type; // elf文件的类型
-  Elf64_Half e_machine;
-  Elf64_Word e_version;
+  Elf64_Half e_type; // elf文件的类型: DYN, 共享目标文件,比如.so; EXEC, 可执行文件; REL, 可重定位文件, 比如.o
+  Elf64_Half e_machine; // Machine
+  Elf64_Word e_version; // Version
   Elf64_Addr e_entry;		/* Entry point virtual address */ 虚拟地址,是这个程序运行的入口即_start符号的地址
   Elf64_Off e_phoff;		/* Program header table file offset */
   Elf64_Off e_shoff;		/* Section header table file offset */
   Elf64_Word e_flags;
-  Elf64_Half e_ehsize;
-  Elf64_Half e_phentsize;
-  Elf64_Half e_phnum;
-  Elf64_Half e_shentsize;
-  Elf64_Half e_shnum;
-  Elf64_Half e_shstrndx;
+  Elf64_Half e_ehsize;    // Size of this header
+  Elf64_Half e_phentsize; // Size of program headers
+  Elf64_Half e_phnum;     // Number of program headers
+  Elf64_Half e_shentsize; // Size of section headers
+  Elf64_Half e_shnum;     // Number of section headers
+  Elf64_Half e_shstrndx;  // Section header string table index
 } Elf64_Ehdr;
 ```
+
+elf Magic(`7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00`)解析:
+- 0x7f : elf标志
+- 0x454c46 : "elf"的ascii码
+- 0x01/0x02 : elf的class, 即32/64位
+- 0x01/0x02 : 字节序, 0x01表示小端
+- 0x01 : elf文件的主版本号
+- 后续的9个字节elf标准未定义, 一般用0填充, 或作为自定义的扩展标志
+
+> [elf标准, v1.2后未更新](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
 
 节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 [struct elf64_shdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L316)`
 
+```c
+typedef struct elf64_shdr {
+  Elf64_Word sh_name;   /* Section name, index in string tbl */ sh_name是段名在.shstrtab中的偏移量
+  Elf64_Word sh_type;   /* Type of section */
+  Elf64_Xword sh_flags;   /* Miscellaneous section attributes */
+  Elf64_Addr sh_addr;   /* Section virtual addr at execution */ 如果该段可以被加载, 则sh_addr为该段被加载后在进程地址空间中的虚拟地址
+  Elf64_Off sh_offset;    /* Section file offset */ 如果该段存在于文件中, 则表示在文件中的偏移; 否则无意义, 比如对bss段
+  Elf64_Xword sh_size;    /* Size of section in bytes */
+  Elf64_Word sh_link;   /* Index of another section */
+  Elf64_Word sh_info;   /* Additional section information */
+  Elf64_Xword sh_addralign; /* Section alignment */ 某些段对段地址对齐有要求, 即sh_addr % (2^sh_addralign) =0
+  Elf64_Xword sh_entsize; /* Entry size if section holds table */ 某些段包含了一些固定大小的项, 比如符号表, 此时表示每个项的大小. 如果为0, 表示该段不包含固定大小的项
+} Elf64_Shdr;
+
+```
+
+段名只在链接和编译中有意义, 但它不能真正地表示段的类型, 真正决定段属性的是[sh_type](https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/sections.html)和sh_flags.
+
+sh_flags会在`readelf -S xxx`的尾部显示:
+- alloc : 该段在进程空间需要分配空间
+- execute : 在进程空间可执行, 通常指代码段
+- write : 在进程空间可写
+
 文件的各section:
-- .init : 程序初始化入口代码，在main()之前运行
+- .init : 程序初始化代码段，在main()之前运行
+- .fini : 程序终结代码段
 - .text(代码段):放编译好的部分二进制可执行代码,比如各种函数, 进程代码段不仅包括`.text`, 还有`.init`, `.fini`等.
 
     这部分区域的大小在程序运行前就已经确定，并且内存区域通常属于只读，某些架构也允许代码段为可写，即允许修改程序.
@@ -65,10 +99,10 @@ typedef struct elf64_hdr {
     1. 对于字符串常量，编译器会去掉重复的常量，让程序的每个字符串常量只有一份
     1. `.rodata`是在多个进程间是共享的，这可以提高空间利用率
 - .symtab:符号表,保存了符号信息, 可通过`readelf -s xxx`查看
-- .strtab:存储变量名，函数名, 是被`.symtab`引用的符号名称
+- .strtab:用于存储elf文件中用到的各种字符串, 比如存储变量名，函数名, 是被`.symtab`引用的符号名称
 
     例如, `char* szPath="/root"`, `void func()`的变量名szPath和函数名func就存储在`.strtab`段.
-- .shstrtab: 用于保存section header中用到的字符串. bss,text,data等段名存储在这里
+- .shstrtab: 用于保存section header中的段名. bss,text,data等段名存储在这里
 - .comment :注释信息段
 - .node.GUN-stack :堆栈提示段
 - .debug: 一个调试符号表
@@ -77,10 +111,19 @@ typedef struct elf64_hdr {
 
     - .rel.text : 针对`.text`段的重定位表，还有rel.data(针对data段的重定位表).
 - .rel.text : 用于链接过程，做完链接后会被删除
+- .plt/.got : 动态链接的跳转表和全局入口.
+- .note.* : 编译器信息
+- .line : 调试时的行号表, 即源代码行号与编译后指令的对应表
+- .dynamic : 动态链接信息
+- .debug : 调试信息
 
 > .data与.bss没有本质区别, 都是用于存放静态变量, 只是.data是已初始化过的静态数据, 而.bss程序是运行时会分配空间并置零的静态数据.
 
 > static 声明的变量，无论它是全局变量还是在函数之中，只要是没有赋初值都存放在.bss段，如果赋了初值，则把它放在.data段.
+
+> elf文件中可能存在多个同名的段.
+
+> gcc允许通过`__attribute__((section("name")))`属性把相应的变量或函数放到以"name"作为段名的段中.
 
 ![.o文件的ELF](/misc/img/compile/1671100-20190512203047832-334199166.jpg)
 
