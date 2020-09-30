@@ -146,7 +146,7 @@ sh_flags会在`readelf -S xxx`的尾部显示:
 - 以`.rec`开头的 sections 里面装载了需要重定位的符号
 
     - .rel.text : 针对`.text`段的重定位表，还有rel.data(针对data段的重定位表).
-- .rel.text : 针对".text"段的重定位表. 用于链接过程，做完链接后会被删除
+- .rel.* : 比如.rel.text是针对".text"段的重定位表. 用于链接过程，做完链接后会被删除
 - .plt/.got : 动态链接的跳转表和全局入口.
 - .note.* : 编译器信息
 - .line : 调试时的行号表, 即源代码行号与编译后指令的对应表
