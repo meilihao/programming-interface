@@ -13,7 +13,7 @@ Linux内核是单内核（monolithic kernel），也就是所有的内核功能�
 ## doc
 - [The Linux Kernel的翻译](https://www.kernel.org/doc/html/latest/translations/zh_CN/index.html)
 
-## kernel git tree
+## [kernel git tree](https://www.kernel.org/category/releases.html)
 - mainline : 由Linus Torvalds亲自制作的内核发布版，是官方当前最新版本的kernel source
 - stable : 稳定分支
 - longterm : 长期维护分支
