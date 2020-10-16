@@ -2,6 +2,7 @@
 参考:
 - [太厉害了，终于有人能把TCP/IP协议讲的明明白白了](http://developer.51cto.com/art/201906/597961.htm)
 - [wireshark使用教程及过滤语法总结](https://www.zhoulujun.cn/html/theory/network/2016_1130_7908.html)
+- [以太网技术联盟宣布完成 800Gb 以太网规范](https://my.oschina.net/u/4313784/blog/3434387)
 
 ![全协议关系图](/misc/img/net/network_protocal_all.png)
 ![TCP/IP协议关系图](/misc/img/net/tcpip_protocal_r.png)
