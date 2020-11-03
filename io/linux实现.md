@@ -2,6 +2,8 @@
 ![io抽象层次](/misc/img/io/80e152fe768e3cb4c84be62ad8d6d07f.jpg)
 ![The Linux Storage Stack Diagram](/misc/img/io/The Linux Storage Stack Diagram.svg)
 
+virtio-scsi是一种新的半虚拟化SCSI控制器设备, 它是替代virtio-blk并改进其功能的KVM Virtualization存储堆栈的替代存储实现的基础.
+
 ## 用设备控制器屏蔽设备差异
 计算机系统里, CPU 并不直接和设备打交道，而是通过设备控制器（Device Control Unit）的组件中转.
 
