@@ -293,6 +293,7 @@ RAID 2.0（独立磁盘冗余数组2.0, Redundant Array of Independent Disks Ver
 > 华为有[raid 2.0+](http://www.learnfuture.com/article/1272)
 > [华为存储虚拟化解决方案](https://kkutysllb.cn/2019/05/29/2019-05-29-%E5%8D%8E%E4%B8%BA%E5%AD%98%E5%82%A8%E8%99%9A%E6%8B%9F%E5%8C%96%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88/)
 > [Linux原生的存储虚拟化软RAID和LVM](https://kkutysllb.cn/2019/06/09/2019-06-09-Linux%E5%8E%9F%E7%94%9F%E7%9A%84%E5%AD%98%E5%82%A8%E8%99%9A%E6%8B%9F%E5%8C%96%E8%BD%AFRAID%E5%92%8CLVM/)
+> [各RAID级别比较](https://support.huawei.com/enterprise/zh/doc/EDOC1000045885?section=j005)
 
 ### RAID 0
 ![](/misc/img/io/20160712135137243.png)
