@@ -1,7 +1,7 @@
 # task
 在 Linux 里面，无论是进程，还是线程，到了内核里面，统一都叫任务（Task），由一个统一的结构 [task_struct](https://elixir.bootlin.com/linux/latest/source/include/linux/sched.h#L632) 进行管理.
 
-task_struct即进程描述符(process descriptor)也叫进程控制块(PCB))存在任务队列(task list, 双向循环链表)中.
+task_struct即进程描述符(process descriptor)也叫进程控制块(PCB))存在任务队列(task list, 双向循环链表)中. 它包含描述该进程内存资源、文件系统资源、文件资源、tty 资源、信号处理等的指针.
 
 Linux下，进程与线程的最大不同是进程拥有独立的内存地址空间，而线程与其他线程共享内存地址空间. 除此之外，进程与线程的实现基本相同，都有task_struct结构，都被分配PID.
 
@@ -91,6 +91,8 @@ state:
 ```
 
 ![state 流转](/misc/img/task_state_change.png)
+
+![Linux进程状态转换](/misc/img/process/2020-11-12_18-03-09.png)
 
 TASK_RUNNING并不是说进程正在运行, 而是`运行中+在运行队列中等待执行`. 当处于这个状态的进程获得时间片的时候,就是在运行中;如果没有获得时间片,就说明它被其他进程抢占了,在等待再次分配时间片. 
 
@@ -3957,7 +3959,7 @@ env: glibc 2.31
 
 ![](/misc/img/process/14635b1613d04df9f217c3508ae8524b.jpeg)
 
-创建一个线程调用的是 pthread_create.
+创建一个线程调用的是 pthread_create, 本质是kernel创建一个新的task_struct, 并将新struct的所有资源指针都指向创建它的那个task_struct的资源指针.
 
 其实，线程不是一个完全由内核实现的机制，它是由内核态和用户态合作完成的. pthread_create 不是一个系统调用，是 Glibc 库的一个函数.
 

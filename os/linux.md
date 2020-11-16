@@ -167,7 +167,7 @@ $ sudo make install
 - certs : 认证相关
 - crypto：常用加密和散列算法（如AES、SHA等)，还有一些压缩和 CRC 校验算法
 - Documentation：内核各部分的通用解释和注释
-- drivers：设备驱动程序每个不同的驱动占用一个子目录，如 char、block、net、mtd、 i2c 等
+- drivers：设备驱动程序, 每个不同的驱动占用一个子目录，如 char、block、net、mtd、 i2c 等
 
     - accessibility – 可访问设备，目前里面包括盲人设备
     - acpi – 高级配置和电源管理接口
@@ -319,10 +319,13 @@ $ sudo make install
 - samples : 示例代码
 - scripts：用于配置和编译内核的脚本文件
 - security：linux安全模块,主要是一个 SELinux 的模块
-- sound：ALSA、OSS 音频设备的驱动核心代码和常用设备驱动
+- sound：ALSA、OSS(已淘汰) 音频设备的驱动核心代码和常用设备驱动
 - tools : 在linux开发中有用的工具
 - usr：实现用于打包和压缩的 cpio 等
 - virt : 虚拟化基础结构
+
+内核一般要做到 drivers 与 arch 的软件架构分离,驱动中不包含板级信息,让驱动跨平
+台. 同时内核的通用部分(如 kernel、 fs、 ipc、 net 等)则与具体的硬件(arch 和 drivers)剥离.
 
 ### 配置kernel
 > Kconfig,Makefile,.config的关系: Kconfig是编译选项的配置菜单, 配置好的结果就是.config, Makefile根据.config编译kernel.
@@ -360,6 +363,19 @@ $ sudo make install
 > 当前系统所用的kernel config在`/boot`里, 比如`/boot/config-4.19.0-8-amd64`
 
 测试内核启动: `qemu-system-x86_64 -kernel  /home/chen/test/mnt/lfs/boot/vmlinuz-5.8.1-lfs-10.0-systemd-rc1 -initrd ../rootfs.gz -append "rw root=/dev/ram0  ramdisk_size=40960"`, 这里的root是指最终的根文件系统, `../rootfs.gz`为当前系统的`/boot/initrd.img`.
+
+
+运行 make menuconfig 等时,配置工具首先分析与体系结构对应的 /arch/xxx/Kconfig 文件(xxx 即为传入的 ARCH 参数),/arch/xxx/Kconfig 文件中除本身包含一些与体系结构相关
+的配置项和配置菜单以外,还通过 source 语句引入了一系列 Kconfig 文件,而这些 Kconfig又可能再次通过 source 引入下一层的 Kconfig, 配置工具依据 Kconfig 包含的菜单和条目即可
+描绘出一个分层结构.
+
+> 用Kconfig配置脚本和Makefile脚本编写的更详细信息,可以分别参见内核文档Documentation 目录内的 kbuild 子目录下的 Kconfig-language.txt 和 Makefiles.txt 文件.
+
+#### 在 Linux 内核中增加程序
+在 Linux 内核中增加程序需要完成以下 3 项工作:
+1. 将编写的源代码复制到 Linux 内核源代码的相应目录中。
+1. 在目录的 Kconfig 文件中增加关于新源代码对应项目的编译配置选项。
+1. 在目录的 Makefile 文件中增加对新源代码的编译条目
 
 #### 获取最新kernel的config
 1. 在[ubuntu kernel网站](https://kernel.ubuntu.com/~kernel-ppa/mainline/)选择指定的kernel并下载其header安装包, 然后解压, 再找到`usr/src/linux-headers-${kernel_version}-generic/.config`即可.

@@ -6,6 +6,8 @@
 - [Virtio网络的演化之路](https://cloud.tencent.com/developer/article/1540284)
 - [详解vhost-user协议及其在OVS DPDK、QEMU和virtio-net驱动中的实现](http://www.jeepxie.net/article/378987.html)
 - [Vhost-user详解](https://www.jianshu.com/p/ae54cb57e608)
+- [UCloud云盘是全链路的改造: client端用了VHOST，网络端用RDMA，后端提交用SPDK - UCan下午茶武汉站，为你全面挖宝分布式存储](http://www.ciotimes.com/index.php?m=content&c=index&a=app_show&catid=67&id=163237)
+- [基于SPDK的UDisk全栈优化](/misc/pdf/io/02_Presentation_06_Full_Stack_Optimization_for_Udisk_with_SPDK_UCloud_Yutian.pdf)
 
 vhost是一种 virtio 高性能的后端驱动实现. 原有virtio后端驱动的i/o要进过vmm(qemu)和host kernel, 但它进一步缩短了i/o路径, 不再经过vmm.
 
