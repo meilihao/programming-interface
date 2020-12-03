@@ -3,13 +3,16 @@
 - [Linux超能力BPF技术介绍及学习分享](https://www.tuicool.com/articles/eAfEvia)
 - [BPF社区和生态](https://mp.weixin.qq.com/s?__biz=MzI3NzA5MzUxNA==&mid=2664608487&idx=1&sn=6f3ddadb16ffa71557b41907999d5261)
 
-BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此.
+BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
 
-目前BPF发展成了eBPF(extended Berkeley Packet Filter), 而原有的BPF被称为了cBPF(classic BPF, 目前基本已废弃, linux kernel只运行eBPF, 内核会将cBPF转成eBPF再执行). eBPF演进成为了一套通用执行引擎，提供可基于系统或程序事件高效安全执行特定代码的通用能力，通用能力的使用者不再局限于内核开发者. 其使用场景不再仅仅是网络分析，可以基于eBPF开发性能分析、系统追踪、网络优化等多种类型的工具和平台.
+> 原有的BPF被称为了cBPF(classic BPF, 目前基本已废弃, linux kernel只运行eBPF, 内核会将cBPF转成eBPF再执行). 
+
+eBPF演进成为了一套通用执行引擎，提供可基于系统或程序事件高效安全执行特定代码的通用能力，通用能力的使用者不再局限于内核开发者. 其使用场景不再仅仅是网络分析，可以基于eBPF开发性能分析、系统追踪、网络优化等多种类型的工具和平台.
 
 eBPF 由执行字节码指令、存储对象和辅助函数组成. eBPF字节码指令在内核执行前必须通过 BPF 验证器的验证，同时在启用 BPF JIT 模式的内核中，会直接将字节码指令转成内核可执行的本地指令运行，具有很高的执行效率.
 
 ![](/misc/img/net/640.webp)
+![eBPF注入位置](/misc/img/net/eeuMjee.webp)
 
 BPF优势:
 - 强安全：BPF验证器（verifier）会保证每个程序能够安全运行，它会去检查将要运行到内核空间的程序的每一行是否安全可靠，如果检查不通过，它将拒绝这个程序被加载到内核中去，从而保证内核本身不会崩溃，这是不同于开发内核模块的. 比如以下几种情况是无法通过的BPF验证器的：
@@ -71,6 +74,8 @@ BPF技术虽然强大，但是为了保证内核的处理安全和及时响应�
     ![](/misc/img/net/eBPF_cilium.png)
     ![配合eBPF Map存储后端Pod地址和端口，实现高效查询和更新](/misc/img/net/cilium_pod.png)
 
+## bpf tools
+![](https://github.com/iovisor/bcc/blob/master/images/bcc_tracing_tools_2019.png)
 
 ## next net acl
 参考:
@@ -78,7 +83,7 @@ BPF技术虽然强大，但是为了保证内核的处理安全和及时响应�
 
 随着 eBPF 技术的快速发展，bpfilter 有望取代 iptables/nftables，成为下一代网络 ACL 的解决方案.
 
-XDP（eXpress Data Path）是基于 eBPF 实现的高性能、可编程的数据平面技术.
+XDP（eXpress Data Path）是基于 eBPF 实现的高性能、可编程的数据平面技术. 它能够在网络包进入用户态直接对网络包进行过滤或者处理.
 
 ![xdp架构](/misc/img/net/2M36Vbb.webp)
 
@@ -92,9 +97,26 @@ XDP 位于网卡驱动层, 当数据包经过 DMA 存放到 ring buffer 之后, 
 
 由于 XDP 位于整个 Linux 内核网络软件栈的底部, 能够非常早地识别并丢弃攻击报文, 具有很高的性能. 这为改善 iptables/nftables 协议栈丢包的性能瓶颈，提供了非常棒的解决方案.
 
-BPF（Berkeley Packet Filter）是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
+相对于DPDK，XDP具有以下优点:
+- 无需第三方代码库和许可
+- 同时支持轮询式和中断式网络
+- 无需分配大页
+- 无需专用的CPU
+- 无需定义新的安全网络模型
 
-![eBPF注入位置](/misc/img/net/eeuMjee.webp)
+XDP的使用场景包括:
+- DDoS防御
+- 防火墙
+- 基于XDP_TX的负载均衡
+- 网络统计
+- 复杂网络采样
+- 高速交易平台
 
 ACL 控制平面负责创建 eBPF 的 Program、Map，注入 XDP 处理流程中: 其中 eBPF 的 Program 存放报文匹配、丢包等处理逻辑，eBPF 的 Map 存放 ACL 规则.
 ![ACL 控制平面架构](/misc/img/net/mmqQ7fA.webp)
+
+## FAQ
+### funccount-bpfcc 'go:fmt.*'报"include/linux/compiler_types.h:210:24: note: expanded from macro 'asm_inline'"
+见[Missing support for asm_inline in Linux 5.4](https://github.com/iovisor/bcc/issues/2546)
+
+将bcc升级到v0.12.0及以上即可.
