@@ -877,3 +877,12 @@ $ meld /tmp/O2-opts /tmp/Os-opts
 1. .config
 
     Kernel hacking -> Compile-time checks and compiler options -> Enable full Section mismatch analysis = y : CONFIG_DEBUG_SECTION_MISMATCH这个宏本来是检测代码/数据段类型属性不匹配的，定义后同时有个功能是禁止将只有一个地方调用的函数变为inline函数
+
+### kernel里的头文件 asm 与 asm-generic
+asm的路径是 arch/xxx/include/asm/ -> /usr/include/x86_64-linux-gnu/asm
+asm-generic 的路径是 include/asm-generic/ -> /usr/include/asm-generic
+
+代码中包含asm/中的头文件，如果某一个架构没有自己特殊代码的话，其中会使用通用版本的头文件，即包含 asm-generic/里的对应.h文件; 否则使用`asm`include`asm-generic`的形式, 即代码中不会直接包含 asm-generic/ 里的.h文件.
+
+以x86_64为例:
+`#include <asm-generic/types.h>` in `/usr/include/x86_64-linux-gnu/asm/types.h`
