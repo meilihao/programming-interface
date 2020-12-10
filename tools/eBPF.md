@@ -6,7 +6,11 @@
 
 BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
 
-> 原有的BPF被称为了cBPF(classic BPF, 目前基本已废弃, linux kernel只运行eBPF, 内核会将cBPF转成eBPF再执行). 
+> 原有的BPF被称为了cBPF(classic BPF, 目前基本已废弃, linux kernel只运行eBPF, 内核会将cBPF转成eBPF再执行).
+
+> BPF CO-RE=`Compile Once – Run Everywhere`, 用于解决BPF可移植性问题, 使得一旦bpf程序成功编译并通过内核验证，那么它将在不同的内核版本之间正确工作，而无需为每个特定内核重新编译它.
+
+> 创建BTF(BPF类型格式)是为了替代更通用、更详细的简洁调试信息. BTF是一种节省空间、紧凑但仍具有足够表现力的格式，可以描述C程序的所有类型信息.
 
 eBPF演进成为了一套通用执行引擎，提供可基于系统或程序事件高效安全执行特定代码的通用能力，通用能力的使用者不再局限于内核开发者. 其使用场景不再仅仅是网络分析，可以基于eBPF开发性能分析、系统追踪、网络优化等多种类型的工具和平台.
 
