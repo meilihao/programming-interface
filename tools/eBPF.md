@@ -73,16 +73,100 @@ BPF技术虽然强大，但是为了保证内核的处理安全和及时响应�
 - eBPF 堆栈大小被限制在 MAXBPFSTACK，截止到内核 Linux 5.8 版本，被设置为 512. 目前没有计划增加这个限制，解决方法是改用 BPF Map，它的大小是无限的.
 - eBPF 字节码大小最初被限制为 4096 条指令，截止到内核 Linux 5.8 版本， 当前已将放宽至 100 万指令（ BPF_COMPLEXITY_LIMIT_INSNS），对于无权限的BPF程序，仍然保留4096条限制 ( BPF_MAXINSNS ).
 
+## [BPF 程序类型](https://elixir.bootlin.com/linux/v5.10/source/include/uapi/linux/bpf.h#L170)
+> **可通过`man 2 bpf`详细了解**.
+
+主要分为两类:
+- tracing
+
+    可方便地了解系统中正在发生的事情
+- networking
+
+    可以检查和处理系统中的网络流量
+
+具体分类(按添加到kernel的时间排序):
+1. BPF_PROG_TYPE_SOCKET_FILTER
+
+    仅允许出于可观察性目的访问数据包而无法修改
+1. BPF_PROG_TYPE_KPROBE
+
+    kprobes是可以动态附加到内核中某些调用点的函数, BPF kprobe程序类型允许将BPF程序用作kprobe处理程序.
+
+    > kprobes在内核中不是稳定的入口点，因此，需要确保kprobe BPF程序与使用的内核版本的兼容性
+
+    编写附加到kprobe的BPF程序时，需要决定是将其作为函数调用中的第一条指令执行还是在调用完成时执行, 即需要在BPF程序的标头中声明此行为.
+
+    例如，如果您要在内核调用exec syscall时检查参数，则可以在调用开始时附加程序, 此时需要在代码段开始处设置`SEC("kprobe/sys_exec")`; 如果要检查调用exec syscall的返回值，则需要在代码段开始处设置`SEC("kretprobe/sys_exec")`
+1. BPF_PROG_TYPE_TRACEPOINT
+
+    允许将BPF程序附加到内核提供的跟踪点处理程序. 跟踪点是内核代码库中的静态标记，可注入任意代码以进行跟踪和调试. 它们不如kprobes灵活，因为它们需要事先由内核定义，但是可以保证在将其引入内核后保持稳定. 当要调试系统时，可提供更高的可预测性. 系统中的所有跟踪点都在目录`/sys/kernel/debug/tracing/events`中定义. 一个有趣的事实是BPF声明了自己的跟踪点，因此可以编写检查其他BPF程序行为的BPF程序. BPF跟踪点在`/sys/kernel/debug/tracing/events/bpf`中定义.
+1. BPF_PROG_TYPE_XDP
+
+    可以编写在网络数据包到达内核的早期就执行的代码, 由于数据包是在早期执行的，因此对如何处理该数据包具有更高级别的控制.
+
+    XDP程序定义了几个可以控制的操作，这些操作可以决定如何处理数据包. XDP程序返回`XDP_PASS`意味着应该将数据包传递到内核中的下一个子系统; 返回`XDP_DROP`意味着内核应完全忽略此数据包，并且对其不执行任何其他操作; 返回`XDP_TX`意味着应将数据包转发回首先接收到数据包的网络接口卡（NIC）.
+
+    这种控制级别为网络层中许多有趣的程序打开了大门, 比如实现程序以保护网络免受DDoS攻击. XDP已成为BPF的主要组件之一.
+1. BPF_PROG_TYPE_PERF_EVENT
+
+    允许将BPF代码附加到Perf事件. Perf是内核中的性能分析器，它能够生成硬件和软件的性能数据. 可以使用它来监控许多事情，从计算机的CPU到系统上运行的任何软件, 当将BPF程序附加到Perf事件时，每次Perf生成可供分析的数据时，都将执行该代码.
+1. BPF_PROG_TYPE_CGROUP_SKB
+
+    允许将BPF逻辑附加到cgroup. 它们允许cgroup控制它们所包含的进程内的网络流量. 借助这些程序，可以在将网络数据包传递到cgroup中的进程之前决定如何处理它. 内核尝试传递到同一cgroup中任何进程的任何数据包都将通过每一个过滤器. 同时，可以决定cgroup中的进程通过该接口发送网络数据包时该怎么做. 它们的行为类似于 BPF_PROG_TYPE_SOCKET_FILTER 程序, 主要区别在于 BPF_PROG_TYPE_CGROUP_SKB 程序附加到cgroup内的所有进程，而不是特定进程；此行为适用于在给定cgroup中创建的当前套接字和将来的套接字. 附加到cgroup的BPF程序在容器环境中很有用，在容器环境中，进程组受cgroup约束，并且可以对所有进程应用相同的策略，而不必独立识别每个进程. Cillium广泛使用cgroup套接字程序将其策略应用于组而不是隔离的容器中.
+1. BPF_PROG_TYPE_CGROUP_SOCK
+
+    允许在cgroup中的任何进程打开网络套接字时执行代码. 此行为类似于附加到cgroup套接字缓冲区的程序，与其给访问通过网络的数据包的权限，不如控制进程打开新套接字时发生的情况. 这对于为可以打开套接字的程序组提供安全性和访问控制很有用，而不必分别限制每个进程的功能.
+1. BPF_PROG_TYPE_SOCK_OPS
+
+    当数据包在内核网络栈中的多个阶段传输时允许在运行时修改套接字连接选项. 它们附加到cgroup，就像 BPF_PROG_TYPE_CGROUP_SOCK 和 BPF_PROG_TYPE_CGROUP_SKB 一样，但是与这些程序类型不同，它们可以在连接的生命周期中多次调用.
+
+    当用这种类型创建一个BPF程序时，bpf函数调用将收到一个名为op的参数，该参数代表内核在套接字连接生命周期内时会执行的操作. 有了这些信息，就可以访问诸如网络IP地址和连接端口之类的数据，并且可以修改连接选项以设置超时并更改给定数据包的往返延迟时间.
+
+    例如，Facebook使用它为同一数据中心内的连接设置短恢复时间目标（RTO）. RTO是指系统或网络连接在这种情况下在出现故障后可以恢复的时间. 该参数还表示系统在遭受无法接受的后果之前可能无法使用多长时间. 以Facebook为例，它假设同一数据中心中的计算机应具有较短的RTO，而Facebook使用BPF程序修改此阈值.
+1. BPF_PROG_TYPE_SK_SKB
+
+    允许访问套接字映射和套接字重定向. 套接字映射允许保留对多个套接字的引用. 当拥有这些引用时，可以使用特殊的辅助函数将传入的数据包从套接字重定向到另一个套接字. 当要使用BPF实现负载平衡功能时，这很有用. 通过跟踪多个套接字，可以在它们之间转发网络数据包而无需离开内核空间. 诸如Cillium和Facebook的Katran之类的项目广泛使用了这类程序来进行网络流量控制.
+1. BPF_PROG_TYPE_CGROUP_DEVICE
+
+    允许在给定设备上执行cgroup中的操作. cgroupsv1 的第一个实现具有一种机制，允许为特定设备的设置权限. 但是，cgroupv2缺少此功能, 引入了此类程序以提供该功能. 同是使得在需要时可以更灵活地设置这些权限.
+1. BPF_PROG_TYPE_SK_MSG
+
+    允许控制msg是否应该被传递到套接字. 当内核创建套接字时，它将套接字存储在上述套接字映射中. 该映射使内核可以快速访问特定的套接字组. 当将套接字消息BPF程序附加到套接字映射时，发送到这些套接字的所有消息将在传递它们之前被程序过滤. 在过滤消息之前，内核会复制消息中的数据，以便开发者可以读取它并决定如何处理它. 这些程序有两个可能的返回值：SK_PASS和SK_DROP. 如果希望内核将消息发送到套接字，则使用第一个消息; 如果希望内核忽略消息而不将消息传递到套接字，则使用后一个消息.
+1. BPF_PROG_TYPE_RAW_TRACEPOINT
+
+    内核开发人员添加了一个新的跟踪点程序，以解决访问内核保留的原始格式的跟踪点参数的需求. 这种格式可以访问到有关内核正在执行的task的更多详细信息, 且它的性能开销很小. 大多数时候，开发者会希望在程序中使用常规跟踪点来避免这种性能开销，但是请记住，还可以在需要时使用原始跟踪点来访问原始参数.
+1. BPF_PROG_TYPE_CGROUP_SOCK_ADDR
+
+    当用户态程序受特定cgroup控制时，可以操纵它们附加到的IP地址和端口号. 在某些情况下，如果要确保一组特定的用户态程序使用相同的IP地址和端口，则系统使用多个IP地址。当将这些用户态程序放在同一cgroup中时，这些BPF程序可以灵活地操作这些绑定. 这样可以确保这些应用程序的所有传入和传出连接都使用BPF程序提供的IP和端口.
+1. BPF_PROG_TYPE_SK_REUSEPORT
+
+    SO_REUSEPORT 是内核中的一个选项，它允许将同一主机中的多个进程绑定到同一端口. 当需要在多个线程之间分配负载时，此选项可在接受的网络连接中提供更高的性能. 这类程序钩子到内核用来决定是否要重用端口的逻辑中. 如果BPF程序返回SK_DROP，则可以防止程序重用同一端口，并且当从这些BPF程序返回SK_PASS时，还可以通知内核遵循其自己的重用例程.
+1. BPF_PROG_TYPE_FLOW_DISSECTOR
+
+    分流器是内核的一个组件，从网络数据包到达系统开始到数据包传递到用户态程序的时间内，跟踪经过不同层的网络数据包. 它允许使用不同的分类方法来控制数据包的流向. 内核中的内置解剖器称为Flower classifier，防火墙和其他过滤设备使用它来决定如何处理特定的数据包. 这类程序设计为在流分解器路径中挂钩逻辑. 它们提供内置解剖器无法提供的安全性保证，例如确保程序始终终止，而内置解剖器可能无法保证. 这些BPF程序可以修改网络数据包在内核中遵循的流.
+1. 其他程序, 这些程序是用于指定领域的，其用法尚未为社区广泛采用.
+
+    1. 流量分类程序 （Traffic classifier programs）
+
+        BPF_PROG_TYPE_SCHED_CLS 和BPF_PROG_TYPE_SCHED_ACT 是两种BPF程序，可用于分类网络流量并修改套接字缓冲区中数据包的某些属性.
+    1. 轻量级隧道程序（Lightweight tunnel programs）
+
+        BPF_PROG_TYPE_LWT_IN，BPF_PROG_TYPE_LWT_OUT，BPF_PROG_TYPE_LWT_XMIT和BPF_PROG_TYPE_LWT_SEG6LOCAL是BPF程序的类型，可用于将代码附加到内核的轻量级隧道基础架构
+    1. 红外设备程序（Infrared device programs）
+
+        BPF_PROG_TYPE_LIRC_MODE2 程序允许通过连接将BPF程序附加到红外设备（例如遥控器）来获得乐趣
+
+
 ## BPF应用场景
 - cilium : Cilium是首款完全基于eBPF程序实现了kube-proxy的所有功能的K8S CNI网络插件，无需依赖iptables和IPVS.
 
     ![](/misc/img/net/eBPF_cilium.png)
     ![配合eBPF Map存储后端Pod地址和端口，实现高效查询和更新](/misc/img/net/cilium_pod.png)
 
-## bpf tools
+### bpf tools
 ![](https://github.com/iovisor/bcc/blob/master/images/bcc_tracing_tools_2019.png)
 
-## next net acl
+### next net acl
 参考:
 - [eBPF技术实践：高性能ACL](https://www.tuicool.com/articles/NZJjUbi)
 
