@@ -3,6 +3,7 @@
 - [Linux超能力BPF技术介绍及学习分享](https://www.tuicool.com/articles/eAfEvia)
 - [BPF社区和生态](https://mp.weixin.qq.com/s?__biz=MzI3NzA5MzUxNA==&mid=2664608487&idx=1&sn=6f3ddadb16ffa71557b41907999d5261)
 - [Libbpf-tools —— 让 Tracing 工具身轻如燕](https://pingcap.com/blog-cn/libbpf-tools/)
+- [kernel bpf examples](https://elixir.bootlin.com/linux/v5.10-rc7/source/samples/bpf)
 
 BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
 
@@ -11,6 +12,8 @@ BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网
 > BPF CO-RE=`Compile Once – Run Everywhere`, 用于解决BPF可移植性问题, 使得一旦bpf程序成功编译并通过内核验证，那么它将在不同的内核版本之间正确工作，而无需为每个特定内核重新编译它.
 
 > 创建BTF(BPF类型格式)是为了替代更通用、更详细的简洁调试信息. BTF是一种节省空间、紧凑但仍具有足够表现力的格式，可以描述C程序的所有类型信息.
+
+> 与运行时的BCC相比，libbpf + BPF CO-RE将内存开销减少了近9倍, 因为libbcc库包含一个庞大的LLVM或Clang库.
 
 eBPF演进成为了一套通用执行引擎，提供可基于系统或程序事件高效安全执行特定代码的通用能力，通用能力的使用者不再局限于内核开发者. 其使用场景不再仅仅是网络分析，可以基于eBPF开发性能分析、系统追踪、网络优化等多种类型的工具和平台.
 
@@ -164,18 +167,15 @@ BPF技术虽然强大，但是为了保证内核的处理安全和及时响应�
 这些是验证器在第一次检查期间可能拒绝您的代码的情形，要求有以下几个方面：
 
     1. 该程序不包含控制循环. 为确保程序不会陷入无限循环，验证程序会拒绝任何类型的控制循环. 已经提出了在BPF程序中允许循环的建议，但未知是否被社区采用.
-
     1. 该程序不会尝试执行超过内核允许的最大指令数的指令. 当前可执行的最大指令数为4,096, 此限制是为了防止BPF永远运行.
-
     1. 程序不包含任何无法访问的指令，例如从未执行过的条件或功能. 这样可以防止在VM中加载无效代码，这也会延迟BPF程序的终止.
-
     1. 该程序不会尝试越界
 
 1. 验证者执行的第二项检查是BPF程序的空运行. 这意味着验证器将尝试分析程序将要执行的每条指令，以确保它不会执行任何无效的指令. 此执行还将检查所有内存指针是否均已正确访问和取消引用. 最后，空运行向验证程序通知程序中的控制流，以确保无论程序采用哪个控制路径，它都会到达BPF_EXIT指令. 为此，验证程序会跟踪堆栈中所有访问过的分支路径，并在采用新路径之前对其进行评估，以确保它不会多次访问特定路径.
 
 经过这两项检查后，验证器认为程序可以安全执行.
 
-可使用bpf syscall调试验证bpf程序的检查, 使用该syscall加载程序时，可以设置几个属性，这些属性将使验证程序打印其操作日志：
+可使用bpf syscall调试(为用户态程序提供与内核中的eBPF进行交互的途径)验证bpf程序的检查, 使用该syscall加载程序时，可以设置几个属性，这些属性将使验证程序打印其操作日志：
 ```c
 // log_level字段告诉验证器是否打印任何日志. 如果将其设置为1，它将打印其日志；如果将其设置为0，它将不打印任何内容. 如果要打印验证程序日志，还需要提供日志缓冲区及其大小. 该缓冲区是一个多行字符串，可通过打印该字符串以检查验证器做出的决定.
 union bpf_attr attr = { 
@@ -189,6 +189,11 @@ union bpf_attr attr = {
 };
 
 bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
+```
+
+```c
+// cmd是eBPF支持的cmd，分为三类： 操作注入的代码、操作用于通信的map、前两个操作的混合
+int bpf(int cmd, union bpf_attr *attr, unsigned int size);
 ```
 
 ## BPF类型格式
@@ -210,11 +215,125 @@ BPF程序可以使用尾部调用来调用其他BPF程序. 这是一个强大的
     ![配合eBPF Map存储后端Pod地址和端口，实现高效查询和更新](/misc/img/net/cilium_pod.png)
 
 ### bpf tools
+参考:
+- [bcc开发](https://www.cnblogs.com/charlieroro/p/13265252.html)
+
 ![](https://github.com/iovisor/bcc/blob/master/images/bcc_tracing_tools_2019.png)
+
+Bcc是ebpf的编译工具集合，前端提供python/lua调用，本身通过c语言实现，集成llvm/clang，将ebpf代码注入kernel，提供一些更人性化的函数给用户使用.
+
+> bcc使用`BPF.get_kprobe_functions(b'blk_start_request')`函数校验kernel函数是否存在，其是在/proc/kallsyms中进行检查的，因为/proc/kallsyms保存了Linux内核符号表.
+
+bcc/tools列表:
+- argdist.py : 统计指定函数的调用次数、调用所带的参数等等信息，打印直方图
+- bashreadline.py : 获取正在运行的 bash 命令所带的参数
+- biolatency.py : 统计 block IO 请求的耗时，打印直方图
+- biosnoop.py : 打印每次 block IO 请求的详细信息
+- biotop.py : 打印每个进程的 block IO 详情
+- bitesize.py : 分别打印每个进程的 IO 请求直方图
+- bpflist.py : 打印当前系统正在运行哪些 BPF 程序
+- btrfsslower.py : 打印 btrfs 慢于某一阈值的 read/write/open/fsync 操作的数量
+- cachestat.py : 打印 Linux 页缓存 hit/miss 状况
+- cachetop.py : 分别打印每个进程的页缓存状况
+- capable.py : 跟踪到内核函数 cap_capable()（安全检查相关）的调用，打印详情
+- ujobnew.sh 跟踪内存对象分配事件，打印统计，对研究 GC 很有帮助
+- cpudist.py : 统计 task on-CPU time，即任务在被调度走之前在 CPU 上执行的时间
+- cpuunclaimed.py : 跟踪 CPU run queues length，打印 idle CPU (yet unclaimed by waiting threads) 百分比
+- criticalstat.py : 跟踪涉及内核原子操作的事件，打印调用栈
+- dbslower.py : 跟踪 MySQL 或 PostgreSQL 的慢查询
+- dbstat.py : 打印 MySQL 或 PostgreSQL 的查询耗时直方图
+- dcsnoop.py : 跟踪目录缓存（dcache）查询请求
+- dcstat.py : 打印目录缓存（dcache）统计信息
+- deadlock.py : 检查运行中的进行可能存在的死锁
+- execsnoop.py : 跟踪新进程创建事件
+- ext4dist.py : 跟踪 ext4 文件系统的 read/write/open/fsyncs 请求，打印耗时直方图
+- ext4slower.py : 跟踪 ext4 慢请求
+- filelife.py : 跟踪短寿命文件（跟踪期间创建然后删除）
+- fileslower.py : 跟踪较慢的同步读写请求
+- filetop.py : 打印文件读写排行榜（top），以及进程详细信息
+- funccount.py : 跟踪指定函数的调用次数，支持正则表达式
+- funclatency.py : 跟踪指定函数，打印耗时
+- funcslower.py : 跟踪唤醒时间（function invocations）较慢的内核和用户函数
+- gethostlatency.py : 跟踪 hostname 查询耗时
+- hardirqs.py : 跟踪硬中断耗时
+- inject.py :
+- javacalls.sh
+- javaflow.sh
+- javagc.sh
+- javaobjnew.sh
+- javastat.sh
+- javathreads.sh
+- killsnoop.py : 跟踪 kill()系统调用发出的信号
+- llcstat.py : 跟踪缓存引用和缓存命中率事件
+- mdflush.py : 跟踪 md driver level 的 flush 事件
+- memleak.py : 检查内存泄漏
+- mountsnoop.py : 跟踪 mount 和 unmount 系统调用
+- mysqld_qslower.py : 跟踪 MySQL 慢查询
+- nfsdist.py : 打印 NFS read/write/open/getattr 耗时直方图
+- nfsslower.py : 跟踪 NFS read/write/open/getattr 慢操作
+- nodegc.sh 跟踪高级语言（Java/Python/Ruby/Node/）的 GC 事件
+- offcputime.py : 跟踪被阻塞的进程，打印调用栈、阻塞耗时等信息
+- offwaketime.py : 跟踪被阻塞且 off-CPU 的进程
+- oomkill.py : 跟踪 Linux out-of-memory (OOM) killer
+- opensnoop.py : 跟踪 open()系统调用
+- perlcalls.sh
+- perlstat.sh
+- phpcalls.sh
+- phpflow.sh
+- phpstat.sh
+- pidpersec.py : 跟踪每分钟新创建的进程数量（通过跟踪 fork()）
+- profile.py : CPU profiler
+- pythoncalls.sh
+- pythoonflow.sh
+- pythongc.sh
+- pythonstat.sh
+- reset-trace.sh
+- rubycalls.sh
+- rubygc.sh
+- rubyobjnew.sh
+- runqlat.py : 调度器 run queue latency 直方图，每个 task 等待 CPU 的时间
+- runqlen.py : 调度器 run queue 使用百分比
+- runqslower.py : 跟踪调度延迟很大的进程（等待被执行但是没有空闲 CPU）
+- shmsnoop.py : 跟踪 shm*()系统调用
+- slabratetop.py : 跟踪内核内存分配缓存（SLAB 或 SLUB）
+- sofdsnoop.py : 跟踪 unix socket 文件描述符（FD）
+- softirqs.py : 跟踪软中断
+- solisten.py : 跟踪内核 TCP listen 事件
+- sslsniff.py : 跟踪 OpenSSL/GnuTLS/NSS 的 write/send 和 read/recv 函数
+- stackcount.py : 跟踪函数和调用栈
+- statsnoop.py : 跟踪 stat()系统调用
+- syncsnoop.py : 跟踪 sync()系统调用
+- syscount.py : 跟踪各系统调用次数
+- tclcalls.sh
+- tclflow.sh
+- tclobjnew.sh
+- tclstat.sh
+- tcpaccept.py : 跟踪内核接受 TCP 连接的事件
+- tcpconnect.py : 跟踪内核建立 TCP 连接的事件
+- tcpconnlat.py : 跟踪建立 TCP 连接比较慢的事件，打印进程、IP、端口等详细信息
+- tcpdrop.py : 跟踪内核 drop TCP 包或片（segment）的事件
+- tcplife.py : 打印跟踪期间建立和关闭的的 TCP session
+- tcpretrans.py : 跟踪 TCP 重传
+- tcpstates.py : 跟踪 TCP 状态变化，包括每个状态的时长
+- tcpsubnet.py : 根据 destination 打印每个 subnet 的 throughput
+- tcptop.py : 根据 host 和 port 打印 throughput
+- tcptracer.py : 跟踪进行 TCP connection 操作的内核函数
+- tplist.py : 打印内核 tracepoint 和 USDT probes 点，已经它们的参数
+- trace.py : 跟踪指定的函数，并按照指定的格式打印函数当时的参数值
+- ttysnoop.py : 跟踪指定的 tty 或 pts 设备，将其打印复制一份输出
+- vfscount.py : 统计 VFS（虚拟文件系统）调用
+- vfsstat.py : 跟踪一些重要的 VFS 函数，打印统计信息
+- wakeuptime.py : 打印进程被唤醒的延迟及其调用栈
+- xfsdist.py : 打印 XFS read/write/open/fsync 耗时直方图
+- xfsslower.py : 打印 XFS 慢请求
+- zfsdist.py : 打印 ZFS read/write/open/fsync 耗时直方图
+- zfsslower.py : 打印 ZFS 慢请求
+
 
 ### next net acl
 参考:
 - [eBPF技术实践：高性能ACL](https://www.tuicool.com/articles/NZJjUbi)
+- [从Bcc到xdp原理分析](https://kernel.taobao.org/2019/05/bcc_to_xdp/)
 
 随着 eBPF 技术的快速发展，bpfilter 有望取代 iptables/nftables，成为下一代网络 ACL 的解决方案.
 
@@ -255,3 +374,24 @@ ACL 控制平面负责创建 eBPF 的 Program、Map，注入 XDP 处理流程中
 见[Missing support for asm_inline in Linux 5.4](https://github.com/iovisor/bcc/issues/2546)
 
 将bcc升级到v0.12.0及以上即可.
+
+### ### build bcc
+```bash
+# # [get bcc code by see here](https://github.com/iovisor/bcc/blob/master/INSTALL.md#libbpf-submodule)
+sudo apt install apt-get install clang-11 lldb-11 lld-11 libclang-11-dev luajit libluajit-5.1-dev arping iperf netperf cmake bison flex
+cd <bcc_resource>
+mkdir bcc/build && cd bcc/build
+cmake ..
+make
+sudo make install # bcc会被安装在/usr/local/share/bcc(可使用`-DCMAKE_INSTALL_PREFIX=/usr`修改安装路径), 默认编译使用的是python2 binding(但也可能是根据/usr/bin/python进行推测)
+sudo ldconfig # 刷新`.so` cache
+sudo /usr/local/share/bcc/tools/tcpconnect # 执行bcc tools验证bcc. 需要`sudo ldconfig`, 避免执行时报`OSError: libbcc.so.0: cannot open shared object file: No such file or directory`
+cmake -DPYTHON_CMD=python3 .. # build python3 binding
+pushd src/python/
+make
+sudo make install
+popd
+ls -l /usr/bin/python
+sudo ln -s -f $(which python3) /usr/bin/python
+sudo PYTHONPATH=/usr/local/lib/python3/dist-packages ./tcptop -C 1 3 # 因为安装在`/usr/local/lib/python3`的原因需要添加PYTHONPATH, 应该可通过DCMAKE_INSTALL_PREFIX修正或使用`sudo mv /usr/local/lib/python3/dist-packages/bcc* /usr/lib/python3/dist-packages`修正路径
+```
