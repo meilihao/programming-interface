@@ -321,7 +321,7 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 	1. 中断号
 	1. cpu接到该中断的数量
 	1. 最后列: 使用该中断的设备
-- kallsyms : 保存了Linux内核符号表, 可用于检查kernel函数是否存在. 例如bcc使用`BPF.get_kprobe_functions(b'xxx')`函数校验kernel函数是否存在就是基于它.
+- kallsyms : 保存了Linux内核符号表(也包含了已加载模块的符号表), 可用于检查kernel函数是否存在. 例如bcc使用`BPF.get_kprobe_functions(b'xxx')`函数校验kernel函数是否存在就是基于它.
 - kcore : 内核核心映像, gdb可以利用它查看当前内核的所有数据结构状态
 - key-users : 密钥保留服务文件
 - kmsg : 内核消息
