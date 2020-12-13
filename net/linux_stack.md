@@ -72,3 +72,11 @@ dropwatch是监控kernel的网络栈丢包的工具.
 # ip addr add 192.168.10.161/24 dev ens3
 # curl 192.168.10.161 # 能正常返回, 说明会生效
 ```
+
+### client ip 随机范围
+```bash
+# # from https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
+# cat /proc/sys/net/ipv4/ip_local_port_range
+32768   60999
+# cat /proc/sys/net/ipv4/ip_local_reserved_ports # 用于保留端口. TCP/IP协议栈从 ip_local_port_range 中随机选取源端口时，会排除该range
+```
