@@ -313,11 +313,11 @@ $ sudo make install
 - init：内核初始化代码著名的 stait_kemel() 就位于 init/main.c 文件中
 - ipc：linux支持的进程间通信的实现
 - kernel：内核最核心的部分，包括进程调度、定时器等，而和平台相关的一部分代码放在 arch/*/kemel 目录下
-- lib：库文件代码
+- lib：公用库文件代码, 比如红黑树和字符串操作. 因为glibc是封装kernel的syscall实现的, 因此kernel编程中没法使用它们
 - mm：内存管理代码，和平台相关的一部分代码放在arch/*/mm目录下
 - net：网络相关代码，实现各种常见的网络协议
 - samples : 示例代码
-- scripts：用于配置和编译内核的脚本文件
+- scripts：用于配置和编译内核的脚本文件, 比如运行`make menuconfig`配置kernel时, 由它们提供支持
 - security：linux安全模块,主要是一个 SELinux 的模块
 - sound：ALSA、OSS(已淘汰) 音频设备的驱动核心代码和常用设备驱动
 - tools : 在linux开发中有用的工具

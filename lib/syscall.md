@@ -3,6 +3,7 @@
 - [Linux 系统调用权威指南(2016)](http://arthurchiao.art/blog/system-call-definitive-guide-zh/) 翻译自[The Definitive Guide to Linux System Calls](https://blog.packagecloud.io/eng/2016/04/05/the-definitive-guide-to-linux-system-calls/)
 - [Linux系统分析实验（二）：Linux内核5.0系统调用处理过程](https://www.zybuluo.com/windmelon/note/1428811)
 - [为 Linux 添加系统调用](https://blog.gloriousdays.pw/2017/11/25/add-linux-system-call/)
+- [Searchable Linux Syscall Table for x86 and x86_64](https://filippo.io/linux-syscall-table/)或通过`man 2 syscalls`查看当前os支持的syscalls
 
 OS向程序提供的内核服务接口, 调用过程: 用户态 - 系统调用 - 保存寄存器 - 内核态执行系统调用 - 恢复寄存器 - 返回用户态，然后接着运行.
 
@@ -278,9 +279,6 @@ mkstemp()函数基于模板(模板参数采用路径名形式,其中最后 6 个
 tmpfile()函数会创建一个名称唯一的临时文件,并以读写方式将其打开(打开该文件时使用了 O_EXCL 标志,以防一个可能性极小的冲突).
 tmpfile()函数执行成功,将返回一个文件流供 stdio 库函数使用。文件流关闭后将自动删除临时文件.
 
-## gettimeofday()
-获取当前时间.
-
 ## pathconf()和 fpathconf()
 pathconf()和 fpathconf()之间唯一的区别在于对文件或目录的指定方式. pathconf()采用路
 径名方式来指定,而 fpathconf()则使用(之前已经打开的)文件描述符.
@@ -361,3 +359,136 @@ mmap可将fd从偏移offset开始长度为length的一块映射到内存区域�
 1. read/write进行寻址访问
 
 > mmap2()与mmap的区别是mmap2中文件的偏移以页为单位.
+
+## time
+### gettimeofday
+获取当前时间, 以timeval(从epoch到现在的秒数)和timezone结构体的形式返回. 它通过vDSO实现.
+
+```c
+// https://elixir.bootlin.com/linux/v5.10.2/source/arch/x86/entry/vdso/vclock_gettime.c#L17
+extern int __vdso_gettimeofday(struct __kernel_old_timeval *tv, struct timezone *tz);
+extern __kernel_old_time_t __vdso_time(__kernel_old_time_t *t);
+
+int __vdso_gettimeofday(struct __kernel_old_timeval *tv, struct timezone *tz)
+{
+	return __cvdso_gettimeofday(tv, tz);
+}
+
+int gettimeofday(struct __kernel_old_timeval *, struct timezone *)
+	__attribute__((weak, alias("__vdso_gettimeofday")));
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/arch/x86/include/asm/vdso/gettimeofday.h#L82
+static __always_inline
+long gettimeofday_fallback(struct __kernel_old_timeval *_tv,
+			   struct timezone *_tz)
+{
+	long ret;
+
+	asm("syscall" : "=a" (ret) :
+	    "0" (__NR_gettimeofday), "D" (_tv), "S" (_tz) : "memory");
+
+	return ret;
+}
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/kernel/time/time.c
+SYSCALL_DEFINE2(gettimeofday, struct __kernel_old_timeval __user *, tv,
+		struct timezone __user *, tz)
+{
+	if (likely(tv != NULL)) {
+		struct timespec64 ts;
+
+		ktime_get_real_ts64(&ts);
+		if (put_user(ts.tv_sec, &tv->tv_sec) ||
+		    put_user(ts.tv_nsec / 1000, &tv->tv_usec))
+			return -EFAULT;
+	}
+	if (unlikely(tz != NULL)) {
+		if (copy_to_user(tz, &sys_tz, sizeof(sys_tz)))
+			return -EFAULT;
+	}
+	return 0;
+}
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/kernel/time/timekeeping.c#L794
+/**
+ * ktime_get_real_ts64 - Returns the time of day in a timespec64.
+ * @ts:		pointer to the timespec to be set
+ *
+ * Returns the time of day in a timespec64 (WARN if suspended).
+ */
+void ktime_get_real_ts64(struct timespec64 *ts)
+{
+	struct timekeeper *tk = &tk_core.timekeeper;
+	unsigned int seq;
+	u64 nsecs;
+
+	WARN_ON(timekeeping_suspended);
+
+	do {
+		seq = read_seqcount_begin(&tk_core.seq);
+
+		ts->tv_sec = tk->xtime_sec;
+		nsecs = timekeeping_get_ns(&tk->tkr_mono);
+
+	} while (read_seqcount_retry(&tk_core.seq, seq));
+
+	ts->tv_nsec = 0;
+	timespec64_add_ns(ts, nsecs);
+}
+EXPORT_SYMBOL(ktime_get_real_ts64);
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/kernel/time/timekeeping.c#L379
+static inline u64 timekeeping_delta_to_ns(const struct tk_read_base *tkr, u64 delta)
+{
+	u64 nsec;
+
+	nsec = delta * tkr->mult + tkr->xtime_nsec; // 当前时间=上次更新时间xtime_nsec+ (上次更新时间到现在的时钟周期数delta) * 时钟频率
+	nsec >>= tkr->shift; // 各时钟源频率不同, kernel通过tkr->mult和tkr->shift提供时钟周期与纳秒的互转
+
+	/* If arch requires, add in get_arch_timeoffset() */
+	return nsec + arch_gettimeoffset();
+}
+
+static inline u64 timekeeping_get_ns(const struct tk_read_base *tkr)
+{
+	u64 delta;
+
+	delta = timekeeping_get_delta(tkr);
+	return timekeeping_delta_to_ns(tkr, delta);
+}
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/lib/vdso/gettimeofday.c#L323
+static __maybe_unused int
+__cvdso_gettimeofday(struct __kernel_old_timeval *tv, struct timezone *tz)
+{
+	return __cvdso_gettimeofday_data(__arch_get_vdso_data(), tv, tz);
+}
+
+// https://elixir.bootlin.com/linux/v5.10.2/source/lib/vdso/gettimeofday.c#L295
+static __maybe_unused int
+__cvdso_gettimeofday_data(const struct vdso_data *vd,
+			  struct __kernel_old_timeval *tv, struct timezone *tz)
+{
+
+	if (likely(tv != NULL)) {
+		struct __kernel_timespec ts;
+
+		if (do_hres(&vd[CS_HRES_COARSE], CLOCK_REALTIME, &ts))
+			return gettimeofday_fallback(tv, tz); // __NR_gettimeofday兜底
+
+		tv->tv_sec = ts.tv_sec;
+		tv->tv_usec = (u32)ts.tv_nsec / NSEC_PER_USEC;
+	}
+
+	if (unlikely(tz != NULL)) {
+		if (IS_ENABLED(CONFIG_TIME_NS) &&
+		    vd->clock_mode == VDSO_CLOCKMODE_TIMENS)
+			vd = __arch_get_timens_vdso_data();
+
+		tz->tz_minuteswest = vd[CS_HRES_COARSE].tz_minuteswest;
+		tz->tz_dsttime = vd[CS_HRES_COARSE].tz_dsttime;
+	}
+
+	return 0;
+}
+```
