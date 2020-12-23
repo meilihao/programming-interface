@@ -4,6 +4,7 @@
 - [Linux内核之ELF格式解析](https://mudongliang.github.io/2015/10/31/linuxelf.html)
 - [计算机那些事(4)——ELF文件结构](http://chuquan.me/2018/05/21/elf-introduce/)
 - [ELF文件格式](https://www.cntofu.com/book/114/Theory/ELF.md)
+- [**二进制文件是什么样的？**](https://www.tuicool.com/articles/QJBZ7br)
 
 ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
 

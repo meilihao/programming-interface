@@ -139,6 +139,9 @@ kernel通过组合来实现继承.
 
 缺少`MODULE_LICENSE`时, kernel加载时就会告警:`... no license`
 
+#### vermagic
+比如`modinfo zfs`输出的"vermagic: 5.4.0-58-generic SMP mod_unload". `5.4.0-58-generic`是内核版本信息, `SMP`即编译kernel时设置了`CONFIG_SMP=y`表示支持smp, 同理`mod_unload`即设置了`CONFIG_MODULE_UNLOAD=y`表示开启卸载模块相关的功能.
+
 ### 内核符号表
 内核符号表是内核内部各个功能模块之间互相调用的纽带，各个模块之间依赖这些函数调用进行通信.  各个功能模块必须要导出符号表才能被模块使用. 还有动态加载的模块的链接需求, 在加载时符号表是对内核其他部分描述本模块的最好方
 式. 加载的模块所导出的函数通过导出操作就可以被其他模块定位并调用.
@@ -173,3 +176,22 @@ tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的�
 `cat /proc/irq`的每个中断号下面的文件都可以进行中断亲和度的绑定, 将特定的进程绑定到特定的中断号上, 这样进程不容易被抢占.
 
 ## 特殊硬件框架
+- fpga : 驱动是XillyBus, 在用户空间设备名是`/dev/xillybus_*`
+- rtc : 时钟源, 设备是`/dev/rtc*`, rtc精度不高.
+
+	kernel提供一个通用的时钟抽象层`timerkeeper`, 它里面有一个clocksource的时钟源抽象封装, 可提供更高精度. 通过`cat /sys/devices/system/clocksource/clocksource0/available_clocksource或cat /sys/devices/system/clocksource/clocksource0/current_clocksource`查看当前可用的和正在使用的时钟源.
+
+## 特殊软件机制
+- UIO : 一种在用户端实现内核驱动的机制. 其在内核中有 UIO 模块，目前
+该模块只支持字符设备.
+
+	设备名是"/dev/uioX". 支持通过`/sys/class/uio/uioX`访问其配置.
+- VFIO : 用来取代UIO的框架, 允许用户端直接访问设备细节, 也就是说让用户端设备驱动成为可能.
+
+	其主要的工作原理是用户端可以配置 IOMMU(访问设备内存的机制, 原本是为虚拟化而设计的, 因为vm在用户态, 没法高效使用设备io内存), 从而向用户暴露 DMA, 使用这个驱动需要设备与os原来的驱动解绑.
+
+	因为新, 其目前还仅支持 PCI 设备的驱动访问(vfio-pci 模块). 另外对 CPU IOMMU实现了 x86, arm, PowerPC, 其他未知.
+
+	其用户端的设备文件是`/dev/vfio/N`, ，用户可以使用这个设备文件实现完全的设备驱
+	动程序，目前主要用途是虚拟机时的设备驱动透明访问.
+- SysRq : 处理特殊问题非常有效.
