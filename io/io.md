@@ -196,3 +196,91 @@ Synchronized I/O file integrity completion 是synchronized I/O data integrity co
 
 若内容发生变化的内核缓冲区在 30 秒内未经显式方式同步到磁盘上,则一条长期运行的
 内核线程pdflush会确保将其刷新到磁盘上, 规避缓冲区与相关磁盘文件内容长期处于不一致状态(以至于在系统崩溃时发生数据丢失)的问题. 文件/proc/sys/vm/dirty_expire_centisecs 规定了在 pdflush 刷新之前脏缓冲区必须达到的时间(单位: 毫秒). 位于同一目录下的其他文件则控制了 pdflush 操作的其他方面.
+
+## os刷盘延迟
+参考:
+- [Page Cache机制](http://mysql.taobao.org/monthly/2020/09/01/)
+
+应用写入drbd到cdp(by drbd)存在延迟, 且是os缓存了数据未进入drbd.
+```bash
+vm.dirty_background_bytes = 0 # 异步刷脏条件还可通过设置最高字节数而非比例触发. 如果设置bytes版本，则ratio版本将变为0，反之亦然
+vm.dirty_background_ratio = 10 # 触发文件系统异步刷脏的脏页占总可用内存的最高百分比，当脏页占总可用内存的比例超过该值，后台回写进程被触发进行异步刷脏
+vm.dirty_bytes = 0  # 同步刷脏条件还可通过设置最高字节数而非比例触发. 如果设置bytes版本，则ratio版本将变为0，反之亦然
+vm.dirty_expire_centisecs = 3000 # 这个参数指定了脏页多长时间后会被周期性刷脏。下次周期性刷脏时，脏页存活时间超过该值的页面都将被刷入磁盘. 这个参数调节可能意义不大:调小这个参数并不保证可以很快的把脏数据刷新下去，因为这里会有个IO拥塞问题, 如果在一个dirty_expire_centisecs周期内没有刷完脏数据就会导致这个参数失效了. 理想情况我们希望一个dirty_expire_centisecs刷完脏数据，但如果cached的脏数据较多或者磁盘较慢的时候就会导致IO拥塞问题. 一般使用默认值就好
+vm.dirty_ratio = 40 # 触发文件系统同步刷脏的脏页占总可用内存的最高百分比，当脏页占总可用内存的比例超过该值，生成新的写文件操作的进程会先执行刷脏
+vm.dirty_writeback_centisecs = 500 # 这个参数指定了多长时间唤醒一次刷脏进程，检查缓存并刷下所有可以刷脏的页面. 该参数设为零内核会暂停周期性刷脏. 单位是 0.01 秒
+vm.dirtytime_expire_seconds = 43200
+```
+![](/misc/img/io/page_cache.png)
+
+> Linux内核目前的做法是为每个磁盘都建立一个线程，负责每个磁盘的刷盘
+
+查看当前系统存在多少脏页:
+```bash
+cat /proc/vmstat | egrep "dirty|writeback"
+cat /proc/meminfo |grep Dirty
+```
+
+优化建议:
+1. 应对持续数据写入
+
+  优化原则，持续写入数据，磁盘同步也尽快刷盘，但是尽可能不要影响业务写入
+
+  vm.dirty_expire_centisecs = 300
+  vm.dirty_writeback_centisecs = 100
+  vm.dirty_background_ratio = 5
+  vm.dirty_ratio = 80
+
+1. 瞬间高峰
+
+  优化原则，加大缓存大小，让数据都暂时保存内存中，事后再异步刷入磁盘
+
+  vm.dirty_expire_centisecs = 1000
+  vm.dirty_writeback_centisecs = 500
+  vm.dirty_background_ratio = 70
+  vm.dirty_ratio = 90
+
+### read, pread, readv, preadv, preadv2
+参考:
+- [`man 2 preadv2`](https://man7.org/linux/man-pages/man2/preadv2.2.html) 
+
+
+- readv() and writev()
+  readv()系统调用从与文件描述符fd相关联的文件中读取iovcnt缓冲区到iov描述的缓冲区中("分散输入")
+  writev()系统调用将iov描述的数据的iovcnt缓冲区写入与文件描述符fd相关联的文件("聚集输出")
+
+  The readv() system call works just like read(2) except that multiple buffers are filled.
+  The writev() system call works just like write(2) except that multiple buffers are written out.
+- pread() and pwrite()
+
+  pread() reads up to count bytes from file descriptor fd at offset offset (from the start of the file)
+       into the buffer starting at buf.  The file offset is not changed.
+
+  pwrite() writes up to count bytes from the buffer starting at buf to the file descriptor fd at offset
+       offset.  The file offset is not changed.
+
+- preadv() and pwritev()
+
+  preadv()系统调用结合了readv()和pread(2)的功能. 它执行与readv()相同的任务，但是添加了第四个参数offset，该参数指定要在其上执行输入操作的文件偏移量.
+
+  pwritev()系统调用结合了writev()和pwrite(2)的功能。它执行与writev()相同的任务，但是添加了第四个参数offset，该参数指定要在其上执行输出操作的文件偏移量.
+
+  这些系统调用不会更改文件偏移量, fd引用的文件必须能够seek.
+- preadv2() and pwritev2()
+
+  这些系统调用类似于preadv()和pwritev()调用，但是添加了第五个参数flags，该参数在每次调用的基础上修改行为.
+
+  与preadv()和pwritev()不同，如果offset参数为-1，则使用和更新当前文件偏移.
+
+  flags参数包含零个或多个以下标志的按位或：
+
+  - RWF_DSYNC (since Linux 4.7)
+      提供与O_DSYNC open(2)标志相同的每次写入功能。该标志仅对pwritev2()有意义，其作用仅适用于系统调用写入的数据范围
+  - RWF_HIPRI (since Linux 4.6)
+      高优先级读/写。允许基于块的文件系统使用设备的轮询，这可以降低延迟，但可能会使用其他资源。 (当前，此功能仅在使用O_DIRECT标志打开的文件描述符上可用。) 
+  - RWF_SYNC (since Linux 4.7)
+      提供等效于O_SYNC open(2)标志的每次写入功能。该标志仅对pwritev2()有意义，其作用仅适用于系统调用写入的数据范围
+  - RWF_NOWAIT (since Linux 4.14)
+      不要等待无法立即获得的数据。如果指定了此标志，则preadv2()系统调用将不得不从后备存储中读取数据或等待锁定时立即返回。如果成功读取了某些数据，它将返回读取的字节数。如果未读取任何字节，它将返回-1并将errno设置为EAGAIN。当前，此标志仅对preadv2()有意义
+  - RWF_APPEND (since Linux 4.16)
+      提供等效于O_APPEND open(2)标志的每次写入功能。该标志仅对pwritev2()有意义，其作用仅适用于系统调用写入的数据范围. offset参数不影响写操作；数据总是附加在文件末尾。但是，如果offset参数为-1，则将更新当前文件的偏移量
