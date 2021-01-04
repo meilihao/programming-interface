@@ -369,6 +369,57 @@ XDP的使用场景包括:
 ACL 控制平面负责创建 eBPF 的 Program、Map，注入 XDP 处理流程中: 其中 eBPF 的 Program 存放报文匹配、丢包等处理逻辑，eBPF 的 Map 存放 ACL 规则.
 ![ACL 控制平面架构](/misc/img/net/mmqQ7fA.webp)
 
+## bpf map
+bpf map是驻留在kernel中的kv存储. 任何BPF程序都可以访问它们, 在用户态中运行的程序也可以使用文件描述符访问这些映射, 即内核上运行的代码和加载了该代码的程序可以在运行时使用消息传递相互通信.
+
+kernel将kv视为二进制 blobs，它并不关心在map中保留的内容.
+
+### 创建map
+方法1, 创建BPF映射的最直接方法是使用bpf syscall:
+```c
+    union bpf_attr my_map { 
+        .map_type = BPF_MAP_TYPE_HASH, 
+        .key_size = sizeof(int), 
+        .value_size = sizeof(int), 
+        .max_entries = 100,
+        .map_flags = BPF_F_NO_PREALLOC,
+    };
+
+    int fd = bpf(BPF_MAP_CREATE, &my_map, sizeof(my_map));
+```
+
+如果调用失败, 则内核返回值-1, 失败的原因可能有三个:
+1. 如果其中一个属性无效，则内核将errno变量设置为EINVAL
+1. 如果执行该操作的用户没有足够的特权，则内核将errno变量设置为EPERM
+1. 如果没有足够的内存来存储映射，则内核将errno变量设置为ENOMEM
+
+方法2, 使用辅助函数创建map.
+内核包括一些约定和帮助程序，用于生成和使用BPF映射. 与直接执行系统调用相比，会发现这些约定的出现频率更高，因为它们更具可读性且易于遵循. 请记住，即使直接在内核中运行，这些约定仍会使用bpf syscall来创建映射，如果事先不知道要使用哪种映射，则直接使用syscall会更有用.
+
+```c
+    // 功能同上, 即封装了上面直接使用syscall bpf创建map的example
+    int fd;
+    fd = bpf_create_map(BPF_MAP_TYPE_HASH, sizeof(int), sizeof(int), 100,
+            BPF_F_NO_PREALOC);
+```
+
+如果知道程序中需要哪种映射，也可以预先定义. 这对于增加程序中使用的映射的可见性有很大帮助:
+```c
+    struct bpf_map_def SEC("maps") my_map = { 
+        .type = BPF_MAP_TYPE_HASH, 
+        .key_size = sizeof(int), 
+        .value_size = sizeof(int), 
+        .max_entries = 100,
+        .map_flags =BPF_F_NO_PREALLOC, 
+    };
+```
+
+以这种方式定义映射: 使用`section` 属性. 在本例中为`SEC("maps")`, 该宏告诉kernel此结构是BPF映射，应该相应地创建它.
+
+在上面示例中，没有与映射关联的文件描述符标识符. 在这种情况下，内核使用名为map_data的全局变量将有关映射的信息存储在程序中. 此变量是一个结构数组，根据在代码中指定每个映射的方式进行排序. 例如，如果先前的映射是代码中指定的第一个映射，则可以从数组的第一个元素获取文件描述符标识符`fd = map_data[0].fd;`.
+
+### 使用map
+
 ## FAQ
 ### funccount-bpfcc 'go:fmt.*'报"include/linux/compiler_types.h:210:24: note: expanded from macro 'asm_inline'"
 见[Missing support for asm_inline in Linux 5.4](https://github.com/iovisor/bcc/issues/2546)
