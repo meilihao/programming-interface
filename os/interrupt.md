@@ -1,9 +1,19 @@
 # interrupt
+概念:
+- 中断请求(irq, interrupt request)是由可编程中断控制器(PIC, programmable interrupt controller)发起的, 其目的是为了中断cpu和执行中断服务程序(isr, interrupt service routine).
+- 硬件中断: 当一个硬件设备想要告诉 CPU 某一需要处理的数据已经准备好后（例如：当键盘被按下或者一个数据包到了网络接口处），它将会发送一个中断请求（IRQ）来告诉 CPU 数据是可用的, 接下来会调用在内核启动时设备驱动注册的对应的中断服务程序（ISR）.
+- 软件中断: 当在播放一个视频时，音频和视频是同步播放是相当重要的，这样音乐的速度才不会变化. 这是由软件中断实现的，由精确的计时器系统（称为 jiffies）重复发起的. 这个计时器会使得音乐播放器同步, 软件中断也可以被特殊的指令所调用，来读取或写入数据到硬件设备. 当系统需要**实时性时（例如在工业应用中），软件中断会变得重要**. 可参考[这里](https://www.linuxfoundation.org/blog/2013/03/intro-to-real-time-linux-for-embedded-developers/).
+
+os已注册的中断: `cat /proc/interrupts`, 从左到右各列的含义依次为：`中断向量号、每个 CPU（0~n）中断发生次数、硬件来源、硬件源通道信息、以及造成中断请求的设备名`. 在表的末尾，有一些非数字的中断, 它们是特定于体系结构的中断，如LOC(local timer interrupt, 本地计时器中断)的中断请求（IRQ）号为 236, 其中一些在 Linux 内核源树中的[Linux IRQ 向量布局](https://github.com/torvalds/linux/blob/master/arch/x86/include/asm/irq_vectors.h)中指定.
 
 ## cpu识别中断
 x86处理器通过INTR和NMI 两个引脚分别接收外部中断请求信号: INTR接收可屏蔽中断, NMI接收不可屏蔽中断请求. 标志寄存器EFLAGS中的IF标志决定是否屏蔽可屏蔽中断请求.
 
-在SMP结构中, 每个处理器都包含一个IOAPIC(高级可编程中断控制器), 外部设备产生中断请求时, 通过该中断控制器并传递给cpu.
+在SMP结构中, 每个处理器都包含一个IOAPIC(高级可编程中断控制器, advanced programmable interrupt controller), 外部设备产生中断请求时, **通过该中断控制器并传递给cpu**.
+
+> 在 MP 架构下，为支持将中断传递给多个 CPU，引入了 APIC，其包含 LAPIC 和 IOAPIC. 一般来说，所有 LAPIC 都连接到一个 I/O APIC 上，形成一个一对多的结构(不排除有多 IOAPIC 的架构), 有两种工作模式：
+> 1. 8259A 模式: 禁用 LAPIC， APIC 直连 CPU
+> 1. 标准模式: 启用 LAPIC，所有的外部中断通过 IOAPIC 接收后转发给对应的 LAPIC
 
 有两个与IF标志相关的函数, local_irq_enable和local_irq_disable, 它们通过设置或清除本地cpu的EFLAGS的IF标志来控制是否使能本地中断.
 
@@ -13,6 +23,8 @@ x86处理器通过INTR和NMI 两个引脚分别接收外部中断请求信号: I
 中断描述符由struct gate_desc表示, 有GATE_INTERRUPT, CATE_TRAP, GATE_CALL和GATE_TASK几种, idt_table就是gate_desc类型的数组. 系统启动时会为idt_table赋值, 然后将它的地址写入寄存器. 当中断发生时, cpu会根据该地址和中断号, 计算得到对应的中断处理程序的地址并执行.
 
 在256个中断中, 前32个(`0x00~0x1F`)是x86预留的, X86_LOCAL_APIC使能的情况下, `0xec~255`供APIC使用, 其余的(非专用)则由os使用.
+
+> 中断请求按照高级可编程中断控制器（APIC）中的优先级高低排序（0是最高优先级）.
 
 kernel定义了多种专用的中断描述符, 多以idt_data数组的形式存在, 比如early_idts, def_idts, apic_idts, 系统初始化过程中会调用idt_setup_from_table将这些数组的元素信息转换为idt_table对应的元素信息.
 
