@@ -40,7 +40,14 @@ root可使用 mknod 命令创建设备文件.
 > Linux 专有文件/proc/partitions 记录了系统中每个磁盘分区的主辅设备编号、大小和名称.
 
 ## udev
-在用户空间实现的一种设备管理系统, 它会将设备文件自动放在/dev下. 它依赖sysfs(/sys下的虚拟文件系统)来了解系统的设备变化, 并使用一系列udev特有的规则来指定其对设备的管理以及命令, 默认规则在`/lib/udev/rules.d`下, 自定义规则在`/etc/udev/rules.d`下.
+在用户空间实现的一种设备管理fs(devtmpfs), 它会将设备文件自动放在/dev下, 即/dev完全由udev管理. 它依赖sysfs(/sys下的虚拟文件系统)来了解系统的设备变化, 并使用一系列udev特有的规则来指定其对设备的管理以及命令, 默认规则在`/lib/udev/rules.d`下, 自定义规则在`/etc/udev/rules.d`下.
+
+```bash
+# grep -ri '/dev/disk' /lib/udev/rules.d # 查找生成/dev/disk下信息的规则
+/lib/udev/rules.d/60-persistent-storage.rules
+```
+
+> 部分相关代码: [udev-builtin-path_id.c](https://cgit.freedesktop.org/systemd/systemd/tree/src/udev/udev-builtin-path_id.c)
 
 ## `/dev/loopN`
 一种伪设备，使得文件可以如同块设备一般被访问.
