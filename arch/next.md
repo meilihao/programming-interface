@@ -126,3 +126,15 @@ RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 - [Alibaba Cloud Linux 2 LTS 率先提供支持 io_uring](https://developer.aliyun.com/article/764720)
 
 io_uring和SPDK
+
+## FAQ
+### 驱动趋势
+1. 将设备驱动程序移动到用户空间（而不是内核）
+2. 使用轮询（而不是中断）
+
+与之前基于内核相比，这可以实现更高的性能，因为它消除了：
+- 代价高昂的系统调用和中断处理
+- 数据副本(zero copy)
+- 上下文切换
+
+> 英特尔存储性能开发套件（SPDK）和数据平面开发套件（DPDK）就是很好的例子.
