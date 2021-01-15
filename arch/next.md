@@ -71,6 +71,8 @@ AVX 512指令集强化的向量和浮点计算
 - [RDMA学习路线总结](https://my.oschina.net/SysuHuyh5LoveHqq/blog/842767)
 - [借助RDMA功能的互连实现您企业软件定义的数据中心基础设施的效率最大化](https://yq.aliyun.com/articles/137416)
 - [UCloud高性能RoCE网络设计](http://blog.ucloud.cn/archives/4364)
+- [RDMA技术原理分析、主流实现对比和解析](https://www.sohu.com/a/229080366_632967)
+- [RDMA-远程直接内存访问-01-RDMA 协议 iWARP 和 RoCE](https://houbb.github.io/2019/11/20/rdma-01-protocol)
 
 DPDK思路:
 - 网络层：硬件中断->放弃中断流程
@@ -107,6 +109,13 @@ RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 劣势：
 1. 特定网卡才支持，成本开销相对较大
 1. RDMA提供了完全不同于传统网络编程的API，一般需要对现有APP进行改造，引入额外开发成本
+
+目前支持RDMA的网络协议有：
+- InfiniBand(IB): 从一开始就支持RDMA的新一代网络协议. 由于这是一种新的网络技术，因此需要支持该技术的网卡和交换机.
+- RDMA过融合以太网(RoCE): 即RDMA over Ethernet, 允许通过以太网执行RDMA的网络协议, 这允许在标准以太网基础架构(交换机)上使用RDMA，只不过网卡必须是支持RoCE的特殊的NIC.
+
+  RoCE又包括RoCEv1和RoCEv2两个版本(RoCEv2的最大改进是支持IP路由)
+- 互联网广域RDMA协议(iWARP): 即RDMA over TCP, 允许通过TCP执行RDMA的网络协议. 这允许在标准以太网基础架构(交换机)上使用RDMA，只不过网卡要求是支持iWARP(如果使用CPU offload的话)的NIC; 否则，所有iWARP栈都可以在软件中实现，但是失去了大部分的RDMA性能优势.
 
 总结
 相同点：

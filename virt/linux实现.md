@@ -1211,7 +1211,7 @@ vring 包含三个成员：
 
 在 virtio_queue_rq 中，会将请求写入的数据，通过 [virtblk_add_req](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/block/virtio_blk.c#L92) 放入 struct virtqueue. 因此，接下来的调用链为：virtblk_add_req->[virtqueue_add_sgs](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1724)->[virtqueue_add](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1693)->[](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/virtio/virtio_ring.c#L1091).
 
-> virtio1.1(最新, 2020.7) 关键的最大改动点就是引入了packed queue，也就是将virtio1.0中的desc ring，avail ring，used ring三个ring打包成一个desc ring了. 相对应的，将virtio 1.0这种实现方式称之为split ring.
+> virtio1.1(最新, 2020.7) 关键的最大改动点就是引入了packed queue，也就是将virtio1.0中的desc ring，avail ring，used ring三个ring打包成一个desc ring了, 这样元数据读取的软件实现可以减少 cache miss，硬件实现可以只用一个 PCI transaction 解决. 相对应的，将virtio 1.0这种实现方式称之为split ring. 
 
 **下面算法描述是旧代码的描述**.
 
@@ -1266,6 +1266,9 @@ virtio_queue_notify 会调用 VirtQueue 的 handle_output 函数，前面已经�
 ![](/misc/img/virt/79ad143a3149ea36bc80219940d7d00c.jpg)
 
 ## 网络虚拟化
+Virtio网络设备是一种虚拟的以太网卡，支持多队列的网络包收发.
+
+virtio标准将其对于队列的抽象称为Virtqueue. Vring即是对Virtqueue的具体实现. 一个Virtqueue由一个Available Ring和Used Ring组成, 前者用于前端向后端发送数据，而后者反之. 而在virtio网络中的TX/RX Queue均由一个Virtqueue实现. 所有的I/O通信架构都有数据平面与控制平面之分.
 ### 解析初始化过程
 还是从 Virtio Network Device 这个设备的初始化入手.
 ```c

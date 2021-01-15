@@ -1,6 +1,7 @@
 # SRv6
 参考:
 - [SRv6浅谈](https://cloud.tencent.com/developer/article/1420074)
+- [kernel support srv6 status](https://www.segment-routing.net/open-software/linux/)
 
 
 ## [从MPLS到SR，再到SRv6](https://mp.weixin.qq.com/s?__biz=MzIwMTMzMDU5Nw==&mid=2456798735&idx=1&sn=d2d9050d20b22bb64e2080e5a6ab257c)
@@ -9,6 +10,8 @@ MPLS全称是Multi-Protocol Label Switching，直译过来就是多协议标签�
 MPLS对技术是做了加法，MPLS是通过在原有IGP协议基础上增加LDP协议来实现标签的分发，又因为LDP不具有流量工程，增加RSVP-TE. 然而RSVP信令非常复杂，同时还得维护庞大的链路信息，因此信息交互效率低下，扩展也非常困难.
 
 也正是在这样的背景下，SR（Segment Routing）技术应运而生.
+
+> SR已经成为事实上的SDN架构标准
 
 SR简单总结就是"一减一集中":
 - 减
@@ -21,7 +24,7 @@ SR简单总结就是"一减一集中":
 
 但在这需要强调的是，上面的SR在数据平面仍然是基于MPLS的，无论控制面分发标签是基于IPv4还是IPv6，从本质上来说还是MPLS下的Segment Routing，也就是SR-MPLS.
 
-与SR-MPLS相比，传统的SR-MPLS是在MPLS的基础上运用了减法和集中的思想，减去LDP集中RSVP，而SRv6则是在传统SR-MPLS基础上，给我们带来了大一统和编程的思想:
+与SR-MPLS相比，传统的SR-MPLS是在MPLS的基础上运用了减法和集中的思想，减去LDP集中RSVP. 而SRv6则是在传统SR-MPLS基础上，给我们带来了大一统和编程的思想:
 1. 与传统SR-MPLS的3层类型标签（VPN/BGP/SR）相比，SRv6在标签分层上更为简单，只有一种IPv6头，以此实现统一的转发. 另外，由于SRv6帧头的标准性，使得它更能兼容现网的IPv6设备，当中间节点不支持SRv6功能时，也可以根据IPv6路由方式来转发报文.
 1. SRv6 SRH扩展中128位SID特殊的帧结构中定义了Function字段
 
@@ -35,9 +38,13 @@ SR简单总结就是"一减一集中":
 
 SRv6是一种网络转发技术，其中SR是Segment Routing的缩写，v6顾名思义是指IPv6.
 
+它是一种源路由技术，基于SDN理念，构成面向路径连接的网络架构，支撑未来网络多层次的可编程需求，可以满足5G超大连接和切片的应用场景下的连接需求.
+
 SRv6是直接在IPv6的IP扩展头中进行新的扩展，这个扩展部分称为[SRH, Segment Routing Header](https://datatracker.ietf.org/doc/rfc8754/)，而这部分扩展没有破坏标准的IP头，因此可以认为SRv6是一种native的IPv6技术.
 
 > [SRv6 uSID在任何情况下的协议开销都要低于VxLAN over SR-MPLS.](https://www.cisco.com/c/dam/global/zh_cn/solutions/service-provider/segment-routing/pdf/usid_srv6.pdf)
+
+Linux SRv6可以完美整合Overlay和Underlay，因为无论是Overlay还是Underlay，本质上都是对应着不同的SRv6 Segment（操作）而已；如果需要提高Linux SRv6性能，可以优化DPDK或者使用FD.IO(VPP)，其中FD.IO已经内置了完善的SRv6支持，在使用上会更为方便.
 
 ## SRv6 Segment
 SRv6的Segment有128bits，而且分成了三部分:
@@ -113,3 +120,13 @@ SRv6在网络可编程性方面有着巨大的优势，但要发挥其优势，�
 
 SRv6则是天生整合了Overlay和Underlay，无须 在Overlay和Underlay间进行复杂的交接，这极大地降低了网络复杂性和业务复杂性.
 
+## SRv6操作(不全)
+参考:
+- [看看有趣的SRv6 Ⅰ：SRv6网络编程](https://www.jianshu.com/p/6fd84ec5d06a)
+
+- End : 该操作要求Segment Left不为0（不是最后一跳），会将Segment Left减1，并更新IPv6数据包的目的地址为下一个Segment，这是最常见的SRv6操作。相当于SR MPLS中的Prefix-SID
+- End.X：该操作和End操作基本一致，区别是可以将处理过的数据包发送到指定的下一跳地址。相当于SR MPLS中的Adj-SID
+- End.DX4：该操作要求Segment Left为0且数据包内封装了IPv4数据包，会去掉外层的IPv6报头，并将内部的IPv4数据包转发给指定的下一跳地址。相当于VPNv4 Per-CE标签
+- End.DX6：该操作要求Segment Left为0且数据包内封装了IPv6数据包，会去掉外层的IPv6报头，并将内部的IPv6数据包转发给指定的下一跳地址。相当于VPNv6 Per-CE标签
+- End.B6：该操作会在已有的SRH的基础上，插入一个新的SRH，并可以定义新的Segment列表，数据包将首先按照插入的新的SRH进行转发。相当于Binding-SID
+- End.B6.Encaps：该操作和End.B6基本一致，区别是该操作将在数据包外层新增一个新的IPv6报头和SRH，而不是仅仅添加一个SRH的路由报头
