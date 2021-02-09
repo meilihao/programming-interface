@@ -33,7 +33,7 @@ SR简单总结就是"一减一集中":
 
 ## SRv6
 
-SRv6是一种网络转发技术，其中SR是Segment Routing的缩写，v6顾名思义是指IPv6.
+SRv6是一种网络转发技术, 是源路由技术的一种，其中SR是Segment Routing的缩写，v6顾名思义是指IPv6.
 
 SRv6是直接在IPv6的IP扩展头中进行新的扩展，这个扩展部分称为[SRH, Segment Routing Header](https://datatracker.ietf.org/doc/rfc8754/)，而这部分扩展没有破坏标准的IP头，因此可以认为SRv6是一种native的IPv6技术.
 
@@ -43,7 +43,7 @@ SRv6是直接在IPv6的IP扩展头中进行新的扩展，这个扩展部分称�
 SRv6的Segment有128bits，而且分成了三部分:
 1. Locator（位置标识）
 
-    网络中分配给一个网络节点的标识，可以用于路由和转发数据包. Locator有两个重要的属性，可路由和聚合. 在SRv6 SID中Locator是一个可变长的部分，用于适配不同规模的网络.
+    网络中分配给一个网络节点的标识，可以用于路由和转发数据包. Locator有两个重要的属性，可路由和聚合. 在SRv6 SID(Segment ID)中Locator是一个可变长的部分，用于适配不同规模的网络.
 2. Function（功能）
 
     设备分配给本地转发指令的一个ID值，该值可用于表达需要设备执行的转发动作，相当于计算机指令的操作码. 在SRv6网络编程中，不同的转发行为由不同的功能ID来表达. 一定程度上功能ID和MPLS标签类似，用于标识VPN转发实例等.
@@ -103,7 +103,20 @@ SRv6的标准化基本上分为两大部分：
 
 第二部分是SRv6面向5G和云的新应用，这些应用包括网络切片、确定性时延（DetNet）、OAM、IOAM（In-situ OAM）、SFC、SD-WAN、组播/BIER等。这些应用都对网络编程提出了新的需求，需要在转发面封装新的信息。SRv6可以很好地满足这些需求，充分体现了其在网络编程能力方面具备的独特优势。
 
-## [uSID](https://datatracker.ietf.org/doc/draft-filsfils-spring-net-pgm-extension-srv6-usid/)
+## 压缩SHR
+SRH中一个SID就需要占用128比特, 当包含多个SID时，过大的SRH头长度增加了协议开销、极大降低了承载效率，对硬件和芯片也提出了非常高的要求. 压缩SRv6报文头的长度，提高SR segment的效率，是SRv6技术大规模落地使用必须要解决的关键问题. 解决方案还需要满足如下主要要求:
+1. 合理的压缩率
+1. 硬件友好
+1. 互操作性好
+1. 继承原有SRv6的关键特性
+1. 能够较为方便的对网络进行替换或升级
+
+总结就是需要解决承载效率、硬件兼容性、现网平滑升级等种种问题.
+
+当前有:
+
+### [中国移动G-SRv6技术白皮书](https://www.ipv6plus.net/resources/G-SRv6/%E4%B8%AD%E5%9B%BD%E7%A7%BB%E5%8A%A8G-SRv6%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6.pdf)
+### [uSID](https://datatracker.ietf.org/doc/draft-filsfils-spring-net-pgm-extension-srv6-usid/)
 参考:
 - [uSID：SRv6新范式](https://www.sdnlab.com/23390.html)
 
