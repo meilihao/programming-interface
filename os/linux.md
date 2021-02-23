@@ -21,6 +21,130 @@ Linux内核是单内核（monolithic kernel），也就是所有的内核功能�
 
     当Linus发布一个Mainline主线内核时，一个为期2周左右的主线合并窗口就会打开，在此期间，mainline分支会从linux-next以及各个子模块的维护者处接收合并patch，当合入一些patch后，就会形成下一个版本的rc候选版本，一般会经历多个rc版本，等待时机成熟，就会发布下一个版本的Mainline内核.
 
+## 阅读linux kernel工具
+### vscode
+1. 移除多余文件
+
+    因为linux kernel文件数量过多，会导致系统很慢。
+
+　　在File->prefenrence->setting->workspace, 右上角有个切换到json文件，编辑如下：
+    ```json
+    {
+    "search.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.DS_Store": true,
+        "**/drivers": true,
+        "**/sound": true,
+        "**/tools": true,
+        "**/arch/alpha": true,
+        "**/arch/arc": true,
+        "**/arch/c6x": true,
+        "**/arch/h8300": true,
+        "**/arch/hexagon": true,
+        "**/arch/ia64": true,
+        "**/arch/m32r": true,
+        "**/arch/m68k": true,
+        "**/arch/microblaze": true,
+        "**/arch/mn10300": true,
+        "**/arch/nds32": true,
+        "**/arch/nios2": true,
+        "**/arch/parisc": true,
+        "**/arch/powerpc": true,
+        "**/arch/s390": true,
+        "**/arch/sparc": true,
+        "**/arch/score": true,
+        "**/arch/sh": true,
+        "**/arch/um": true,
+        "**/arch/unicore32": true,
+        "**/arch/xtensa": true
+    },
+
+    //-------- Files configuration --------
+
+    // Configure glob patterns for excluding files and folders.
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.DS_Store": true,
+        "**/drivers": true,
+        "**/sound": true,
+        "**/tools": true,
+        "**/arch/alpha": true,
+        "**/arch/arc": true,
+        "**/arch/c6x": true,
+        "**/arch/h8300": true,
+        "**/arch/hexagon": true,
+        "**/arch/ia64": true,
+        "**/arch/m32r": true,
+        "**/arch/m68k": true,
+        "**/arch/microblaze": true,
+        "**/arch/mn10300": true,
+        "**/arch/nds32": true,
+        "**/arch/nios2": true,
+        "**/arch/parisc": true,
+        "**/arch/powerpc": true,
+        "**/arch/s390": true,
+        "**/arch/sparc": true,
+        "**/arch/score": true,
+        "**/arch/sh": true,
+        "**/arch/um": true,
+        "**/arch/unicore32": true,
+        "**/arch/xtensa": true
+    }
+    }
+    ```
+2. 修复有些头文件路径查找不到
+
+    可自行添加头文件路径
+
+    ctrl+shift+P: 输入>edit configurations，选择json文件编辑，添加如下：
+    ```json
+    {
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/arch/arm64/include/**",
+                "${workspaceFolder}/include/**",
+                "${workspaceFolder}/arch/arm64/**",
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "clang-x64"
+        }
+    ],
+    "version": 4
+    }
+    ```
+### clion
+1. 1. 正常编译
+    ```bash
+    make clean
+    bear make zImage
+    ```
+
+    其中最关键的是bear make zImage,它会在内核源码目录下生成compile_commands.json, 记录完整的编译过程
+2. 生成CMakeLists.txt
+
+    需要用到工具kernel-grok
+    ```bash
+    sudo apt install ruby
+    git clone https://github.com/habemus-papadum/kernel-grok.git
+    cd clion-linux-kernel-3.16
+    ../kernel-grok/generate_cmake
+    ```
+    这时候就会生成CMakeLists.txt. 然后打开CMakeLists.txt,添加:
+    ```conf
+    SET(CMAKE_C_COMPILER "gcc")
+    include_directories(".")
+    include_directories("./include")
+    ```
+    否则会出现头文件找不到的情况.
+
 ## header
 参考:
 - [ Cross-Compiled Linux From Scratch - 5.3. Linux-3.14.21 Headers](http://www.clfs.org/view/CLFS-3.0.0-SYSTEMD/x86_64-64/cross-tools/linux-headers.html)
