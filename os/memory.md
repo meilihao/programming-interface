@@ -186,7 +186,43 @@ EXPORT_PER_CPU_SYMBOL_GPL(gdt_page);
 > 32bit 的页目录在CR3寄存器中, 保存的是页目录的指针.
 
 ## 内存分配
-Linux内核内存管理的一项重要工作就是如何在频繁申请释放内存的情况下，避免碎片的产生. Linux采用伙伴系统解决外部碎片的问题，采用slab解决内部碎片的问题.
+参考:
+- [linux内存源码分析 - SLUB分配器概述](https://www.cnblogs.com/tolimit/p/4654109.html)
+- [linux内核之slob、slab、slub](https://blog.csdn.net/Rong_Toa/article/details/106440497)
+- [如何诊断SLUB问题](http://linuxperf.com/?p=184)
+
+Linux内核内存管理的一项重要工作就是如何在频繁申请释放内存的情况下，避免碎片的产生. Linux提供了两个层次的内存分配接口:
+1. 伙伴系统解决外部碎片的问题
+
+	最底层的内存管理机制, 提供页式内存管理
+
+	调用alloc_pages(它以页为单位进行分配, 得到页面地址), 再调用page_address可得到内存地址. [__get_free_pages](https://elixir.bootlin.com/linux/v5.11/source/mm/page_alloc.c#L5034)封装了它俩.
+1. 采用slub解决内部碎片的问题
+
+	伙伴系统之上的内存管理, 基于对象
+
+	slub针对多处理器、NUMA系统进行了优化.
+
+	判断系统是否在用slub的方法: 看是否存在/sys/kernel/slab目录，存在即使用slub，没有就是slab.
+
+	> 为了保证内核其它模块能够无缝迁移到SLUB分配器，SLUB还保留了原有SLAB分配器所有的接口API函数
+
+	kmalloc使用的就是slub提供的对象.
+
+	要从slub申请内存需要先使用[kmem_cache_create](https://elixir.bootlin.com/linux/v5.11/source/mm/slab_common.c#L407)创建一个slub对象. 再通过[kmem_cache_alloc](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3484)和[kmem_cache_free](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3686)来申请和释放内存.
+
+	vmalloc: 把物理地址不连续的内存页拼凑成逻辑地址连续的内存区间.
+
+#### slabinfo工具
+随内核源程序提供了一个slabinfo工具，但是需要自己手工编译. 源程序的位置是在源代码树下的`tools/vm/slabinfo.c`，编译方法是：
+```bash
+$ gcc -o slabinfo tools/vm/slabinfo.c
+```
+
+或者进入 tools/vm 目录下直接执行make：
+```bash
+$ make slabinfo
+```
 
 ### 伙伴系统
 参考:
