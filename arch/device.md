@@ -13,6 +13,34 @@ root可使用 mknod 命令创建设备文件.
 > /dev 目录中 sda 设备之所以是 a，并**不是由插槽决定的，而是由系统内核的识别顺序来决定的**，而恰巧很多主板的插槽顺序就是系统内核的识别顺序. 因此在使用 iSCSI 网络存储设备时就会发现，明明主板上第二个插槽是空着的，但系统却能识别到/dev/sdb 这个设备就是原因.
 > 分区的数字编码不一定是强制顺延下来的，也有可能是**手工指定**的. 因此sda3 只能表示是编号为 3 的分区，而不能判断 sda 设备上已经存在了 3 个分区.
 
+## blocksize
+参考:
+- [Advanced Format](https://zh.wikipedia.org/wiki/%E5%85%88%E9%80%B2%E6%A0%BC%E5%BC%8F%E5%8C%96)
+- [磁盘格式的512，512e，4kn是什么意思](https://www.reneelab.net/what-is-4kn-disk.html)
+- [过渡到高级格式化 4K 扇区硬盘](https://www.seagate.com/cn/zh/tech-insights/advanced-format-4k-sector-hard-drives-master-ti/)
+- [Advanced Sector Format of Block Devices](https://www.thomas-krenn.com/en/wiki/Advanced_Sector_Format_of_Block_Devices)
+- [512e and 4Kn Disk Formats](https://i.dell.com/sites/csdocuments/Shared-Content_data-Sheets_Documents/en/512e_4Kn_Disk_Formats_120413.pdf)
+- [机械硬盘避坑大法：一文搞懂 PMR 和 SMR 有什么区别](https://www.ithome.com/0/436/608.htm)
+
+对于大多数现代磁盘，逻辑扇区大小小于物理扇区大小是正常的(通过`fdisk -l /dev/sd<N>`获取), 这就是最常用的[高级格式磁盘512e](https://en.wikipedia.org/wiki/Advanced_Format)的实现方式.
+
+> Linux内核可在`/sys/block/sdX/queue/physical_block_size`获取有关物理扇区大小的信息，并在`/sys/block/sdX/queue/logical_block_size`获取有关逻辑扇区大小的信息.
+
+> The old format gave a format efficiency of 88.7%, whereas Advanced Format results in a format efficiency of 97.3%.
+
+> `fdisk -l`的`I/O size`: optimal I/O size(最佳io的大小) 默认是 minimal I/O size(磁盘最小io的大小).
+
+disk Advanced Format(Logical Sector Size/Physical Sector Size):
+- 512n : 512/512
+- 512e : 512/4,096
+
+    512e是因为当时部分操作系统识别不了4k物理扇区，而做的兼容方案. 作为过渡时期的产物，512e(e的意思是Emulation)表示由disk firmware将4K的磁盘模拟成512，让系统以为看见的是512格式.
+
+    在disk支持的情况下, `hdparm --set-sector-size 4096`可修改Logical Sector Size.
+- 4Kn : 4,096/4,096
+
+    带"Advanced 4Kn Format" (4K native). 没有512-byte emulation layer, 性能更佳.
+
 ## 设备文件
 在linux中, 硬件设备都以文件形式存在, 不同设备有不同的文件类型, 这些文件被称为设备文件. 设备文件让程序能够同系统的硬件和外围设备进行通信. 在Linux中,所有的设备以文件的形式出现在目录 /dev 中, 由`systemd-udevd`管理(随着kernel报告的硬件变化创建或删除设备文件).
 
