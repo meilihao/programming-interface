@@ -162,14 +162,22 @@ kernel使用`EXPORT SYMBOL(<func_name>);`表示导出内核符号, 之后就可�
 
 ### module可用的内核组件
 #### 1. workqueue
-Linux下的工作队列是一种将工作推后执行的方式，其可以被睡眠、调度，与内核线程表现基本一致，但使用起来又比直接使用内核线程简单，一般用来处理任务内容比较动态的任务链. 每 workqueue 都可以添加多个 work (使用 queue_work函数).
+Linux下的工作队列是一种将工作推后执行的方式，其可以被**睡眠、调度**，与内核线程表现基本一致，但使用起来又比直接使用内核线程简单，一般用来处理任务内容比较动态的任务链. 每 workqueue 都可以添加多个 work (使用 queue_work函数).
+
+kernel 提供了[create_workqueue](https://elixir.bootlin.com/linux/v5.11.1/source/include/linux/workqueue.h#L428)和[create_singlethread_workqueue](https://elixir.bootlin.com/linux/v5.11.1/source/include/linux/workqueue.h#L433)函数用于用户创建自己的工作队列和执行线程, 而不用kernel提供的工作队列.
+
+> create_singlethread_workqueue和create_workqueue类似, 但create_singlethread_workqueue只创建一个kernel线程, 而不是为每个cpu创建一个内核线程.
+
+[kblockd_workqueue](https://elixir.bootlin.com/linux/v5.11.1/source/block/blk-core.c#L73)是通用块层提供的工作队列, 由kblockd_schedule_work来添加work.
 
 #### 2. 中断系统和 tasklet
 Linux 中的中断分为3个层次. 最低的层次是在源代码 arch 目录下与各个平台相关的代码，一般位于平台代码下面的`irq.c`文件中，该部分代码直接与硬件相关，最后都要调用`do_IRQ(__do_IRQ)`进行执行.
 
 `do_IRQ`是中断系统的中层，其根据下层传来的中断号找到对应的中断处理函数，处理多 CPU 访问和中断重入问题，然后调用真实的中断处理函数，也就是中断的上层.  但是这里内核做了区别，如果内核判断中断发生了嵌套（同时发生的中断很多)或者有其他的高时间成本的需求，则将中断处理函数以内核线程的形式（软中断)运行，否则直接运行.  中断的最上层则与各个中断的具体功能相关.
 
-tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的操作都交给 tasklet在中断上下文之外调度执行，基于软中断实现.  软中断被内核直接使用，但是如果用户模块想要直接使用则会非常难，因为需要考虑在不同 CPU 上的调度问题，所以软中断是锁密集型的机制. 内核线程 ksoftirqd 专门用来调度软中断，而模块开发的时候希望使用这种软中断的延时执行机制，就可以调用内核封装好的 tasklet.
+tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的操作都交给 tasklet在中断上下文之外调度执行，基于软中断实现, 且tasklet**不可睡眠**.  软中断被内核直接使用，但是如果用户模块想要直接使用则会非常难，因为需要考虑在不同 CPU 上的调度问题，所以软中断是锁密集型的机制. 内核线程 ksoftirqd 专门用来调度软中断，而模块开发的时候希望使用这种软中断的延时执行机制，就可以调用内核封装好的 tasklet.
+
+同一时刻一个tasklet只能有一个cpu执行, 不同的tasklet可以在不同的cpu上执行. 这和软中断不同, 软中断同一时刻可以在不同的cpu上并行执行, 因此软中断必须考虑重入问题.
 
 中断系统是一个非常复杂的子系统, 除非深度的内核开发者, 例如比较细节的多CPU 中断、中断亲和度、中 断域等概念都是不太容易接触到的. 其中中断亲和度常被运维人员用于锁定应用性能.
 
