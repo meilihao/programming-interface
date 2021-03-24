@@ -222,6 +222,11 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 `/sys`目录:
 - block : 系统中当前所有的块设备所在，按照功能来说放置在 /sys/class 之下会更合适，但只是由于历史遗留因素而一直存在于/sys/block, 但从 2.6.22 开始就已标记为过时，只有在打开了 CONFIG_SYSFS_DEPRECATED配置下编译才会有这个目录的存在，并且**在 2.6.26 内核中已正式移到 /sys/class/block**, 旧的接口 /sys/block为了向后兼容保留存在，但其中的内容已经变为指向它们在 /sys/devices/ 中真实设备的符号链接文件
 - bus : 总线: pci-e, scsi, usb等, 是内核设备按总线类型分层放置的目录结构，devices 中的所有设备都是连接于某种总线之下，在这里的每一种具体总线之下可以找到每一个具体设备的符号链接，它也是构成 Linux 统一设备模型的一部分
+
+	- scsi : scsi总线
+
+		- drivers : scsi总线上的驱动程序
+		- devices : scsi设备, 名称是SCSI设备在Linux系统中的逻辑地址映射
 - class : 按照设备功能分类的设备模型(比如声卡, 显卡, 输入设备, 网卡)组织的一颗树
 
 	> /sys/class目录下有三个主要文件夹跟 fibre channel相关的文件夹fc_transport、fc_remote_ports，fc_hosts.

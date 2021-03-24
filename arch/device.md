@@ -178,3 +178,31 @@ aaa
 ```
 
 当pts/1收到input的输入后，会检查当前前端进程组是哪一个，然后将输入放到进程组的leader的输入缓存中，这样相应的leader进程就可以通过read函数得到用户的输入. 因此这是有时看到`/proc/<pid>/fd/0 -> /dev/pts/1`, 但`echo aaa > /dev/pts/1`并不起作用的原因, 目前也没法方法跨pgid写pts.
+
+## SAS
+参考:
+- [SAS学习笔记](https://www.jianshu.com/p/0f4333a5f1af)
+- [SAS (Serial Attached SCSI) 技术详解](https://tech.hqew.com/fangan_127764)
+
+ SAS（Serial Attached SCSI）即串行SCSI技术，是一种磁盘连接技术，它综合了并行SCSI和串行连接技术（如FC、SSA、IEEE1394等）的优势，以串行通讯协议为协议基础架构，采用SCSI-3扩展指令集，并兼容SATA设备，是多层次的存储设备连接协议栈.
+
+SAS Phy：一个phy即是一个transceiver，每个phy都有一个SAS addresss，和一个唯一的identifier；
+SAS Port：一个port包含一个或一组phy，每个SAS PORT有一个唯一的SAS地址，同一个Port中的所有phy共用一个address，即一个port只有一个SAS address；
+SAS device：一个SAS device可以包括一个或多个SAS port，device里的每个phy有一个独立的identifier
+
+> SAS addresss是**无法修改**的.
+
+![SAS device,SAS port,SAS phy关系](/misc/img/arch/device/1201105091707051216.gif)
+
+End device：是一种SAS device，SAS物理连接的末端设备，例如HBA卡、Disk driver都是end device.
+Expander device：包括Edge expander device和Fanout expander device:
+    - Fanout expander device：起中心交换作用，既可以直接连接到end device，也可以连接到edge expander device
+    - Edge expander device：一般用于连接fanout expander device和end device，也可以连接其它的edge expander device，一个edge expander set中只能包含128个SAS address
+
+![SAS Expander拓扑构图](/misc/img/arch/device/2201105091707051217.gif)
+
+Domain：即整个SAS交换构架，由SAS device和SAS expander device组成，其中Device又区分为Initiator和Target，它们可以直接对接起来，也可以经过Expander进行连接，Expander起到通道交换或者端口扩展的作用.
+
+> 一个SAS域理论上可以连接16384 - 256 = 16128个SAS End Device。对比光纤环路126 个device的上限，16128 这个数字仍然是非常可观
+
+SAS协议共有6层，从上到下依次为: 应用层(application layer), 传输层(transport layer),端口层(port layer), 链路层(link layer), phy层(phy layer), 物理层(physical layer).

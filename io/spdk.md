@@ -53,3 +53,4 @@ SPDK包括了几种存储介质的用户态轮询模式驱动：
 
 ## 其他
 - [SPDK用户态hotplug处理](https://blog.csdn.net/weixin_37097605/article/details/101514668)
+- [打造用户态存储利器，基于SPDK的存储引擎Blobstore & BlobFS](https://cloud.tencent.com/developer/article/1442627)
