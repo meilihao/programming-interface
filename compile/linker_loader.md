@@ -218,3 +218,5 @@ Data Segment的后面还有其它一些Segment，主要是调试信息.
 通过设置`env LD_DEBUG=all`并执行程序, 会输出ld log, 可定位到具体so文件, 再通过原文件或`/var/lib/dpkg/info/${package}.md5sums`中的校验值比对, 检查文件是否被改动. 此时使用`readelf -a bad.so`可能会得到错误信息, 比如`bad symbol index: ${addr} in relocreadelf`.
 
 > `env LD_DEBUG=help`会输出LD_DEBUG支持的选项.
+
+> 类似的有`sudo QT_DEBUG_PLUGINS=1 dde-control-center --show`
