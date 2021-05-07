@@ -1,6 +1,8 @@
 # device
 root可使用 mknod 命令创建设备文件.
 
+当前系统支持的设备见`/proc/devices`, 由驱动程序生成.它可产生一个major供mknod作为参数. /dev下的设备是通过mknod加上去的, 用户可通过此设备名来访问驱动.
+
 常见的硬件设备及其文件名称:
 - IDE 设备 /dev/hd[a-d]
 - SCSI/SATA/U 盘 /dev/sd[a-p]
