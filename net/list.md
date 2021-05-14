@@ -3,6 +3,9 @@
 - [New IP：开拓未来数据网络的新连接和新能力](http://www.infocomm-journal.com/dxkx/article/2019/1000-0801/1000-0801-35-9-00002.shtml)
 - [NEW IP Framework and Protocol for Future Applications](/misc/pdf/net/6f569c60-7045-11ea-89df-41bea055720b.pdf)
 
+## quic
+- [面向5G的阿里自研标准化协议库XQUIC](https://developer.aliyun.com/article/770062)
+
 ## next
 - [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
 - [阿里云如何构建高性能云原生容器网络-直播](https://yq.aliyun.com/live/2626)
