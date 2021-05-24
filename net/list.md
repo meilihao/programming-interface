@@ -10,6 +10,9 @@
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)
 
+## cloud
+- [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)
+
 # 概念
 ## 工作组 Work Group
 在一个网络内，可能有成百上千台电脑，如果这些电脑不进行分组，都列在“网上邻居”内，可想而知会有多么乱. 为了解决这一问 题，Windows就引用了“工作组”这个概念，将不同的电脑一般按功能分别列入不同的组中，如财务部的电脑都列入“财务部”工作组中，人事部的电脑都 列入“人事部”工作组中. 要访问某个部门的资源，就在“网上邻居”里找到那个部门的工作组名，双击就可以看到那个部门的电脑了.

@@ -148,6 +148,8 @@ Red Hat Enterprise Linux 5自动维护从基于wwid的设备名称到系统上�
 ### by-partlabel && by-partuuid
 这两个和上面提到的by-label和by-uuid类似，只不过是在GPT磁盘上.
 
+查询lable和partuuid: `blkid /dev/<分区device>`, 单个属性查询: `blkid -s PARTUUID -o value /dev/<分区device>`
+
 ### 多路径设备
 多路径设备指的是从一个系统到一个设备存在多个路径，这种现象主要出现在光纤网络的SAN下，主要是做数据链路冗余以达到高可用的效果，即对应底层一个物理设备，可能存在多个路径表示它.
 
