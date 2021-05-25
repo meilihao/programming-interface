@@ -86,7 +86,7 @@ disk Advanced Format(Logical Sector Size/Physical Sector Size):
 
 snapd的`loopN`可通过`sudo apt autoremove --purge snapd`解决.
 
-## [块设备持久化命名和多路径](https://www.zybuluo.com/tony-yin/note/1214135)
+## [块设备持久化命名(Persistent block device naming)和多路径](https://www.zybuluo.com/tony-yin/note/1214135)
 持久化命名，顾名思义区别于一次性或者是短暂的命名，它是一种长久的并且稳定靠谱的命名方案. 与之形成鲜明对比的就是/dev/sda这种非持久化命名，这两种命名方案各有各的用处，持久化命名方案有四种：by-label、by-uuid、by-id和by-path. 对于那些使用GUID分区表（GPT）的磁盘，还有额外的两种方案：by-partlabel和by-partuuid.
 
 by-label和by-uuid都和文件系统相关，by-label是通过读取设备中的内容获取，by-uuid则是随着每次文件系统的创建而创建，所以by-uuid的持久化程度更高一些；持久化程度最高的要属by-path和by-id了，因为它们都是根据物理设备的位置或者信息而和链接做对应的，by-path会因为路径的变化而变化；而by-id则不会因为路径或者系统的改变而改变，它只会在多路径的情况下发生改变. 这两个在通过虚拟设备名称寻找物理设备的场景下都十分有用.
@@ -148,7 +148,7 @@ Red Hat Enterprise Linux 5自动维护从基于wwid的设备名称到系统上�
 ### by-partlabel && by-partuuid
 这两个和上面提到的by-label和by-uuid类似，只不过是在GPT磁盘上.
 
-查询lable和partuuid: `blkid /dev/<分区device>`, 单个属性查询: `blkid -s PARTUUID -o value /dev/<分区device>`
+查询lable和partuuid: `blkid /dev/<分区device>`; 单个属性查询: `blkid -s PARTUUID -o value /dev/<分区device>`; 或直接执行`blkid`查找全部分区的信息; 也可使用`blkid -o udev -p /dev/sdb1`(**推荐**).
 
 ### 多路径设备
 多路径设备指的是从一个系统到一个设备存在多个路径，这种现象主要出现在光纤网络的SAN下，主要是做数据链路冗余以达到高可用的效果，即对应底层一个物理设备，可能存在多个路径表示它.
