@@ -12,6 +12,7 @@
 ## spdk
 - [SPDK用户态 iSCSI 客户端库功能介绍](https://www.sdnlab.com/23018.html)
 - [阿里云单盘百万IOPS的背后](https://zhuanlan.zhihu.com/p/33593012)
+- [基于SPDK的用户态存储引擎：FusionEngine 2.0](/misc/pdf/io/02_Presentation_03_FusionEngine_2.0--Alibaba_User-Space_Full_Stack_Solution_for_Storage_Alibaba_Zhengyong_Yi.pdf)
 
 ## 性能
 - [【冬瓜哥手绘】它保你上线性能也吊炸天！](https://mp.weixin.qq.com/s?__biz=MzAwNzU3NzQ0MA==&mid=2652088576&idx=1&sn=af2557735037e254b2f1a5b6ad93e541)
