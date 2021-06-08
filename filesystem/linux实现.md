@@ -3,29 +3,332 @@
 - [一口气搞懂「文件系统」，就靠这 25 张图了](https://www.tuicool.com/articles/63qam22)
 
 ## vfs
-文件系统的种类众多，而操作系统希望 对用户提供一个统一的接口，于是在用户层与文件系统层引入了中间层，这个中间层就称为 虚拟文件系统（ Virtual File System，VFS ）, 是是驻留在用户进程和各种类型的linux 文件系统之间的一个抽象接口层, 对用户进程隐藏了实现每个文件系统的差异.
+文件系统的种类众多，而操作系统希望 对用户提供一个统一的接口，于是在用户层与文件系统层引入了中间层，这个中间层就称为 虚拟文件系统(Virtual File System，VFS, 只存在内存中), 是驻留在用户进程和各种类型的linux 文件系统之间的一个抽象接口层, 对用户进程隐藏了实现每个文件系统的差异.
 
 VFS 定义了一组所有文件系统都支持的数据结构和标准接口，这样程序员不需要了解文件系统的工作原理，只需要了解 VFS 提供的统一接口即可.
 
 Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽象了四种对象类型：
-1. 超级块对象：代表一个已安装的文件系统,用于存储该文件系统的有关信息.
-1. 索引节点对象：代表具体的文件, 用于存储该文件的元信息
+1. 超级块对象([super_block](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1416))：代表一个文件系统,用于存储该文件系统的有关信息.
 
-	索引节点即inode，用来记录文件的元信息，比如 inode 编号、文件大小、访问权限、创建时间、修改时间、 数据在磁盘的位置 等等. **索引节点是文件的 唯一 标识**，它们之间一一对应，也同样都会被存储在硬盘中，即占用磁盘空间.
+	fs中所有的inode都会链接到super_block的链表头.
+
+	```c
+	struct super_block {
+		struct list_head	s_list;		/* Keep this first */
+		dev_t			s_dev;		/* search index; _not_ kdev_t */
+		unsigned char		s_blocksize_bits;
+		unsigned long		s_blocksize; // 块大小
+		loff_t			s_maxbytes;	/* Max file size */ // 最大文件的大小
+		struct file_system_type	*s_type; // 指向file_system_type的指针
+		const struct super_operations	*s_op; // 提供了操作super_block的函数
+		const struct dquot_operations	*dq_op;
+		const struct quotactl_ops	*s_qcop;
+		const struct export_operations *s_export_op;
+		unsigned long		s_flags;
+		unsigned long		s_iflags;	/* internal SB_I_* flags */
+		unsigned long		s_magic; // 魔术数字, 每个fs都有有一个该数字
+		struct dentry		*s_root; // 指向fs root dentry的指针
+		struct rw_semaphore	s_umount;
+		int			s_count;
+		atomic_t		s_active;
+	#ifdef CONFIG_SECURITY
+		void                    *s_security;
+	#endif
+		const struct xattr_handler **s_xattr;
+	#ifdef CONFIG_FS_ENCRYPTION
+		const struct fscrypt_operations	*s_cop;
+		struct key		*s_master_keys; /* master crypto keys in use */
+	#endif
+	#ifdef CONFIG_FS_VERITY
+		const struct fsverity_operations *s_vop;
+	#endif
+	#ifdef CONFIG_UNICODE
+		struct unicode_map *s_encoding;
+		__u16 s_encoding_flags;
+	#endif
+		struct hlist_bl_head	s_roots;	/* alternate root dentries for NFS */
+		struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
+		struct block_device	*s_bdev; // 指向fs存在的块设备指针
+		struct backing_dev_info *s_bdi;
+		struct mtd_info		*s_mtd;
+		struct hlist_node	s_instances;
+		unsigned int		s_quota_types;	/* Bitmask of supported quota types */
+		struct quota_info	s_dquot;	/* Diskquota specific options */
+
+		struct sb_writers	s_writers;
+
+		/*
+		 * Keep s_fs_info, s_time_gran, s_fsnotify_mask, and
+		 * s_fsnotify_marks together for cache efficiency. They are frequently
+		 * accessed and rarely modified.
+		 */
+		void			*s_fs_info;	/* Filesystem private info */
+
+		/* Granularity of c/m/atime in ns (cannot be worse than a second) */
+		u32			s_time_gran;
+		/* Time limits for c/m/atime in seconds */
+		time64_t		   s_time_min;
+		time64_t		   s_time_max;
+	#ifdef CONFIG_FSNOTIFY
+		__u32			s_fsnotify_mask;
+		struct fsnotify_mark_connector __rcu	*s_fsnotify_marks;
+	#endif
+
+		char			s_id[32];	/* Informational name */
+		uuid_t			s_uuid;		/* UUID */
+
+		unsigned int		s_max_links;
+		fmode_t			s_mode;
+
+		/*
+		 * The next field is for VFS *only*. No filesystems have any business
+		 * even looking at it. You had been warned.
+		 */
+		struct mutex s_vfs_rename_mutex;	/* Kludge */
+
+		/*
+		 * Filesystem subtype.  If non-empty the filesystem type field
+		 * in /proc/mounts will be "type.subtype"
+		 */
+		const char *s_subtype;
+
+		const struct dentry_operations *s_d_op; /* default d_op for dentries */
+
+		/*
+		 * Saved pool identifier for cleancache (-1 means none)
+		 */
+		int cleancache_poolid;
+
+		struct shrinker s_shrink;	/* per-sb shrinker handle */
+
+		/* Number of inodes with nlink == 0 but still referenced */
+		atomic_long_t s_remove_count;
+
+		/* Pending fsnotify inode refs */
+		atomic_long_t s_fsnotify_inode_refs;
+
+		/* Being remounted read-only */
+		int s_readonly_remount;
+
+		/* per-sb errseq_t for reporting writeback errors via syncfs */
+		errseq_t s_wb_err;
+
+		/* AIO completions deferred from interrupt context */
+		struct workqueue_struct *s_dio_done_wq;
+		struct hlist_head s_pins;
+
+		/*
+		 * Owning user namespace and default context in which to
+		 * interpret filesystem uids, gids, quotas, device nodes,
+		 * xattrs and security labels.
+		 */
+		struct user_namespace *s_user_ns;
+
+		/*
+		 * The list_lru structure is essentially just a pointer to a table
+		 * of per-node lru lists, each of which has its own spinlock.
+		 * There is no need to put them into separate cachelines.
+		 */
+		struct list_lru		s_dentry_lru;
+		struct list_lru		s_inode_lru;
+		struct rcu_head		rcu;
+		struct work_struct	destroy_work;
+
+		struct mutex		s_sync_lock;	/* sync serialisation lock */
+
+		/*
+		 * Indicates how deep in a filesystem stack this SB is
+		 */
+		int s_stack_depth;
+
+		/* s_inode_list_lock protects s_inodes */
+		spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
+		struct list_head	s_inodes;	/* all inodes */ // 指向fs内所有的inode, 通过它可遍历inode对象
+
+		spinlock_t		s_inode_wblist_lock;
+		struct list_head	s_inodes_wb;	/* writeback inodes */
+	} __randomize_layout;	
+	```
+
+1. 索引节点对象([inode](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L612))：代表具体的文件, 用于存储该文件的元信息
+
+	索引节点用来记录文件的元信息，比如 inode 编号、文件大小、访问权限、创建时间、修改时间、 数据在磁盘的位置, 对文件的读写函数, 文件的读写缓存 等等. **索引节点是文件的 唯一 标识**，它们之间一一对应，也同样都会被存储在硬盘中，即占用磁盘空间.
 
 	为了加速文件的访问，通常会把索引节点加载到内存中.
-1. 目录项对象：代表一个目录项，描述了文件系统的层次结构.
 
-	目录项即dentry ，用来记录文件的名字、 索引节点指针 以及与其他目录项的层级关联关系. 多个目录项关联起来，就会形成目录结构，但它与索引节点不同的是，**目录项是由内核维护的一个数据结构，不存放于磁盘，而是缓存在内存**
+	一个文件可以有多个dentry, 因为执行文件的路径可以有多个(考虑文件的链接), 但inode只有一个.
 
+	`dentry + inode`可表示一个文件.
+
+	```c
+	/*
+	 * Keep mostly read-only and often accessed (especially for
+	 * the RCU path lookup and 'stat' data) fields at the beginning
+	 * of the 'struct inode'
+	 */
+	struct inode {
+		umode_t			i_mode;
+		unsigned short		i_opflags;
+		kuid_t			i_uid;
+		kgid_t			i_gid;
+		unsigned int		i_flags;
+
+	#ifdef CONFIG_FS_POSIX_ACL
+		struct posix_acl	*i_acl;
+		struct posix_acl	*i_default_acl;
+	#endif
+
+		const struct inode_operations	*i_op;
+		struct super_block	*i_sb;
+		struct address_space	*i_mapping; // 缓存文件的内容. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
+
+	#ifdef CONFIG_SECURITY
+		void			*i_security;
+	#endif
+
+		/* Stat data, not accessed from path walking */
+		unsigned long		i_ino; // inode号
+		/*
+		 * Filesystems may only read i_nlink directly.  They shall use the
+		 * following functions for modification:
+		 *
+		 *    (set|clear|inc|drop)_nlink
+		 *    inode_(inc|dec)_link_count
+		 */
+		union {
+			const unsigned int i_nlink;
+			unsigned int __i_nlink;
+		};
+		dev_t			i_rdev;
+		loff_t			i_size; // 文件长度, 单位B
+		struct timespec64	i_atime;
+		struct timespec64	i_mtime;
+		struct timespec64	i_ctime;
+		spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */
+		unsigned short          i_bytes;
+		u8			i_blkbits; // 文件块的位数
+		u8			i_write_hint;
+		blkcnt_t		i_blocks;
+
+	#ifdef __NEED_I_SIZE_ORDERED
+		seqcount_t		i_size_seqcount;
+	#endif
+
+		/* Misc */
+		unsigned long		i_state;
+		struct rw_semaphore	i_rwsem;
+
+		unsigned long		dirtied_when;	/* jiffies of first dirtying */
+		unsigned long		dirtied_time_when;
+
+		struct hlist_node	i_hash;
+		struct list_head	i_io_list;	/* backing dev IO list */
+	#ifdef CONFIG_CGROUP_WRITEBACK
+		struct bdi_writeback	*i_wb;		/* the associated cgroup wb */
+
+		/* foreign inode detection, see wbc_detach_inode() */
+		int			i_wb_frn_winner;
+		u16			i_wb_frn_avg_time;
+		u16			i_wb_frn_history;
+	#endif
+		struct list_head	i_lru;		/* inode LRU list */ // 用于链接描述inode当前状态的链表. 当创建一个新的inode时i_lru要链接到inode_in_use这个链表, 表示inode处于使用中, 同时i_sb_list要链接到super_block中的s_inodes链表
+		struct list_head	i_sb_list; // 用于链接到super_block中的s_inodes链表
+		struct list_head	i_wb_list;	/* backing dev writeback list */
+		union {
+			struct hlist_head	i_dentry; // 一个文件可能对应多个dentry, 这些dentry都要链接到这里
+			struct rcu_head		i_rcu;
+		};
+		atomic64_t		i_version;
+		atomic64_t		i_sequence; /* see futex */
+		atomic_t		i_count; // inode的引用计数
+		atomic_t		i_dio_count;
+		atomic_t		i_writecount;
+	#if defined(CONFIG_IMA) || defined(CONFIG_FILE_LOCKING)
+		atomic_t		i_readcount; /* struct files open RO */
+	#endif
+		union {
+			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ // file_operations类型的指针. 文件的读写函数和异步io函数都由它提供
+			void (*free_inode)(struct inode *);
+		};
+		struct file_lock_context	*i_flctx;
+		struct address_space	i_data;
+		struct list_head	i_devices;
+		union {
+			struct pipe_inode_info	*i_pipe;
+			struct cdev		*i_cdev;
+			char			*i_link;
+			unsigned		i_dir_seq;
+		};
+
+		__u32			i_generation;
+
+	#ifdef CONFIG_FSNOTIFY
+		__u32			i_fsnotify_mask; /* all events this inode cares about */
+		struct fsnotify_mark_connector __rcu	*i_fsnotify_marks;
+	#endif
+
+	#ifdef CONFIG_FS_ENCRYPTION
+		struct fscrypt_info	*i_crypt_info;
+	#endif
+
+	#ifdef CONFIG_FS_VERITY
+		struct fsverity_info	*i_verity_info;
+	#endif
+
+		void			*i_private; /* fs or device private pointer */
+	} __randomize_layout;
+	```
+1. 目录项对象([dentry](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L90))：代表一个目录项，描述了文件系统的层次结构.
+
+	目录项用来记录文件的名字、 索引节点指针 以及与其他目录项的层级关联关系. 多个目录项关联起来，就会形成目录结构，但它与索引节点不同的是，**目录项是由内核维护的一个数据结构，不存放于磁盘，而是缓存在内存**
+
+	一个文件可能不止一个dentry.
 	一个文件路径的各组成部分都是一个目录项对象. 比如`/home/test/test.c`, kernel为home, test和test.c都创建了目录项对象.
+
+	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache.
+
+	```c
+	struct dentry {
+		/* RCU lookup touched fields */
+		unsigned int d_flags;		/* protected by d_lock */
+		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
+		struct hlist_bl_node d_hash;	/* lookup hash list */ // 链接到dentry cache的hash表
+		struct dentry *d_parent;	/* parent directory */ // 指向父dentry
+		struct qstr d_name; // 文件或目录的名称. 打开一个文件时, 会根据这个名称来查找目标文件.
+		struct inode *d_inode;		/* Where the name belongs to - NULL is
+						 * negative */ // 指向一个inode. inode与dentry共同描述了一个普通文件或目录文件
+		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */
+
+		/* Ref lookup also touches following */
+		struct lockref d_lockref;	/* per-dentry lock and refcount */
+		const struct dentry_operations *d_op;
+		struct super_block *d_sb;	/* The root of the dentry tree */
+		unsigned long d_time;		/* used by d_revalidate */
+		void *d_fsdata;			/* fs-specific data */
+
+		union {
+			struct list_head d_lru;		/* LRU list */
+			wait_queue_head_t *d_wait;	/* in-lookup ones only */
+		};
+		struct list_head d_child;	/* child of parent list */ // dentry自身的链表头, 会链接到父dentry的d_subdirs. 但移动文件时需要将一个dentry从旧的父dentry链表中脱离, 再链接到新的父dentry的d_subdirs中
+		struct list_head d_subdirs;	/* our children */ // 子项的链表头, 其所有的子项都会链接到这里
+		/*
+		 * d_alias and d_rcu can share memory
+		 */
+		union {
+			struct hlist_node d_alias;	/* inode alias list */
+			struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
+		 	struct rcu_head d_rcu;
+		} d_u;
+	} __randomize_layout;
+	```
 1. 文件对象：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
 
 	当且仅当进程访问文件期间存在与内存中. 同一个文件可能对应多个文件对象, 但其对应的索引节点对象是唯一的.
 
-它们对应的操作对象分别是super_operations, indoe_operations, dentry_operations, file_operations, fs只要实现了这4个对象的操作方法即可注册到kernel. 每个对象都包含一组操作方法，用于操作相应的文件系统.
+它们对应的操作对象分别是[super_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L2009), indoe_operations, [dentry_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L136), file_operations, fs只要实现了这4个对象的操作方法即可注册到kernel. 每个对象都包含一组操作方法，用于操作相应的文件系统.
 
-linux fs会为每个文件分配两个数据结构： 索引节点（ index node ）和目录项（ directory entry ）.
+linux fs会为每个文件分配两个数据结构： 索引节点(index node)和目录项(directory entry).
 
 由于索引节点唯一标识一个文件，而目录项记录着文件的名，所以目录项和索引节点的关系是多对一，也就是说，一个文件可以有多个别字. 比如，硬链接的实现就是多个目录项中的索引节点指向同一个文件.
 
