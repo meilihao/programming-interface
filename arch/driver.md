@@ -36,3 +36,13 @@ NVMe命名标准描述：
 nvme的队列名称是根据核数来编号的，admin的队列和第一个io队列共享同一个中断（下图示），所以它俩的中断数会相对比其他IO队列多，队列默认就是跟随cpu号而绑定的. 查看/proc/interrupt，中断名称是nvme0q0，当然类似的nvme1q0也是，以此类推，nvme0q0和nvme1q0分别是设备0与设备1的admin队列.
 
 IO队列是nvme0q1,...,nvme0qx，其中x就是cpu的核数。nvme0q1这个队列，默认绑定在cpu0上；nvme0q30这个队列，默认绑定在cpu29上，以此类推.
+
+## 用户态驱动
+参考:
+- [用户态驱动概述](https://huqianshan.github.io/Linux/Drivers/%E7%94%A8%E6%88%B7%E6%80%81%E9%A9%B1%E5%8A%A8%E6%A6%82%E8%BF%B0/)
+- [Linux用户态驱动设计](https://www.cnblogs.com/wahaha02/p/8569074.html)
+- `User-Space Device Drivers in Linux: A First Look`
+
+UIO框架适用于简单设备的驱动，因为它不支持DMA，不能支持多个中断线，缺乏逻辑设备抽象能力.
+
+VFIO(**推荐**)是一个可以安全地把设备I/O、中断、DMA等暴露到用户空间（userspace），从而可以在用户空间完成设备驱动的框架。用户空间直接设备访问，虚拟机设备分配可以获得更高的IO性能。依赖于IOMMU, vfio-pci, 相比于UIO，VFIO更为强健和安全.

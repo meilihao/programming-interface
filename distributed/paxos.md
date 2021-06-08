@@ -70,3 +70,6 @@ Follower是灾备节点，用于收集Leader发送的日志，并负责把达成
 Logger是一种特殊类型的Follower，不对外提供服务. Logger做两件事：存储最新的日志用于Leader的多数派判定；选主阶段行使投票权. Logger不回放状态机，会定期清理老旧的日志，占用极少的计算和存储资源. 因此，基于Leader/Follower/Logger的部署方式，三节点相比双节点高可用版，只额外增加很少的成本.
 
 Learner没有投票权，不参加多数派的计算，仅从Leader同步已提交的日志，并回放到状态机. 在实际使用中，我们把Learner作为只读副本，用于应用层的读写分离.此外，X-Paxos支持Learner和Follower之间的节点变更，基于这个功能可以实现故障节点的迁移和替换.
+
+## example
+- [LiuzhouChan/go-paxos](https://github.com/LiuzhouChan/go-paxos)

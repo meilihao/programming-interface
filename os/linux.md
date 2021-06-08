@@ -5,6 +5,18 @@
 - [Linux Performance tools map](http://www.brendangregg.com/linuxperf.html)
 - [linux kernel map](https://makelinux.github.io/kernel/map/)
 
+kernel层次:
+- 基础层
+
+    kernel, 内存管理
+
+    关键是kernel api.
+- 应用层(占绝大部分代码, 尤其是驱动)
+
+    文件系统, 设备, 驱动, 网络等.
+
+    关键是代码架构和典型案例.
+
 ## ko
 Linux内核是单内核（monolithic kernel），也就是所有的内核功能都集成在一个内核空间内. 但是kernel内核又有微内核的设计即具有模块功能，可以将磁盘驱动程序、文件系统等独立的内核功能制作成模块，并动态添加到内核空间或者删除.
 
