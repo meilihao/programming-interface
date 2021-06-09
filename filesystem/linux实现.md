@@ -23,7 +23,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		const struct super_operations	*s_op; // 提供了操作super_block的函数
 		const struct dquot_operations	*dq_op;
 		const struct quotactl_ops	*s_qcop;
-		const struct export_operations *s_export_op;
+		const struct export_operations *s_export_op; // 支持s_export_op接口的文件系统都是存储设备文件系统，如ext3/4、ubifs等. 其他文件系统如rootfs、ramfs、sysfs等是不支持的
 		unsigned long		s_flags;
 		unsigned long		s_iflags;	/* internal SB_I_* flags */
 		unsigned long		s_magic; // 魔术数字, 每个fs都有有一个该数字
@@ -150,6 +150,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	} __randomize_layout;	
 	```
 
+	kernel有一个[super_blocks](https://elixir.bootlin.com/linux/v5.12.9/source/fs/super.c#L45), 所有super_block均在该双向链表中. fs中每个文件在打开时都会在内存分配一个inode并链接到super_block. 因此通过super_blocks可遍历os打开的所有inode.
+
 1. 索引节点对象([inode](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L612))：代表具体的文件, 用于存储该文件的元信息
 
 	索引节点用来记录文件的元信息，比如 inode 编号、文件大小、访问权限、创建时间、修改时间、 数据在磁盘的位置, 对文件的读写函数, 文件的读写缓存 等等. **索引节点是文件的 唯一 标识**，它们之间一一对应，也同样都会被存储在硬盘中，即占用磁盘空间.
@@ -167,7 +169,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	 * of the 'struct inode'
 	 */
 	struct inode {
-		umode_t			i_mode;
+		umode_t			i_mode; // 代表不同类型的文件, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10)
 		unsigned short		i_opflags;
 		kuid_t			i_uid;
 		kgid_t			i_gid;
@@ -180,7 +182,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 		const struct inode_operations	*i_op;
 		struct super_block	*i_sb;
-		struct address_space	*i_mapping; // 缓存文件的内容. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
+		struct address_space	*i_mapping; // 缓存文件的内容 by radix tree. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
 
 	#ifdef CONFIG_SECURITY
 		void			*i_security;
@@ -278,6 +280,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		void			*i_private; /* fs or device private pointer */
 	} __randomize_layout;
 	```
+
+	kernel存在一个[inode_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/inode.c#L60), 所有的inode均会链接到这里. 与它作用类似的还有[dentry_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/dcache.c#L99).
 1. 目录项对象([dentry](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L90))：代表一个目录项，描述了文件系统的层次结构.
 
 	目录项用来记录文件的名字、 索引节点指针 以及与其他目录项的层级关联关系. 多个目录项关联起来，就会形成目录结构，但它与索引节点不同的是，**目录项是由内核维护的一个数据结构，不存放于磁盘，而是缓存在内存**
@@ -292,7 +296,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		/* RCU lookup touched fields */
 		unsigned int d_flags;		/* protected by d_lock */
 		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
-		struct hlist_bl_node d_hash;	/* lookup hash list */ // 链接到dentry cache的hash表
+		struct hlist_bl_node d_hash;	/* lookup hash list */ // 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
 		struct dentry *d_parent;	/* parent directory */ // 指向父dentry
 		struct qstr d_name; // 文件或目录的名称. 打开一个文件时, 会根据这个名称来查找目标文件.
 		struct inode *d_inode;		/* Where the name belongs to - NULL is
@@ -322,11 +326,56 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		} d_u;
 	} __randomize_layout;
 	```
-1. 文件对象：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
+1. 文件对象([file](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L917))：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
+
+	文件对象代表进程与具体文件交互的关系. kernel为每个打开的文件申请一个文件对象并返回该文件的fd. 每个进程有一个文件描述符表, 它用数组保存了进程打开的每个文件.
 
 	当且仅当进程访问文件期间存在与内存中. 同一个文件可能对应多个文件对象, 但其对应的索引节点对象是唯一的.
 
-它们对应的操作对象分别是[super_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L2009), indoe_operations, [dentry_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L136), file_operations, fs只要实现了这4个对象的操作方法即可注册到kernel. 每个对象都包含一组操作方法，用于操作相应的文件系统.
+	```c
+	struct file {
+		union {
+			struct llist_node	fu_llist;
+			struct rcu_head 	fu_rcuhead;
+		} f_u;
+		struct path		f_path;
+		struct inode		*f_inode;	/* cached value */
+		const struct file_operations	*f_op;
+
+		/*
+		 * Protects f_ep, f_flags.
+		 * Must not be taken from IRQ context.
+		 */
+		spinlock_t		f_lock;
+		enum rw_hint		f_write_hint;
+		atomic_long_t		f_count;
+		unsigned int 		f_flags;
+		fmode_t			f_mode;
+		struct mutex		f_pos_lock;
+		loff_t			f_pos; // 进程为文件操作的位置. 比如对文件读取前10字节, f_pos就指向第11B.
+		struct fown_struct	f_owner;
+		const struct cred	*f_cred;
+		struct file_ra_state	f_ra; // 用于文件预读的位置
+
+		u64			f_version;
+	#ifdef CONFIG_SECURITY
+		void			*f_security;
+	#endif
+		/* needed for tty driver, and maybe others */
+		void			*private_data;
+
+	#ifdef CONFIG_EPOLL
+		/* Used by fs/eventpoll.c to link all the hooks to this file */
+		struct hlist_head	*f_ep;
+	#endif /* #ifdef CONFIG_EPOLL */
+		struct address_space	*f_mapping; // 指向一个address_space, 该结构封装了文件的读写缓存页面
+		errseq_t		f_wb_err;
+		errseq_t		f_sb_err; /* for syncfs */
+	} __randomize_layout
+	  __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+	```
+
+它们对应的操作对象分别是[super_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L2009), [indoe_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1930), [dentry_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L136), [file_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1888), fs只要实现了这4个对象的操作方法即可注册到kernel. 每个对象都包含一组操作方法，用于操作相应的文件系统.
 
 linux fs会为每个文件分配两个数据结构： 索引节点(index node)和目录项(directory entry).
 
@@ -348,6 +397,63 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 - 网络的文件系统 : 用来访问其他计算机主机数据的文件系统，比如 NFS、SMB 等等
 
 **文件系统首先要先挂载到某个目录才可以正常使用**，比如 Linux 系统在启动时，会把文件系统挂载到根目录.
+
+## mount
+参考:
+- [EADME - 计算机专业性文章及回答总索引#新一代VFS mount系统调用](https://zhuanlan.zhihu.com/p/67686817)
+
+当一个fs被挂载时, 它的[vfsmount](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/mount.h#L71)被链接到了kernel的一个全局链表[mount_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L70). mount_hashtable是一个数组, 它的每个成员都是一个hash链表.
+
+当发现目录是一个挂载点时, 会从mount_hashtable中找到该fs的vfsmount, 然后挂载点目录的dentry会被替换为被挂载fs的root dentry.
+
+### 新内核mount
+参考:
+- [深入理解 Linux 文件系統之文件系統掛載](https://webcache.googleusercontent.com/search?q=cache:EX2JdZE_xJgJ:https://www.readfog.com/a/1637370894679642112+&cd=3&hl=zh-CN&ct=clnk)
+
+```
+[mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3431)
+-> [do_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3237)
+   -> [path_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3158)
+      -> [do_new_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L2862)
+
+do_new_mount
+-> type = get_fs_type(fstype)  // 根据已注册fs的名称查找fs
+-> fc = fs_context_for_mount(type, sb_flags) //为需挂载的fs分配fs上下文 struct fs_context
+ -> alloc_fs_context
+   -> 分配fs_context fc = kzalloc(sizeof(struct fs_context), GFP_KERNEL)
+   ->  设置 ...
+   ->  fc->fs_type     = get_filesystem(fs_type);  // 赋值相应的fs类型
+   ->  init_fs_context = **fc->fs_type->init_fs_context**;  //新內核使用fs_type->init_fs_context接口来初始化文件系统上下文
+    if (!init_fs_context)   //init_fs_context回调, 主要用于初始化
+        init_fs_context = **legacy_init_fs_context**;    //沒有 fs_type->init_fs_context接口 
+   -> init_fs_context(fc)  //初始化fs上下文 (比如初始化一些回调函数共以后使用)
+-> parse_monolithic_mount_data(fc, data)  //调用fc->ops->parse_monolithic  解析挂载选项
+-> mount_capable(fc) //检查是否有挂载权限
+-> vfs_get_tree(fc)  //fs/super.c 挂载重点, 调用fc->ops->get_tree(fc) 创建super_block实例
+-> do_new_mount_fc(fc, path, mnt_flags)  //创建mount实例, 关联挂载点和super_block, 添加到命名空间的挂载树中
+   -> do_add_mount(real_mount(mnt), mp, mountpoint, mnt_flags) // 把源fs挂载到目的fs
+      -> graft_tree(newmnt, parent, mp) // 把源fs的dentry树与目的fs的dentry树嫁接到一起
+        -> attach_recursive_mnt(mnt, p, mp, false) // 执行挂载操作
+          -> mnt_set_mountpoint(dest_mnt, dest_mp, source_mnt)
+          -> commit_tree(source_mnt) // 把源vfsmount提交到全局hash链表
+```
+
+对应没有实现init_fs_context接口情况:
+```
+//fs/fs_context.c
+init_fs_context = legacy_init_fs_context
+->  fc->ops = &legacy_fs_context_ops   // 设置fs上下文操作
+                    ->.get_tree               = legacy_get_tree  // get_tree用于读取磁盘superblock并在内存创建super_block, root dentry和root inode.
+                        -> root = fc->fs_type->mount(fc->fs_type, fc->sb_flags,
+                                         ¦     fc->source, ctx->legacy_data)  // 调用fs的mount方法创建super_block
+                        -> fc->root = root
+
+
+有一些文件系统使用原來的接口(fs_type.mount  = xxx_mount)：如ext2,ext4等
+有一些文件系统使用新的接口(fs_type.init_fs_context =  xxx_init_fs_context)：xfs， proc， sys, tmpfs
+
+无论使用哪一种, 都会在xxx_init_fs_contex中实现fc->ops =  &xxx_context_ops 接口, 后面也都会调用fc->ops.get_tree来创建super_block
+```
 
 ## 相关扩展
 - 从2.4.10开始, buffer cache不再是一个独立的缓存, 而是被包含在page cache中, 通过page cache来实现.
@@ -1381,7 +1487,7 @@ struct dx_root
 ![](/misc/img/fs/3c506edf93b15341da3db658e9970773.jpeg)
 
 ### 挂载文件系统
-内核是不是支持某种类型的文件系统，需要先进行注册才能知道. 例如 ext4 文件系统，就需要通过 register_filesystem 进行注册，传入的参数是 ext4_fs_type，表示注册的是 ext4 类型的文件系统. 这里面最重要的一个成员变量就是 ext4_mount.
+内核是不是支持某种类型的文件系统，需要先进行注册才能知道. 例如 ext4 文件系统，就需要通过 register_filesystem 注册到全局变量[file_systems](https://elixir.bootlin.com/linux/v5.12.9/source/fs/filesystems.c#L34)中，传入的参数是 ext4_fs_type，表示注册的是 ext4 类型的文件系统. 这里面最重要的一个成员变量就是 ext4_mount.
 
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/super.c#L6262
