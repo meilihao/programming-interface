@@ -966,7 +966,7 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	int flags = op->lookup_flags;
 	struct file *filp;
 
-	set_nameidata(&nd, dfd, pathname);
+	set_nameidata(&nd, dfd, pathname); // 沿着要打开文件名的整个路径, 一层层解析路径, 最后得到文件的dentry和vfsmount, 再保存到nd中.
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
