@@ -1,6 +1,7 @@
 # fuse
 参考:
 - [FUSE协议解析](http://blog.mingforpc.me/2018/11/30/FUSE%E5%8D%8F%E8%AE%AE%E8%A7%A3%E6%9E%90/)
+- [libfuse文档](https://libfuse.github.io/doxygen/index.html)
 
 FUSE的全称是Filesystem in Userspace，即用户空间文件系统，是系统内核提供的一个功能，使得可以在用户态下实现一个自定义的文件系统. 比如CEPH和GlusterFS等都有使用到FUSE.
 
@@ -117,4 +118,8 @@ fuse文件系统是在内核空间捕获到这些文件调用的（事实上就�
 
 * `create()`: 创建并打开文件。如果没有实现，将会调用`mknod()`和`open()`代替。PS: 如果`create()`返回错误码`ENOSYS`，那么之后将不会调用`create()`。
 
-* `bmap()`: 仅当是块设备是触发，`mount()`的时候需要参数`blkdev`和`fsname={块设备路径}`。
+* `bmap()`: 仅当是块设备是触发，`mount()`的时候需要参数`blkdev`和`fsname={块设备路径}`
+
+## FAQ
+### entry_timeout和attr_timeout
+在文件系统实现中增大返回参数entry_timeout和attr_timeout的值，这会增加对应文件在内核缓存中的过期时间，从而减少元数据的交互次数
