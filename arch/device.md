@@ -48,7 +48,9 @@ disk Advanced Format(Logical Sector Size/Physical Sector Size):
 ## 设备文件
 在linux中, 硬件设备都以文件形式存在, 不同设备有不同的文件类型, 这些文件被称为设备文件. 设备文件让程序能够同系统的硬件和外围设备进行通信. 在Linux中,所有的设备以文件的形式出现在目录 /dev 中, 由`systemd-udevd`管理(随着kernel报告的硬件变化创建或删除设备文件).
 
-设备用主设备号和次设备号表示其特征, 主设备号和次设备号统称为设备号. 主设备号用来查找一个特定的驱动程序即指明设备类型, 次设备号用来表示使用该驱动程序的各设备即指具体哪个设备.
+linux通过设备号来区分不同的设备.设备号由两部分组成:[主设备号](https://elixir.bootlin.com/linux/v5.12.10/source/include/uapi/linux/major.h#L10)和次设备号.
+
+主设备号用来查找一个特定的驱动程序即指明设备类型, 次设备号用来表示使用该驱动程序的各设备即指具体哪个设备.
 
 > 设备文件的 i 节点中记录了设备文件的主、辅 ID. 每个设备驱动程序都会将自己与特定主设备号的关联关系向内核注册,藉此建立设备专用文件和设备
 驱动程序之间的关系.
@@ -212,3 +214,59 @@ Domain：即整个SAS交换构架，由SAS device和SAS expander device组成，
 > 一个SAS域理论上可以连接16384 - 256 = 16128个SAS End Device。对比光纤环路126 个device的上限，16128 这个数字仍然是非常可观
 
 SAS协议共有6层，从上到下依次为: 应用层(application layer), 传输层(transport layer),端口层(port layer), 链路层(link layer), phy层(phy layer), 物理层(physical layer).
+
+# linux实现
+设备配置表, 总线, 驱动是linux设备架构的三大层次:
+1. 设备配置表描述了设备本身物理特性, 包括设备的寄存器信息和内存信息
+1. 总线(pcie物理总线, platform虚拟总线)是一个软件框架, 作用是作为一个容器, 把设备和驱动容纳在其中. 通过总线, 可以发现设备, 为设备发现驱动, 配置设备信息.
+
+## 文件变设备
+[init_special_inode](https://elixir.bootlin.com/linux/v5.12.10/source/fs/inode.c#L2115), 其参数rdev就是由主设备号和从设备号生成的设备号. 调用该函数后, 该inode变成了代表字符/块设备, fifo, socket的特殊inode.
+
+linux提供mknod命令, 通过它用户可根据主从设备号创建特殊文件, 比如字符/块设备文件. 它的原理是:
+1. 为特殊文件创建一个inode和dentry. inode的成员包含主从设备号和设备类型.
+1. 调用init_special_inode为该inode设置不同的函数指针.
+
+## 字符设备
+字符设备的file_operations是[def_chr_fops](https://elixir.bootlin.com/linux/v5.12.10/source/fs/char_dev.c#L452), 重点是它的open函数: [chrdev_open](https://elixir.bootlin.com/linux/v5.12.10/source/fs/char_dev.c#L373).
+
+### chrdev_open
+根据设备号调用kobj_lookup搜索注册的字符设备对象, 如果找到就执行字符设备的open函数, 否则返回错误.
+
+chrdev_open会调用设备驱动本身的open函数, 前提是已注册设备驱动.
+
+### 以INPUT_MAJOR(13)设备号举例
+> 一个键盘设备的驱动可分为input层, 虚拟键盘驱动(input_handler层), 真实键盘驱动层.
+
+[input_init](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/input/input.c#L2598)把input设备注册到系统. input_init最终会调用register_chrdev_region(MKDEV(INPUT_MAJOR, 0), INPUT_MAX_CHAR_DEVICES, "input")来注册.
+
+区间是主设备号和从设备号共同占用的一段空间, register_chrdev_region要登记0~256的从设备号区间, 这个区间之前不能被占用. 登记区间由__register_chrdev_region实现.
+
+__register_chrdev_region先会创建一个__register_chrdev_region结构, 然后要考虑输入的主设备号为0的情况, 为0时需要为字符设备分配一个主设备号.
+
+[分配主设备号的算法](https://elixir.bootlin.com/linux/v5.12.10/source/fs/char_dev.c#L65)是从高到低遍历全局数组chrdevs, 如果某个主设备号为空, 则分配给字符设备. chrdevs是一个含255个元素的指针数组, 对应设备的主设备号. 如果输入的主设备号大于255, 则取其余数. chrdevs保存了所有的主设备号和从设备号.
+
+__register_chrdev_region第二部分从chrdevs找到未占用的区间:
+1. 通过主设备号索引获得char_device_struct
+1. 遍历char_device_struct结构的单向链表, 依次比较从设备号, 找到一个合适的区间
+1. 将创建的字符设备结构cd链接到单向链表, 完成字符设备区间的登记
+
+### input设备架构
+input设备是设备和驱动的封装. 由[input_register_handler](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/input/input.c#L2393)注册input设备的驱动, [input_register_device](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/input/input.c#L2259)注册input设备.
+
+input框架的管理机制: input设备维护了两个链表, 一个是设备链表, 一个是handler链表, 注册一个驱动要和所有的设备一一匹配, 看是否适合.
+
+input框架主要是为了复用代码, 简化其他层次的工作量. input框架提供事件处理函数input_event用于上报用户输入.
+
+#### input_register_handler
+它的最后一段是遍历所有注册的input设备, 检查能否和注册的handler匹配, 相关逻辑在[input_attach_handler](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/input/input.c#L1026), 检查原理: 检查handler的id表是否和设备的id表相等.
+
+如果handler和设备匹配, 调用handler的connect函数和设备建立连接.
+
+#### 匹配input管理的设备和驱动
+由[input_match_device](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/input/input.c#L1011)实现. 它会逐个对比驱动的id表和设备的id表, 检查它们的总线类型, 制造商, 产品号和版本号, 以及事件类型是否相等.
+
+#### input_register_device
+1. 初始化设备, 将设备加入总的input设备链表. 这样, 通过链表就可以遍历所有的input设备. 初始化设备的timer, 定时时间到达时, 自动重复输入input设备的按键值.
+1. 通过sysfs创建设备的属性文件 by [device_add](https://elixir.bootlin.com/linux/v5.12.10/source/drivers/base/core.c#L3130)
+1. 这部分代码和input_register_handler最后的代码很像, 不过这次是遍历所有的驱动, 检查是否和设备匹配. 匹配算法: 检查驱动和设备的id表是否适合.
