@@ -204,14 +204,27 @@ weak_alias (__socket, socket) // 如果没有定义socket()函数，那么对soc
 非阻塞: 调用recv()函数读取网络缓冲区中数据，不管是否读到数据都立即返回，而不会一直挂在此函数调用上.
 
 ### epoll 和 select 的区别
+参考:
+- [字节跳动在Go 网路库上的实践](https://www.infoq.cn/article/fea7chf9moohbxbtyres)
+
 1. epoll 和 select 都是 I/O 多路复用的技术,都可以实现同时监听多个 I/O 事件的状态
 1. epoll 相比 select 效率更高,主要是基于其操作系统支持的 I/O事件通知机制, 而 select 是基于轮询机制
 1. epoll 支持水平(level trigger/条件)触发和边沿(edge trigger/事件)触发两种模式, 默认使用lt.
 
   - lt: 只要其监控的i/o句柄具备调用者所要捕获的条件(一般是可读或可写)就会通知调用者. 如果调用者不处理这个通知, 它会一直通知下去, 直到这个状态发生变化. 好处: 使得所有连接均匀的分布于每个用于处理网络请求的进程中.
+
+    需要同步的在事件触发后主动完成 I/O，并向上层代码直接提供 buffer.
   - et: 基于事件的通知是事件发生后只会产生一次通知, 如果不处理, 它不会再通知, 直到下一次事件发生. 在获得事件通知后并没有将缓存区的数据全部读出, epoll也不会再有通知, 没读出的数据可能永远都不会被读取或使得那部分数据超时. 该问题的解决方法是反复读取缓存区, 直到返回error. et优势是减少了每次需要返回的i/o句柄数量, 在并发极多的时候能加快epoll_wait的处理.
 
+    可选择只管理事件通知(如 go net 设计)，由上层代码完成 I/O 并管理 buffer.
+
   > udp不推荐使用epoll
+
+  两种方式各有优缺，netpoll 采用前者策略，水平触发时效性更好，容错率高，主动 I/O 可以集中内存使用和管理，提供 nocopy 操作并减少 GC. 事实上一些热门开源网络库也是采用方式一的设计，如 easygo、evio、gnet 等.
+
+  但使用 LT 也带来另一个问题，即底层主动 I/O 和上层代码并发操作 buffer，引入额外的并发开销. 比如：I/O 读数据写 buffer 和上层代码读 buffer 存在并发读写，反之亦然. 为了保证数据正确性，同时不引入锁竞争，现有的开源网络库通常采取 同步处理 buffer(easygo, evio) 或者将 buffer 再 copy 一份提供给上层代码(gnet) 等方式，均不适合业务处理或存在 copy 开销.
+
+  另一方面，常见的 bytes、bufio、ringbuffer 等 buffer 库，均存在 growth 需要 copy 原数组数据，以及只能扩容无法缩容，占用大量内存等问题. bytedance netpoll使用了linkbuffer和buffer block pool来解决该问题.
 
 ### socket缓冲区已满是否会丢数据
 不会. 缓冲区满后, socket无法再接收数据, 会通知对端停止传输, 即发送端会根据接收端的状态传输数据.

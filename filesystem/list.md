@@ -20,3 +20,19 @@
 ## net fs
 - [Linux网络文件系统的实现与调试](https://www.cnblogs.com/wahaha02/p/9559345.html)
 - [NFS文件系统协议及解析概要](https://zhuanlan.zhihu.com/p/58095846)
+- [NFS文件锁一致性设计原理解析](https://developer.aliyun.com/article/771329)
+
+## fs
+- [第4章 ext文件系统机制原理剖析](https://www.cnblogs.com/f-ck-need-u/p/7016077.html)
+- [大话EXT4文件系统完整版](http://www.ssdfans.com/?p=8136)
+
+## fs list
+- [Stratis 是基于XFS 和LVM 的组合构建的卷管理器](https://stratis-storage.github.io/)
+- [NVFS面向基于DAX的设备（直接访问）的fs]()
+
+## FAQ
+### ext4格式化慢
+ext4格式化的时候是真的慢，它在格式化的时候就将inode和block就已经分好了，而xfs与他的区别在于xfs格式化的时候不分配，而当数据来了的时候再分发inode和block.
+
+### ext4 inode耗尽
+XFS 动态分配 inode. 只要文件系统上有可用空间，XFS 文件系统就不会耗尽 inode.
