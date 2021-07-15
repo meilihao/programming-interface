@@ -242,12 +242,13 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 
 		- rport-H:B-R : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
 			- port_id : 存储端口的 24位交换机端口ID
-			- node_name : 存储端口的64位node name
-			- port_name : 存储端口的64位port name
+			- node_name : 存储端口(即target)的64位node name
+			- port_name : 存储端口(即target)的64位port name
 			- dev_loss_tmo : 链路故障等待时间
 
 				故障链路不再处理任何新的IO。默认dev_loss_tmo值视具体HBA卡而定，Qlogic默认是35秒，Emulex默认是30秒。HBA卡自带驱动可以覆盖这个 参数值。dev_loss_tmo最大值600秒，如果dev_loss_tmo值小于0或者大于600，HBA自带超时值生效。
 			- fast_io_fail_tmo : IO故障等待时间. 链路波动情况，IO尝试多长时间
+			- port_state: 链路状态
 	- fc_transport : 已分配存储信息
 
 		- targetH:B:T : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)

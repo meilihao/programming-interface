@@ -25,10 +25,9 @@
 ## fs
 - [第4章 ext文件系统机制原理剖析](https://www.cnblogs.com/f-ck-need-u/p/7016077.html)
 - [大话EXT4文件系统完整版](http://www.ssdfans.com/?p=8136)
-
-## fs list
 - [Stratis 是基于XFS 和LVM 的组合构建的卷管理器](https://stratis-storage.github.io/)
 - [NVFS面向基于DAX的设备（直接访问）的fs]()
+- [NOVA: a new file system for persistent memory](https://lwn.net/Articles/749009/)
 
 ## FAQ
 ### ext4格式化慢
