@@ -1,8 +1,17 @@
 # nftables 基于[nftables HOWTO](https://wiki.nftables.org/wiki-nftables/index.php/Main_Page)
 
+> [Nftables HOWTO 中文翻译](https://farkasity.gitbooks.io/nftables-howto-zh/content/)
+
 [**!!!随着 eBPF 技术的快速发展，bpfilter 有望取代 nftables**](https://lwn.net/Articles/747551/)
 
 nftables是新的数据包分类框架，旨在替代现存的{ip,ip6,arp,eb}_tables, 即它是新一代包过滤框架.
+
+nftables组成:
+1. nf_tables内核模块
+1. nft用户态管理工具
+
+    - libmnl, 提供了使用Netlink进行内核和用户空间通信的接口
+    - libnftnl (通常称为libnftables), 提供了把netlink消息转换到对象的底层API
 
 其他:
 - linux kernel >= 3.13, 推荐 newer kernel >= 4.10. debain 10 默认使用nftables
