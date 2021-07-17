@@ -53,6 +53,12 @@ ipsec支持模式:
 - 传输模式
 - 隧道模式
 
+## netlink
+为完成诸如增删路由, 配置邻接表, 设置IPsec策略和状态等任务, 网络栈必须与用户空间通信, 该通信基于netlink套接字完成.
+
+## 无线
+无线栈包含一些常规网络栈没有的独特功能, 比如省电模式. 它还支持一些特殊拓扑结构, 如网状(Mesh)网络, 对等(ad-hoc)网络等. 这些拓扑结构有时要求使用特殊的功能, 比如网状网络mesh使用路由选择协议混合无线网状协议(HWMP, Hybrid Wireless Mesh Protocol), 它运行在L2, 处理的是MAC地址.
+
 ## tcp编程
 ![tcp编程模型](/misc/img/net/997e39e5574252ada22220e4b3646dda.png)
 
@@ -809,7 +815,9 @@ sock_sendmsg_nosec里调用了 socket 的 ops 的 sendmsg，据 inet_stream_ops 
 
 tcp_sendmsg->[tcp_sendmsg_locked](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp.c#L1185), tcp_sendmsg_locked 的实现还是很复杂的，这里面做了这样几件事情.
 
-msg 是用户要写入的数据，这个数据要拷贝到内核协议栈里面去发送；在内核协议栈里面，网络包的数据都是由 struct sk_buff 维护的，因而第一件事情就是找到一个空闲的内存空间，将用户要写入的数据，拷贝到 struct sk_buff 的管辖范围内. 而第二件事情就是发送 [struct sk_buff](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/skbuff.h#L711).
+msg 是用户要写入的数据，这个数据要拷贝到内核协议栈里面去发送；在内核协议栈里面，入站或出站的网络数据包都是用 struct sk_buff 表示的, 它也被称为skb(套接字缓冲区)，因而第一件事情就是找到一个空闲的内存空间，将用户要写入的数据，拷贝到 struct sk_buff 的管辖范围内. 而第二件事情就是发送 [struct sk_buff](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/skbuff.h#L711).
+
+> 使用skb必须遵循skb api.
 
 在 tcp_sendmsg_locked 中，首先通过强制类型转换，将 sock 结构转换为 struct tcp_sock，这个是维护 TCP 连接状态的重要数据结构.
 
@@ -1374,8 +1382,48 @@ tcp_recvmsg 的整个逻辑也是这样执行的：这里面有一个 while 循�
 
 ## core
 ### [struct net_device](https://elixir.bootlin.com/linux/v5.10.50/source/include/linux/netdevice.h#L1865) 
-net_device用与表示一个网络设备:
+net_device用与表示一个网络设备.
+
+struct:
 - irq : 设备的irq号
 - netdev_ops : 网络设备回调函数的ops对象, 包含用于打开和停止设备, 开始传输, 修改网络设备MTU等函数
 - ethool_ops : ethool回调函数的ops对象, 它支持通过运行ethtool命令来获取有关设备的信息
 - promiscuity : promiscuity计数器大于0, 网络栈就不会丢弃那些目的地并非本地主机的数据包, 这样tcpdump和wireshark等数据分析工具(嗅探器)就能对其加以利用. 嗅探器会在用户空间打开原始socket, 从而捕获此类发往别处的数据包. 每运行一个嗅探器, promiscuity就加1; 反之, 每关闭一个就减1; 当promiscuity为0时该设备就退出混杂模式(promiscuous mode).
+
+### [struct sk_buff](https://elixir.bootlin.com/linux/v5.10.50/source/include/linux/skbuff.h#L713)
+使用skb必须遵循skb api:
+- skb_pull_inline()/skb_pull() : 向前移动skb->data指针
+- skb_transport_header() : 从skb中提取L4报头(传输层报头)
+- skb_network_header() : 从skb中提取L3报头(网络层报头)
+- skb_mac_header() : 从skb中提取L2报头(MAC报头)
+
+skb包含数据包的报头(L2, L3和L4)和有效载荷, 在数据包沿网络栈传输的过程中, 可能添加或删除报头.
+
+通常调用netdev_alloc_skb()分配skb. 原先分配skb的dev_alloc_skb()已被废弃. 释放skb用kfree_skb()/dev_kfree_skb().
+
+struct:
+- pkt_type : 由数据链路层(L2)决定, 即由eth_type_trans()根据目标以太网地址确定的.
+
+  - PACKET_MULTICAST : 组播地址
+  - PACKET_BROADCAST : 广播地址
+  - PACKET_MULTICAST : 当前主机的地址
+- dev : 一个strcut net_device 的实例. 对于入站的数据包, 表示接收它的网络设备; 对于出站数据包则是发送它的网络设备.
+- sk : sock对象. 中转数据包的sk为NULL, 表示不是当前主机生成的.
+
+相关methods：
+- eth_type_trans() : 在接收路径中使用, 它会根据以太网报头指定的以太网类型ethertype设置skb的protocol. 它还会调用skb_pull_inline(), 将skb->data前移14(ETH_HLEN, 以太网报头的长度),目的是让指针指向当前层的报头.
+
+  当数据包位于网络设备驱动程序接收路径的L2时, skb->data指向L2(以太网)报头; 调用eth_type_trans()后, 数据包即将进入L3, 此时skb->data指向L3(网络层)报头, 而这个报头紧跟在以太网报头后面.
+- ip_rcv()/ipv6_rcv() : 对于接收到的每个数据包, 都应由相应的网络层协议处理程序进行处理, 由dev_add_pack()注册. 它们分别处理ipv4/ipv6数据包.
+
+  在ip_rcv()中, 将执行大部分完整性检查. 如果一切ok, 将调用一个NF_INET_PRE_ROUTING钩子回调函数(前提是已注册)对数据包进行处理. 接下来, 如果数据包没有被这个钩子回调函数丢弃, 将调用ip_rcv_finish()在路由选择子系统中进行查找, 查找操作将根据目的地创建一个缓存条目(dst_entry对象).
+
+### socket
+用户空间的套接字
+
+### sock
+L3的套接字
+
+## FAQ
+### 根据主机的ip查找其mac
+该工作由邻接子系统完成. 邻居发现在ipv4由arp协议完成; 在ipv6由NDISC协议负责. 它们区别在于: arp依赖于发送广播请求; NDISC依赖于发送ICMPv6请求(属于组播数据包).

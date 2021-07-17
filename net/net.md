@@ -293,6 +293,8 @@ IP 中包括 ICMP(Internet Control Message Protocol) 协议和 ARP 协议.
 
 ICMP 用于告知网络包传送过程中产生的错误以及各种控制消息; ARP 用于根据 IP 地址查询相应的以太网 MAC 地址; RARP是逆地址解析协议, 用是完成硬件地址到IP地址的映射.
 
+> icmp在ipv4中仅用于报告错误和提示信息; 在ipv6中, 可被用于其他目的, 如邻居发现(ND, neighbour discovery), 组播侦听器发现(MLD, Multicast Listener Discovery)等.
+
 > traceroute是利用ICMP检查链路情况的工具.
 >
 > Traceroute 判断能否到达目的主机的方法: 会发送一份 UDP 数据报给目的主机,但它会选择一个不可能的值作为 UDP 端口号(大于 30000). 当该数据报到达时,将使目的主机的 UDP 模块
@@ -684,6 +686,14 @@ net.ipv4.tcp_fack : 启用转发应答（Forward Acknowledgment），这可以�
 
 
 ## 扩展阅读
+### quic/sctp(stream control transmission protocol)和数据包拥塞控制协议(DCCP, Datagram Congestion Control Protocol)
+参考:
+- [http3为什么不基于UDP使用SCTP](https://http3-explained.haxx.se/zh/why-quic/why-tcpudp)
+
+sctp和dccp兼具tcp和udp的特点. sctp已与LTE(Long Term Evolution)结合使用, 而dccp还未在大型网络中测试.
+
+> 若要了解更多SCTP与QUIC的差异，请参阅[A Comparison between SCTP and QUIC](https://http3-explained.haxx.se/zh/why-quic/why-tcpudp).
+
 ### tcp/ip配置项
 ipv4的配置在`/proc/sys/net/ipv4`里, 永久性修改时应保持到`/etc/sysctl.conf`里,两者的映射关系举例:`net.ipv4.ip_forward`=>`/proc/sys/net/ipv4/ip_forward`
 
