@@ -67,4 +67,4 @@ ps: `-p` 仅支持关闭`pr_debug`; 其他级别, 比如`pr_err`照常输出
   因为本身就不打印, 不做处理.
 
 #### grub
-grub bootargs 追加`dynamic_debug.verbose=0`, **未验证**, 且担心追加该参数后, debug输出被禁止无法按需开启.
+grub boot args 追加`dynamic_debug.verbose=0`.
