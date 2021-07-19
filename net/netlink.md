@@ -25,7 +25,7 @@ Netlink 相对于系统调用，ioctl 以及 /proc文件系统而言具有以下
 > [Netlink 消息格式](https://tools.ietf.org/html/rfc3549#section-2.3.2)
 
 ## netlink常用数据结构及函数
-netlink协议实现大都位于[`net/netlink`](https://elixir.bootlin.com/linux/v5.10.50/source/net/netlink)下. 最常用的是af_netlink.c, 它提供了netlink内核套接字api; 而genetlink.c提供了新的通用netlink api, 使用它创建netlink消息更容易. diag.c提供的api用于读写有关netlink套接字的信息.
+netlink协议实现大都位于[`net/netlink`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink)下. 最常用的是af_netlink.c, 它提供了netlink内核套接字api; 而genetlink.c提供了新的通用netlink api, 使用它创建netlink消息更容易. diag.c提供的api用于读写有关netlink套接字的信息.
 
 用户态应用使用标准的 socket API有`sendto()，recvfrom()； sendmsg(), recvmsg()`
 
@@ -58,8 +58,27 @@ Netlink 消息头使用以下格式：（来自 [RFC 3549](https://tools.ietf.or
 
 最后，有效载荷可能会立即跟随 netlink 消息头. 再次注意, 有效载荷必须填充到 4 字节的边界(header已对齐).
 
+## kernel
+在kernel网络栈中, 可创建多种netlink套接字, 它们分别处理不同类型的消息. 比如处理NETLINK_ROUTE消息的netlink套接字是在[rtnetlink_net_init()](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L5631)中创建到来.
+
+rtnetlink套接字支持网络命名空间. 网络命名空间对象([`struct net`](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/net_namespace.h#L56))包含一个名为rtnl的成员(rtnetlink套接字). 因此rtnetlink_net_init()调用netlink_kernel_create()创建rtnetlink套接字后会将其赋值给rtnl.
+
+netlink_kernel_create()参数:
+1. net : 网络命名空间
+1. netlink协议 : 比如NETLINK_ROUTE表示rtnetlink消息, NETLINK_XFRM表示IPsec消息, NETLINK_AUDIT表示审计子系统消息等. 有20多种netlink协议, 但不多于32(MAX_LINKS), 它们定义在[include/linux/netlink.h](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L9)
+1. [netlink_kernel_cfg](https://elixir.bootlin.com/linux/v5.10.51/source/include/linux/netlink.h#L44)的指针 : 用于创建netlink套接字的可选参数
+    
+    - groups : 用于指定组播组(或组播组掩码). 要加入组播组, 可通过设置sockaddr_nl->nl_groups(也可调用libnl中的`nl_join_groups()`)来实现, 但使用这种方式最多只能加入32个组播组. 从2.6.14起, libnl的nl_socket_add_memberships()/nl_socket_drop_memberships()可利用套接字选项NETLINK_ADD_MEMBERSHIP/NETLINK_DROP_MEMBERSHIP来加入/退出组播组, 并可加入更多的组播组.
+    - flags : NL_CFG_F_NONROOT_RECV, 非root用户可绑定到组播组, netlink_bind()绑定到组播组时会检查它; NL_CFG_F_NONROOT_SEND, 非root用户可发送组播.
+    - input ： 指定回调函数. NULL时表示内核套接字将无法接收来自用户空间的数据(但能从kernel向userspace发送), 对于uevent内核事件就只需该种单项发送, 因此lib/kobject_uevent.c#uevnet_net_init()中就指定成了NULL. rtnetlink套接字使用rtnetlink_rcv处理来自用户空间的数据.
+    - cb_mutex : 互斥锁. 没有指定时默认使用[cb_def_mutex](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L642), 只有rtnetlink套接字使用了rtnl_mutex, 其他均未指定互斥锁.
+
+netlink_kernel_create()->[__netlink_kernel_create()](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2029)->[netlink_insert()](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L560)
+
+netlink_insert()在nl_table表中创建一个条目. 对nl_table表的访问由读写锁nl_table_lock保护; netlink_lookup()可根据指定的协议和端口号对它进行查找; 要为特定消息类型注册回调函数可用rtnl_registerr(). 网络栈很多地方都注册了这样的回调函数, 比如rtnetlink_init()中为RTM_NEWLINK(新建链路), RTM_DELLINK(删除链路), RTM_GETROUTE(转储路由表)等; 在net/core/neighbour.c中, 为RTM_NEWNEIGH(创建新邻居), RTM_DELHEIGH(删除邻居), RTM_GETNEIGHTBL(转储邻居表)等消息注册了回调函数.
+
 ## struct
-### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.50/source/include/uapi/linux/netlink.h#L37)
+### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L37)
 它表示netlink套接字的地址:
 - nl_family : 始终为AF_NETLINK
 - nl_pad : 总是0
