@@ -28,7 +28,7 @@
 
 #### linux kernel在线阅读
 - [elixir.bootlin.com/linux **推荐**](https://elixir.bootlin.com/linux/latest/source)和[sourcegraph linux](https://sourcegraph.com/github.com/torvalds/linux@v5.8-rc3), 适合跳转
-- [sourcegraph.com](https://sourcegraph.com/search?q=repo:%5Egithub%5C.com/torvalds/linux%24%40v5.8-rc5+&patternType=literal), 适合跳转+搜索
+- [sourcegraph.com](https://sourcegraph.com/search?q=context:global+repo:%5Egithub%5C.com/torvalds/linux%24%40master&patternType=literal), 适合跳转+搜索
 - [github.com/torvalds/linux](https://github.com/torvalds/linux), 适合搜索
 - [轻松认识 Linux kernel](http://www.bricktou.com/)
 

@@ -45,18 +45,55 @@ netlink协议实现大都位于[`net/netlink`](https://elixir.bootlin.com/linux/
 > 已废弃的net-tools基于ioctl.
 
 ## Netlink 消息格式
-Netlink 消息遵循非常特殊的格式: **所有消息必须与 4 字节边界对齐**. 例如，16 字节的消息必须按原样发送，但是 17 字节的消息必须被填充到 20 个字节.
+Netlink 消息遵循非常特殊的格式(定义在RFC 3549的2.2 `Message Format`): **所有消息必须与 4 字节边界对齐**. 例如，16 字节的消息必须按原样发送，但是 17 字节的消息必须被填充到 20 个字节.
 
 与典型的网络通信不同，netlink 使用主机字节顺序来编码和解码整数，而不是普通的网络字节顺序（大端）.
 
-Netlink 消息头使用以下格式：（来自 [RFC 3549](https://tools.ietf.org/html/rfc3549#section-2.3.2)）
-1. 长度（32位）：整个消息的长度，包括报头和有效载荷（消息体）
-1. 类型（16位）：消息包含什么样的信息，如错误，multi-part 消息的结束等
-1. 标志（16位）：指示消息是请求的位标志，如 multi-part ，请求确认等
-1. 序列号（32位）：用于关联请求和响应的数字；每个请求递增
-1. PortID（PID）（32位）：有时称为端口号；用于唯一标识特定 netlink 套接字的数字, 类似于TCP/UDP的port, 与进程的pid是两码事
+Netlink [nlmsghdr](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L44) 消息头(来自 [RFC 3549](https://tools.ietf.org/html/rfc3549#section-2.3.2))使用以下格式, 长度固定, 共16B:
+1. nlmsg_len,长度（32位）：整个消息的长度，包括报头和有效载荷（消息体）
+1. nlmsg_type,类型（16位）：消息包含什么样的信息，如错误，multi-part 消息的结束等
 
-最后，有效载荷可能会立即跟随 netlink 消息头. 再次注意, 有效载荷必须填充到 4 字节的边界(header已对齐).
+    - NLMSG_NOOP : 不执行任何操作， 必须将消息丢弃
+    - NLMSG_ERROR : 发生了错误
+    - NLMSG_DONE : 标识由多部分组成的消息的末尾
+    - NLMSG_OVERRUN : 缓冲区溢出通知, 表示发生了错误, 数据已丢失
+
+    协议簇可添加自己的netlink消息类型, 比如rtnetlink添加的RTM_NEWLINK等. 但小于NLMSG_MIN_TYPE(0x10)的消息类型值需要保留, 用于控制消息.
+1. [nlmsg_flags](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L54), 标志（16位）：指示消息是请求的位标志，如 multi-part ，请求确认等
+
+    - NLM_F_REQUEST : 消息为请求消息
+    - NLM_F_MULTI :
+    - NLM_F_ACK : 希望接收方收到ack对消息进行应答. netlink ack消息由[`netlink_ack()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2398)发送.
+    - NLM_F_DUMP : 检索有关表/条目的消息
+    - NLM_F_ROOT : 指定root
+    - NLM_F_MATCH : 返回所有匹配的条目
+    - NLM_F_ATOMIC : 该标志已废弃
+    - NLM_F_REPLACE : 覆盖已有条目 # 当前开始的标志都是针对条目创建的说明符
+    - NLM_F_EXCL : 保留已有条目不动
+    - NLM_F_CREATE : 创建条目(如果它不存在)
+    - NLM_F_APPEND : 在列表末尾添加条目
+    - NLM_F_ECHO : 回应当前请求
+1. nlmsg_seq, 序列号（32位）：用于关联请求和响应的数字；每个请求递增. netlink并未要求必须使用序列号.
+1. nlmsg_pid, PortID（PID）（32位）：有时称为端口号；用于唯一标识特定 netlink 套接字的数字, 类似于TCP/UDP的port. 对于从内核发出的消息总为0; 对于从用户空间发往kernel时, 可将其设置为发送消息的用户空间进程的pid.
+
+最后，有效载荷可能会立即跟随 netlink 消息头. 再次注意, 有效载荷必须填充到 4 字节的边界(header已对齐). 它用TLV(类型-长度-值)表示, 其中类型和长度字段的长度是固定值, 通常是1~4B.
+
+netlink 属性允许往 neltink 消息中添加任意数量的任意长度数据段, 它在playload和pad(如果有的话)后, 所有的netlink属性必须与4B边界(NLA_ALIGNTO)对其.
+![](/misc/img/net/netlink/attribute_hdr.png)
+
+netlink属性头用[nlattr](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L213)表示:
+- nla_len : 属性的长度
+- [nla_type](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/netlink.h#L165) : 属性的类型, 常用的有:
+
+    - NLA_U32 : 32位无符号整数
+    - NLA_STRING : 变长字符串
+    - NLA_NESTED : 嵌套属性
+    - NLA_UNSPEC : 类型和长度未知
+
+每个协议簇都可定义属性有效性策略, 即对收到的属性的期望, 它用[nla_policy](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/netlink.h#L315)表示.
+属性有效性策略是nla_policy的数组, 它用属性号作为索引, 对每个属性(定长属性除外), 如果nla_policy的len为0则不执行有效性检查. 如果属性类型是NLA_STRING, 则len值应为字符串的最大长度(不包括末尾的NULL); 如果属性类型是NLA_UNSPEC, 应将len设置为属性有效载荷的长度; 如果是NLA_FLAG, 将不使用len(因为属性存在表示true, 不存在表示false)
+
+在kernel中, 接收通用netlink消息由[genl_rcv_msg()](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/genetlink.c#L787)负责, 如果消息flag是NLM_F_DUMP则调用netlink_dump_start()来转储表; 否则调用nlmsg_parse()对playload进行分析. nlmsg_parse()调用validate_nla()来验证属性的有效性. 如果属性的类型值大于maxtype, 出于向后兼容考虑会丢弃; 没有通过验证将不执行genl_rcv_msg()的后续操作. 
 
 ## kernel
 在kernel网络栈中, 可创建多种netlink套接字, 它们分别处理不同类型的消息. 比如处理NETLINK_ROUTE消息的netlink套接字是在[rtnetlink_net_init()](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L5631)中创建到来.
@@ -76,6 +113,19 @@ netlink_kernel_create()参数:
 netlink_kernel_create()->[__netlink_kernel_create()](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2029)->[netlink_insert()](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L560)
 
 netlink_insert()在nl_table表中创建一个条目. 对nl_table表的访问由读写锁nl_table_lock保护; netlink_lookup()可根据指定的协议和端口号对它进行查找; 要为特定消息类型注册回调函数可用rtnl_registerr(). 网络栈很多地方都注册了这样的回调函数, 比如rtnetlink_init()中为RTM_NEWLINK(新建链路), RTM_DELLINK(删除链路), RTM_GETROUTE(转储路由表)等; 在net/core/neighbour.c中, 为RTM_NEWNEIGH(创建新邻居), RTM_DELHEIGH(删除邻居), RTM_GETNEIGHTBL(转储邻居表)等消息注册了回调函数.
+
+要使用netlink内核套接字, 需要使用[`rtnl_register()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L267)注册, 参数是:
+1. protocol, 协议簇(如果不针对任何协议, 可以设为PF_UNSPEC), 其他见[`include/linux/socket.h`](https://elixir.bootlin.com/linux/v5.10.51/source/include/linux/socket.h#L230).
+1. netlink消息类型, 如RTM_NEWLINK, RTM_NEWNEIGH. rtnetlink有一些专用的消息类型, 见[include/uapi/linux/rtnetlink.h](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/rtnetlink.h#L25).
+1. 回调函数:doit, dumpit和calcit, 指定了为处理消息而执行的操作, 通常只指定一个即可.
+
+    - doit用于指定添加, 删除, 修改等操作
+    - dumpit用于检索操作
+    - calcit用于计算缓冲区大小
+
+rtnl_register()会将组织好的结构放入rtnl_msg_handlers. rtnl_msg_handlers的第一级是以protocol为索引的数组, 每个成员本身也是一个将消息类型作为其索引的表.
+
+rtnetlink消息是使用rtmsg_ifinfo()发送的. 比如[`dev_open()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/dev.c#L1564)使用了`rtmsg_ifinfo(RTM_NEWLINK, dev, IFF_UP|IFF_RUNNING, GFP_KERNEL)`来创建一条新链路. [`rtmsg_ifinfo()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L3845)首先调用`nlmsg_new()`分配一个大小合适的sk_buff; 然后创建两个对象: netlink消息报头nlmsghdr和ifinfomsg对象, 后者紧跟在nlmsghdr后面, 并由rtnl_fill_ifinfo()初始化这两对象. 再调用[`rtnl_notify()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L728)发送数据包, 其实实际发送由[`nlmsg_notify()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2524)完成.
 
 ## struct
 ### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L37)
