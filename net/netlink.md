@@ -2,6 +2,7 @@
 参考:
 - [linux netlink通信机制](https://www.cnblogs.com/wenqiang/p/6306727.html)
 - [Linux，Netlink 和 Go](http://blog.studygolang.com/2017/07/linux-netlink-and-go-part-1-netlink/)
+- [Netlink 库 -- 官方开发者教程中文版第N部分](http://blog.guorongfei.com/2015/02/12/libnl-translation-part6/)
 
 netlink是一种在RFC 3549中定义的 Linux 内核进程间通信机制(IPC), 是用以实现**用户进程与内核进程通信或多个用户空间进程间的双向通讯**, 是对标准socket实现的扩展,  也是网络应用程序与内核通信的最常用的接口.
 
@@ -64,6 +65,8 @@ Netlink [nlmsghdr](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi
     - NLM_F_REQUEST : 消息为请求消息
     - NLM_F_MULTI :
     - NLM_F_ACK : 希望接收方收到ack对消息进行应答. netlink ack消息由[`netlink_ack()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2398)发送.
+
+        内核发送ack时, 使用错误代码为0的错误消息头nlmsgerr, 此时消息类型是NLMSG_ERROR.
     - NLM_F_DUMP : 检索有关表/条目的消息
     - NLM_F_ROOT : 指定root
     - NLM_F_MATCH : 返回所有匹配的条目
@@ -102,7 +105,7 @@ rtnetlink套接字支持网络命名空间. 网络命名空间对象([`struct ne
 
 netlink_kernel_create()参数:
 1. net : 网络命名空间
-1. netlink协议 : 比如NETLINK_ROUTE表示rtnetlink消息, NETLINK_XFRM表示IPsec消息, NETLINK_AUDIT表示审计子系统消息等. 有20多种netlink协议, 但不多于32(MAX_LINKS), 它们定义在[include/linux/netlink.h](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L9)
+1. netlink协议 : 比如NETLINK_ROUTE表示rtnetlink消息, NETLINK_XFRM表示IPsec消息, NETLINK_AUDIT表示审计子系统消息等. 有20多种netlink协议, 但不多于32(MAX_LINKS), 它们定义在[include/uapi/linux/netlink.h](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L9)
 1. [netlink_kernel_cfg](https://elixir.bootlin.com/linux/v5.10.51/source/include/linux/netlink.h#L44)的指针 : 用于创建netlink套接字的可选参数
     
     - groups : 用于指定组播组(或组播组掩码). 要加入组播组, 可通过设置sockaddr_nl->nl_groups(也可调用libnl中的`nl_join_groups()`)来实现, 但使用这种方式最多只能加入32个组播组. 从2.6.14起, libnl的nl_socket_add_memberships()/nl_socket_drop_memberships()可利用套接字选项NETLINK_ADD_MEMBERSHIP/NETLINK_DROP_MEMBERSHIP来加入/退出组播组, 并可加入更多的组播组.
@@ -127,6 +130,53 @@ rtnl_register()会将组织好的结构放入rtnl_msg_handlers. rtnl_msg_handler
 
 rtnetlink消息是使用rtmsg_ifinfo()发送的. 比如[`dev_open()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/dev.c#L1564)使用了`rtmsg_ifinfo(RTM_NEWLINK, dev, IFF_UP|IFF_RUNNING, GFP_KERNEL)`来创建一条新链路. [`rtmsg_ifinfo()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L3845)首先调用`nlmsg_new()`分配一个大小合适的sk_buff; 然后创建两个对象: netlink消息报头nlmsghdr和ifinfomsg对象, 后者紧跟在nlmsghdr后面, 并由rtnl_fill_ifinfo()初始化这两对象. 再调用[`rtnl_notify()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/core/rtnetlink.c#L728)发送数据包, 其实实际发送由[`nlmsg_notify()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/af_netlink.c#L2524)完成.
 
+发生错误时, netlink使用[nlmsgerr](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L109)表示错误消息, 实际上就是由netlink消息报头和错误代码.
+
+## iproute2使用rtnetlink
+`ip route add 192.168.2.11 via 192.168.2.20`, 它通过rtnetlink, 从userspace发送一条添加路由选择条目的netlink消息(RTM_NEWROUTE). 内核rtnetlink内核套接字收到后交由rtnetlink_rcv()处理, 添加路由选择条目的工作由[`inet_rtm_newroute()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/fib_frontend.c#L868)完成. 接下来, 由`fib_table_insert()`完成插入转发信息库(FIB, 即路由选择数据库)的工作, 它还需要通知所有注册了RTM_NEWROUTE消息的侦听者. 通知过程是, 在插入新路由选择条目时, 调用了rtmsg_fib(), 它会将RTM_NEWROUTE作为参数创建一条netlink信息, 并通过调用rtnl_notify()发送, 从而通知加入了RTNLGRP_IPV4_ROUTE组播组的所有侦听者. 在内核注册RTNLGRP_IPV4_ROUTE的这些侦听者可在用户空间注册(比如iproute2), 或在路由选择守护程序(如xorp)中注册.
+
+`ip route del 192.168.2.11`, 删除前面添加的路由与上面类似, 它通过rtnetlink, 从userspace发送一条删除路由选择条目的netlink消息(RTM_DELROUTE). 内核rtnetlink内核套接字收到后交由rtnetlink_rcv()处理, 删除路由选择条目的工作由[`inet_rtm_delroute()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/fib_frontend.c#L838)完成. 接下来, 由`fib_table_delete()`完成从FIB中删除的工作. 它调用了rtmsg_fib(), 它会将RTM_DELROUTE作为参数创建一条netlink信息, 并通过调用rtnl_notify()发送.
+
+`ip monitor route`将启动一个守护进程, 它会打开一个netlink套接字, 并加入RTNLGRP_IPV4_ROUTE组播组, 当出现添加/删除路由时, 将接收到使用rtnl_notify()发送的消息, 并显示在terminal上.
+
+`ip monitor link`, 同上, 但加入的是RTNLGRP_LINK组播组. 当添加(比如`brctl addbr mybr`添加一个网桥)/删除链路时, 它会收到消息.
+
+## 通用netlink协议
+netlink协议的一个缺点是协议簇不能超过32(MAX_LINKS), 开发通用netlink簇的主要原因之一就是支持添加更多的协议簇. 它有点类似多路复用器, 使用单个netlink协议簇(NETLINK_GENERIC).
+
+要添加NETLINK协议簇需要在[include/uapi/linux/netlink.h](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L9)中定义, 但通用netlink不需要. 通用netlink被用于网络子系统外, 还被用于ACPI子系统(见drivers/acpi/event.c中acpi_event_genl_family的定义), 任务统计信息代码(kernel/taskstats.c), 过热事件(thermal event)等.
+
+通用netlink内核套接字用netlink_kernel_create()创建, 例子是[`genl_pernet_init()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/genetlink.c#L1363).
+
+通用套接字也支持网络命名空间, net包含一个名为genl_sock的成员(一个通用netlink套接字), netlink_kernel_create()创建出的通用套接字会赋值给genl_sock.
+
+创建通用netlink用户空间套接字需要使用socket()系统调用, 但更推荐使用libnl-genl api.
+
+使用通用netlink前需要[`genl_register_family(&genl_ctrl)`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/genetlink.c#L1397), 注册控制器簇genl_ctrl, 它的id是GENL_ID_CTRL. 它也是唯一一个ID在初始化时就指定的genl_family实例. 其他所有实例的id被初始化为GENL_ID_GENERATE, 实际就是0, 并在随后被替换为动态分配的值.
+
+通用netlink套接字支持注册组播组. 方法是定义一个genl_multicast_group, 再调用genl_register_mc_group(), 例子可见[net/nfc/netlink.c](https://elixir.bootlin.com/linux/v5.10.51/source/net/nfc/netlink.c#L25). 组播组的名称必须是唯一的, 因为它会被用作查找的主键. 组播组的ID是注册组播组时动态生成的(GENL_ID_CTRL除外), 这是genl_register_mc_group()调用find_first_zero_bit()完成的.
+
+内核使用通用netlink套接字的方法:
+1. 创建一个genl_family
+1. 创建一个genl_ops, 赋值给genl_family的ops成员
+1. 再调用genl_register_family()来注册genl_family
+
+有些用户空间包也使用通用netlink协议, 比如hostapd(提供了用于无线接入点和身份验证服务器的用户空间守护程序)和iw(操作无线设备及其配置, 基于nl80211和libnl库).
+
+nl80211中的genl_family是[nl80211_fam](https://elixir.bootlin.com/linux/v5.10.51/source/net/wireless/nl80211.c#L15528), 字段有:
+- hdrsize : 私有报头的长度
+- maxattr : 所支持的最大属性数
+- netsock : true, 表示是否支持网络命名空间
+- pre_doit : 调用doit()前的钩子函数
+- post_doit : 调用doit()后的钩子函数, 可以解除锁定或执行必要的私有任务.
+
+nl80211中的genl_ops是[nl80211_ops](https://elixir.bootlin.com/linux/v5.10.51/source/net/wireless/nl80211.c#L14665), 成员有:
+- cmd : 命令标志符
+- internal_flags : 簇定义和使用的私有标志. nl80211回调函数pre_doit和post_doit会根据这些flag执行操作.
+- doit : 标准命令回调函数
+- dumpit : 转储回调函数
+- done : 转储结束后执行的回调函数
+
 ## struct
 ### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L37)
 它表示netlink套接字的地址:
@@ -134,3 +184,25 @@ rtnetlink消息是使用rtmsg_ifinfo()发送的. 比如[`dev_open()`](https://el
 - nl_pad : 总是0
 - nl_pid : netlink套接字的单播地址. 对于内核netlink套接字应为0; 用户态应用会将其设为pid, 但开发者显式设为0或不设置, 调用bind()后, 内核netlink_autobind()会尝试将其赋值为当前线程的进程id. 用户态创建的多个netlink套接字需保证nl_pid唯一.
 - nl_groups : 组播组
+
+## 消息
+### NETLINK_ROUTE
+rtnetlink(NETLINK_ROUTE)消息并非限制于网络路由选择子系统消息, 还包括邻接子系统消息, 接口设置消息, 防火墙消息, netlink排队消息, 策略路由消息以及众多其他类型的rtnetlink消息. NETLINK_ROUTE消息可分为多个消息簇:
+- LINK : 网络接口
+
+    - RTM_SETLINK : 修改链路
+- ADDR : 网络地址
+- ROUTE : 路由选择消息
+
+    - RTM_NEWROUTE : 创建路由的消息类型
+    - RTM_DELROUTE : 删除路由
+    - RTM_GETROUTE : 检索路由
+- NEIGH : 邻接子系统消息
+- RULE : 策略路由消息
+- QDISC : 排队准则
+- TCLASS : 流量类别
+- ACTION : 数据包操作api, 见net/sched/act_api.c
+- NEIGHTBL : 邻接表
+- ADDRLABEL : 地址标记
+
+每个消息簇都至少有3类: 创建, 删除, 检索消息, 比如ROUTE消息; 部分消息簇有更多类型的消息, 比如LINK消息.

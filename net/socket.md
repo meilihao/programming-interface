@@ -24,9 +24,11 @@ socket是通过标准的unix文件描述符和其他的程序进行通信的一�
 > socket.listen用两个队列实现，一个SYN队列（或半连接队列）和一个accept队列（或完整的连接队列）: 处于SYN RECEIVED状态的连接被添加到SYN队列，并且当它们的状态改变为ESTABLISHED时，即当接收到3次握手中的ACK分组时，将它们移动到accept队列. 在这种情况下，listen syscall的backlog参数表示accept队列的大小. SYN队列的长度可以使用`/proc/sys/net/ipv4/tcp_max_syn_backlog`设置.
 
 端口分类:
-- 保留端口: 0~1023, 可通过`/etc/services`查看
-- 动态分配端口(也叫非特权端口): > 1024
-- 注册端口: > 1024
+- 保留端口(Well Known ports) : 0~1023, 可通过`/etc/services`查看. 它也叫, 这些端口由 IANA 分配管理, IANA 把这些端口分配给最重要的一些应用程序, 让所有的用户都知道.
+- 动态端口(Dynamic Ports, 也叫非特权端口) : > 1024
+
+  - 注册端口（Registered Ports）：从1024-49151, 由公司和其他用户向互联网名称与数字地址分配机构（ICANN）登记的端口号
+  - 客户端使用的端口号 : 49152~65535, 这类端口号仅在客户进程运行时才动态选择, 因此又叫做短暂端口号
 
 ## 类型
 socket类型即数据传输方式, 也是socket 传输层的协议.
