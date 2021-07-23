@@ -177,6 +177,23 @@ nl80211中的genl_ops是[nl80211_ops](https://elixir.bootlin.com/linux/v5.10.51/
 - dumpit : 转储回调函数
 - done : 转储结束后执行的回调函数
 
+`iw dev wlan0 scan`时, 将通过通用netlink套接字从用户空间发送一条通用netlink消息, 该消息的命令是NL80211_CMD_GET_SCAN, 由libnl中的nl_send_auto()(旧版libnl的话是`nl_send_auto_complete()`)发送. nl_send_auto()会填充netlink消息报头中缺失的部分, 如果不需要自动填充消息的话, 可直接使用nl_send(). 该消息由[`nl80211_dump_scan()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/wireless/nl80211.c#L9289)处理.
+
+要向kernel发送命令, 用户空间程序需要知道簇id. 在用户空间中, 簇名是已知的, 但簇id未知(由kernel运行期间动态分配). 用户空间程序可向kernel发送通用netlink请求CTRL_CMD_GETFAMILY()来获取簇id. 该请求会由[`ctrl_getfamily()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/genetlink.c#L1025)处理, 它返回簇id外, 还会返回簇支持的操作.
+
+### 创建和发送通用netlink消息
+通用netlink消息格式: netlink消息报头(nlmsghdr) + 通用netlink消息报头(genlmsghdr) + 用户特定的消息报头(可选) + 通用netlink消息的playload(可选).
+
+[genlmsghdr](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/genetlink.h#L13):
+- cmd : 通用netlink消息类型. 每个通用簇都有自己的命令, 比如nl80211_fam簇的[nl80211_commands](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/nl80211.h#L1183).
+- version : 可用于version控制, 作用是能够在不破坏向后兼容性的情况下修改消息的格式.
+- reserved: 保留, 未使用
+
+
+为通用netlink消息分配缓冲区是由[`genlmsg_new()`](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L406)完成, 它是nlmsg_new()的包装器. 在genlmsg_new()分配缓冲区后, 调用genlmsg_put()来创建通用netlink报头. 单播通用netlink消息使用genlmsg_unicast()发送, 它实际是nlmsg_unicast()的包装器. 发送组播通用netlink消息有两种方法:
+- [genlmsg_multicast()](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L321) : 将消息发送到默认网络命名空间net_init
+- [genlmsg_multicast_allns()](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L339) : 将消息发送到所有网络命名空间
+
 ## struct
 ### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L37)
 它表示netlink套接字的地址:

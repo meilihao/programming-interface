@@ -136,6 +136,9 @@ RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 
 io_uring和SPDK
 
+## 媒体系统
+[Pipewire代替PulseAudio, 并使用WirePlumber管理Pipewire](https://www.oschina.net/news/151623/fedora-may-use-wireplumber).
+
 ## FAQ
 ### 驱动趋势
 1. 将设备驱动程序移动到用户空间（而不是内核）
