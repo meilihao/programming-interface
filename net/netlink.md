@@ -181,6 +181,8 @@ nl80211中的genl_ops是[nl80211_ops](https://elixir.bootlin.com/linux/v5.10.51/
 
 要向kernel发送命令, 用户空间程序需要知道簇id. 在用户空间中, 簇名是已知的, 但簇id未知(由kernel运行期间动态分配). 用户空间程序可向kernel发送通用netlink请求CTRL_CMD_GETFAMILY()来获取簇id. 该请求会由[`ctrl_getfamily()`](https://elixir.bootlin.com/linux/v5.10.51/source/net/netlink/genetlink.c#L1025)处理, 它返回簇id外, 还会返回簇支持的操作.
 
+> 对于所有注册的通用netlink簇, 都可使用iproute2中的genl(`genl ctrl list`)来获取它们的各种参数(簇id, 报头长度, 最大属性数等).
+
 ### 创建和发送通用netlink消息
 通用netlink消息格式: netlink消息报头(nlmsghdr) + 通用netlink消息报头(genlmsghdr) + 用户特定的消息报头(可选) + 通用netlink消息的playload(可选).
 
@@ -189,10 +191,35 @@ nl80211中的genl_ops是[nl80211_ops](https://elixir.bootlin.com/linux/v5.10.51/
 - version : 可用于version控制, 作用是能够在不破坏向后兼容性的情况下修改消息的格式.
 - reserved: 保留, 未使用
 
-
 为通用netlink消息分配缓冲区是由[`genlmsg_new()`](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L406)完成, 它是nlmsg_new()的包装器. 在genlmsg_new()分配缓冲区后, 调用genlmsg_put()来创建通用netlink报头. 单播通用netlink消息使用genlmsg_unicast()发送, 它实际是nlmsg_unicast()的包装器. 发送组播通用netlink消息有两种方法:
 - [genlmsg_multicast()](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L321) : 将消息发送到默认网络命名空间net_init
 - [genlmsg_multicast_allns()](https://elixir.bootlin.com/linux/v5.10.51/source/include/net/genetlink.h#L339) : 将消息发送到所有网络命名空间
+
+用户空间创建netlink套接字通过`socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC)`, 之后内核由`netlink_create()`处理, 这与非通用netlink套接字一样. 这样就可使用套接字api(bind, sendmsg, recvmsg等)执行其他操作了, 但**推荐使用libnl**.
+
+libnl-genl提供了通用netlink api, 可用于管理控制器, 簇和命令注册. 它使用genl_connect()来创建本地套接字文件描述符, 并将该套接字关联到netlink协议NETLINK_GENERIC上.
+
+以iw使用libnl_genl的`iw dev wlan0 list`举例:
+1. state->nl_sock = nl_socket_alloc() : 分配一个套接字, 这里使用的是libnl核心api, 而未使用libnl-genl
+1. genl_connect(state->nl_sock) : 以NETLINK_GENERIC为参数调用socket(), 并对套接字调用bind(). genl_connect()是libnl-genl的方法
+1. genl_ctrl_resolve(state->nl_sock, "nl80211") : 将通用netlink簇名(nl80211)解析为相应的簇标识符, 因为用户空间向kernel发送后续消息必须指定簇id.
+
+    1. 调用genl_ctrl_probe_by_name()发送命令为CTRL_CMD_GETFAMILY的通用netlink消息. 在kernel中通用netlink控制器(nlctrl)使用ctrl_getfamily()处理该命令, 并将簇id返回到用户空间.
+
+### 套接字监视借接口
+> ss命令就使用了套接字监视接口
+
+netlink套接字sock_diag提供了一个基于netlink的子系统, 即基于netlink的内核套接字NETLINK_SOCK_DIAG, 可用于获取有关套接字的信息, 在kernel中实现它旨在在linux用户空间中支持查找点/恢复功能(CRIU).
+
+> 检查点: 将进程的状态存储到文件系统
+
+创建NETLINK_SOCK_DIAG是使用[diag_net_init()](https://elixir.bootlin.com/linux/v5.10.52/source/net/core/sock_diag.c#L309).
+
+sock_diag模块包含了一个[sock_diag_handlers](https://elixir.bootlin.com/linux/v5.10.52/source/net/core/sock_diag.c#L18)表, 用于包含一系列[sock_diag_handler](https://elixir.bootlin.com/linux/v5.10.52/source/include/linux/sock_diag.h#L15)对象, 该表使用协议号作为索引.
+
+每个需要在此表中添加套接字监视接口条目的协议都会预先定义一个处理程序, 然后调用[`sock_diag_register`](https://elixir.bootlin.com/linux/v5.10.52/source/net/core/sock_diag.c#L181)注册, 比如针对unix套接字的[unix_diag_handler](https://elixir.bootlin.com/linux/v5.10.52/source/net/unix/diag.c#L331), 这样就可使用`ss --unix`转储unix diag模块收集的统计信息了. 其他diag模块有udp(net/ipv4/udp_diag.c), tcp(net/ipv4/tcp_diag.c), dccp(net/dccp/diag.c), AF_PACKET(net/packet/diag.c)等.
+
+还有一个针对netlink套接字本身的diag模块. `/proc/net/netlink`提供了有关netlink套接字(netlink_sock对象)的信息, 比如套接字的portid, groups, inode等. `/proc/net/netlink`由[netlink_seq_show()](https://elixir.bootlin.com/linux/v5.10.52/source/net/netlink/af_netlink.c#L2684)提供. 有些netlink_sock字段是`/proc/net/netlink`未提供的, 比如dst_group, dst_portid, 以及编号超过32的组播组, 它们是ss通过netlink套接字监视接口(net/netlink/diag.c)获取的.
 
 ## struct
 ### [sockaddr_nl](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/netlink.h#L37)
@@ -201,6 +228,9 @@ nl80211中的genl_ops是[nl80211_ops](https://elixir.bootlin.com/linux/v5.10.51/
 - nl_pad : 总是0
 - nl_pid : netlink套接字的单播地址. 对于内核netlink套接字应为0; 用户态应用会将其设为pid, 但开发者显式设为0或不设置, 调用bind()后, 内核netlink_autobind()会尝试将其赋值为当前线程的进程id. 用户态创建的多个netlink套接字需保证nl_pid唯一.
 - nl_groups : 组播组
+
+## netlink重要方法
+见`<<精通Linux内核网络>> 2.4 快速参考`
 
 ## 消息
 ### NETLINK_ROUTE
