@@ -1,5 +1,5 @@
 # mpt3sas
-mpt3sas是SAS卡驱动.
+mpt3sas是SAS卡驱动, 源码在[drivers/scsi/mpt3sas](https://elixir.bootlin.com/linux/v5.10.53/source/drivers/scsi/mpt3sas)
 
 ## FAQ
 ### [debug mpt3sas](https://bugzilla.kernel.org/show_bug.cgi?id=60644)
