@@ -92,6 +92,20 @@ ip_local_deliver_finish()处理的是目的地为当前机器的数据包:
     1. 不是ICMP_ECHO, ICMP_TIMESTAMP, ICMP_ADDRESS, ICMP_ADDRESSREPLY中的一个时直接丢包
 1. 根据消息类型从icmp_pointers获取对应的hanler进行处理
 
-    - ICMP_ECHO由icmp_echo()处理
-    - 除ping外, 其他消息只有ICMP_TIMESTAMP需要响应, 由icmp_timestamp()处理.
-    - icmp应答有icmp_reply()处理.
+    - ICMP_ECHO由icmp_echo()处理; ICMP_TIMESTAMP由icmp_timestamp()处理
+    - 除上述两种消息外的其他消息不需要响应
+
+### 发送icmpv4消息
+发送icmpv4消息由两种方法:
+1. icmp_reply() : 用于发送ICMP_ECHO和ICMP_TIMESTAMP的响应
+1. icmp_send() : 发送当前机器在特定条件下主动发送的icmpv4消息
+
+    在ipv4网络栈的很多地方都用了它, 比如netfilter, ip_forward.c, ipip和ip_gre之类的隧道中等等
+
+上面两种方法最终都调用[icmp_push_reply()](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/icmp.c#L366)来实际发送数据包.
+
+ip报头协议字段中的协议不存在时需要发送ICMP_DEST_UNREACH/ICMP_PROT_UNREACH消息(没有对应的处理程序), 该情况由两种:
+1. ip报头中的协议是错误的, 没在[协议列表](https://elixir.bootlin.com/linux/v5.10.51/source/include/uapi/linux/in.h#L28)中.
+1. kernel不支持该协议
+
+[ip_local_deliver_finish()](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/ip_input.c#L226)->[ip_protocol_deliver_rcu()](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/ip_input.c#L187)存在没找到协议时的处理逻辑.
