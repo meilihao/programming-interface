@@ -5,6 +5,8 @@ RFC 792对icmpv4做了基本定义, 包括icpmv4的目标以及各种icpmv4消�
 
 > ping, traceroute是最典型的icmp应用.
 
+> ICMPv4和ICMPv6是kernel必须的, 因此不能构建成module.
+
 ## icmpv4
 icmpv4消息分两类:
 1. 错误消息
@@ -14,6 +16,8 @@ ping命令是在用户空间(by iputils)打开一个原始套接字并发送一�
 traceroute是用于确定主机与给定目标ip间路径的工具(默认使用udp), 它基于ip报头中的ttl, 通过将ttl设为不同的值(从1开始, 收到ICMP_DEST_UNREACH消息就递增， 直至到达或超限制), 当ttl=0时转发设备会返回一条ICMP_TIME_EXCEED消息. 它利用返回的icmp 超时消息来创建数据包经过的路由列表, 直到到达目标ip并返回icmp echo reply消息.
 
 icmpv4模块在[net/ipv4/icmp.c](https://elixir.bootlin.com/linux/v5.10.52/source/net/ipv4/icmp.c).
+
+> 组播组成员关系在ipv4中由IGMP(internet组管理协议)完成的.
 
 ### icmpv4的初始化
 icmpv4的初始化是在引导阶段的[`inet_init()`](https://elixir.bootlin.com/linux/v5.10.52/source/net/ipv4/af_inet.c#L1938)中的[`icmp_init()`](https://elixir.bootlin.com/linux/v5.10.52/source/net/ipv4/af_inet.c#L2023)里完成.
@@ -142,3 +146,27 @@ icmp_send()的参数:
 - 组播侦听者发现(Multicast Listener Discovery, MLD)协议, MLD协议相当于ipv4中的IGMP协议.
 
 icmpv6在rfc 4443中定义, 它的实现基于ipv4, 但更复杂.
+
+pingv6和traceroute6是基于ICMPv6. ICMPv6是在net/ipv6/icmp.c和net/ipv6/ip6_icmp.c中实现的.
+
+### ICMPv6初始化
+icmpv6的初始化是由[`inet6_init()`](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/af_inet6.c#L1038)中的[`icmpv6_init()`](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L1060)和[icmpv6_sk_ops->init=icmpv6_sk_init()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L1023)完成.
+
+[icmpv6_protocol](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L105)的成员有:
+1. 回调函数handler : icmpv6_rcv(), 这意味着协议字段是IPPROTO_ICMPV6(58)的数据包都由icmpv6_rcv()处理
+
+    设置了标志INET6_PROTO_NOPOLICY就不检查IPsec策略, 此时ip6_input_finish()将不会调用xfrm6_policy_check().
+
+与ICMPv4一样, kernel为每个cpu都创建了一个原始ICMPv6套接字, 并将它们存储在一个array中. 要访问当前的sk, 需调用icmpv6_sk().
+
+### ICMPv6报头
+icmpv6报头[icmp6hdr](https://elixir.bootlin.com/linux/v5.10.53/source/include/uapi/linux/icmpv6.h#L8)的组成:
+1. [type(8b)](https://elixir.bootlin.com/linux/v5.10.53/source/include/uapi/linux/icmpv6.h#L89)
+
+    type的最高位是0时表示错误消息(即取值范围0~127); 最高位是1时(取值:128~255)表示信息消息. type具体列表可见[icmpv6-parameters.xml](https://www.iana.org/assignments/icmpv6-parameters/icmpv6-parameters.xml).
+1. code(8b)
+1. checksum(16b)
+1. payload
+
+### 接收ICMPv6消息
+收到的ICMPv6数据包交由[icmpv6_rcv()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L859), 它的参数只有一个skb.
