@@ -169,4 +169,71 @@ icmpv6报头[icmp6hdr](https://elixir.bootlin.com/linux/v5.10.53/source/include/
 1. payload
 
 ### 接收ICMPv6消息
+参考:
+- [Linux内核中的IPSEC实现(3)](https://blog.csdn.net/dolphin98629/article/details/17713455)
+
 收到的ICMPv6数据包交由[icmpv6_rcv()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L859), 它的参数只有一个skb.
+
+在icmpv6_rcv(), 在执行`xfrm6_policy_check()`(普通包返回true, 因此跳过IPsec策略检查)后, 将InMsgs SNMP计数器(ICMP6_MIB_INMSGS)加1. 接下来检查checksum: 如果不对, 将InErrors SNMP计数器(ICMP6_MIB_INERRORS)加1， 然后释放skb, 最终返回0即不返回错误. 然后, 读取ICMPv6报头的消息类型, 并调用ICMP6MSGIN_INC_STATS()宏将相应的procfs消息类型计数器(每种ICMPv6消息类型都有一个procfs计数器)加1, 例如: ICMPv6响应ping时, /proc/net/snmp6.Icmp6InEchos加1; 收到ICMPv6邻居请求是, 将/proc/net/snmp6.Icmp6InNeighborSolicits加1.
+
+在ICMPv6中, 没有ICMPv4 icmp_pointers那样的分派表, 而是使用了一个较长的switch(type)来处理:
+1. ICMP6_ECHO_REQUEST : 回应请求, 由icmpv6_echo_reply()处理
+1. ICMP6_ECHO_REPLY : 回应应答, 由ping_rcv()处理, 它能处理ipv4/6双栈.
+1. ICMP6_PKT_TOOGIG : 数据包太长
+
+    首先检查数据块区域(skb->data指向的区域)包含的数据块长度是否不短于ICMP报头的长度, 该逻辑由pskb_may_pull()完成, 如果不满足该条件则丢包. 然后调用icmp6_notify()->raw6_icmp_error(), 让注册的套接字对ICMP消息进行处理.
+1. ICMP6_ECHO_REQUEST, ICMP6_TIME_EXCEED和ICMP6_PARAMPROB也由icmp6_notify()处理.
+1. 邻居消息
+
+    所有邻居发现消息都由邻居发现方法[ndisc_rcv()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/ndisc.c#L1730)处理, 全部消息有:
+
+    1. NDISC_ROUTER_SOLICITATION : 这些消息通常发送到表示所有路由器的组播地址FF02::2, 并使用路由器通知消息进行应答.
+    1. NDISC_ROUTER_ADVERTISEMENT : 这些消息由路由器定期发送或为响应路由器请求消息而发送. 路由器通告包含用于确定链路和(或)地址配置, 建议ttl等信息的前缀.
+    1. NDISC_NEIGHBOUR_SOLICITATION : 相当于ipv4中的arp请求
+    1. NDISC_NEIGHBOUR_ADVERTISEMENT ： 相当于ipv4中的arp应答
+    1. NDISC_REDIRECT : 路由器使用它将前往目的地的最佳第一跳告诉主机
+1. ICMP6_MGM_QUERY : 组播侦听者查询, 由igmp6_event_query()处理
+1. ICMP6_MGM_REPORT : 组播侦听者报告, 由igmp6_event_report()处理
+1. 类型未知消息及下述消息由icmpv6_notify()处理
+
+    1. ICMP6_MGM_REDUCTION : 退出组播组时, 主机会发送一条MLDv2 ICMP6_MGM_REDUCTION消息, 可见`net/ipv6/mcast.c`中的igmp6_leave_group().
+    1. ICMP6_MLD2_REPORT : MLDv2组播侦听者报告数据包, 其目标地址通常为组播组地址FF02:16-表示所有支持MLDv2的路由器
+    1. ICMP6_NI_QUERY : 结点信息查询
+	1. ICMPV6_NI_REPLY : 结点信息响应
+	1. ICMPV6_DHAAD_REQUEST : ICMP归属代理地址发现请求消息(Home Agent Address Discovery Request Message), 见RFC 6275.
+	1. ICMPV6_DHAAD_REPLY : ICMP归属代理地址发现应答消息(Home Agent Address Discovery Reply Message), 见RFC 6275.
+	1. ICMPV6_MOBILE_PREFIX_SOL : ICMP移动前缀请求消息格式(Mobile Prefix Solicitation Message Format)
+	1. ICMPV6_MOBILE_PREFIX_ADV : ICMP移动前缀通告消息格式(Mobile Prefix Advertisement Message Format)
+
+switch(type)的default 分支中, 如果消息满足`type & ICMPV6_INFOMSG_MASK`则丢包; 而不满足该条件的其他消息(即错误消息)将交给上层处理, 者符合RFC 4443的"Message Processing Rules"中的规定.
+
+### 发送ICMPv6消息
+发送ICMPv6消息主要方法是icmpv6_send(), 在ipv6栈中很多地方调用了该方法, 但仅在响应ICMPV6_ECHO_REQUEST(ping)时是使用icmpv6_echo_reply().
+
+1. 发送"跳数限制超时"消息
+[ip6_forward()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/ip6_output.c#L460)在`hop_limit <= 1`时调用`icmpv6_send(skb, ICMPV6_TIME_EXCEED, ICMPV6_EXC_HOPLIMIT, 0)`
+
+1. 发送"分段重组超时"消息
+[ip6frag_expire_frag_queue()](https://elixir.bootlin.com/linux/v5.10.53/source/include/net/ipv6_frag.h#L64)在分段超时发送`icmpv6_send(head, ICMPV6_TIME_EXCEED, ICMPV6_EXC_FRAGTIME, 0)`.
+
+1. 发送"目的地不可达/端口不可达"消息
+[__udp6_lib_rcv()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/udp.c#L894)收到udpv6数据包后, 将查找相应的UDPv6套接字. 如果没找到, 将检查checksum是否正确, 如果不正确, 将直接丢弃; 如果正确将更新统计信息(MIB计数器: /proc/net/snmp6.Udp6NoPorts), 并调用icmpv6_send()发送该消息`icmpv6_send(skb, ICMPV6_DEST_UNREACH, ICMPV6_PORT_UNREACH, 0)`.
+
+1. 发送"需要分段"消息
+ip6_forward()转发数据包时, 如果其长度大于出站MTU且skb的local_df位未设置(`if (ip6_pkt_too_big(skb, mtu))`), 将数据包丢弃, 并发送一条`icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu)`. 路径MTU(PMTU)发现过程使用了这种消息包含的信息.
+
+> 在ipv4中, 这种情形下是发送ICMP_FRAG_NEEDED的ICMP_DEST_UNREACH消息.
+
+1. 发送"参数问题"消息
+[ip6_tlvopt_unknown()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/exthdrs.c#L74)在分析扩展报头时出错将发送`icmpv6_param_prob(skb, ICMPV6_UNK_OPTION, optoff)`.
+
+icmpv6_send()会调用icmpv6_xrlim_allow()来实现限速, 和ICMPv4一样, 也不会对所有类型的流量执行限速, 例外有:
+1. 信息消息
+1. PMTU消息
+1. 环回设备
+
+如果上述条件不满足, 将调用与ipv4共享的inet_peer_xrlim_allow()来限速, 但不同的是在ipv6中不能设置速率掩码. ICMPv6规范RFC 4443并未禁止这样做, 但这种操作从未实现过.
+
+[icmp6_send()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L447)与icmp_send()类似, 执行一系列完整性检查后， 调用is_ineligible()来检查触发消息是否为ICMPv6错误消息, 如果是就退出了. 这种消息的长度不应超过1280, 即ipv6最小MTU: IPV6_MIN_MTU, 这是RFC 4443的2.4(c)节规定的: 所有ICMPv6错误消息多必须在长度不超过IPv6最小MTU的情况下, 尽可能多地包含IPv6触发数据包(导致错误的数据包)的内容. 接下来, 调用ip6_append_data()将消息交给ipv6层， 并调用icmpv6_push_pending_frames()释放skb.
+
+[icmpv6_echo_reply()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L713), 是响应ICMPV6_ECHO消息时被调用. 它创建一个icmpv6_msg对象, 并将其类型设置为ICMPV6_ECHO_REPLY, 在调用ip6_append_data()和icmpv6_push_pending_frames()将这条消息交给ipv6层. 如果ip6_append_data()失败, 会把SNMP计数器(ICMP6_MIB_OUTERRORS)加1, 并调用ip6_flush_pending_frames()释放skb.
