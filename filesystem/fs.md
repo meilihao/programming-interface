@@ -238,6 +238,7 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 
 			- port_id : HBA端口的 24位交换机端口ID
 			- issues_lip : 重置HBA端口，重新尝试发现存储端口
+			- symbolic_name : 保持光纤卡型号, 固件版本, 使用的qla2xxx驱动版本
 	- fc_remote_ports : 主机到存储端口链路信息（包含未给主机分配存储的链路信息）
 
 		- rport-H:B-R : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
