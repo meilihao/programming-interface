@@ -109,3 +109,36 @@ ip报头协议字段中的协议不存在时需要发送ICMP_DEST_UNREACH/ICMP_P
 1. kernel不支持该协议
 
 [ip_local_deliver_finish()](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/ip_input.c#L226)->[ip_protocol_deliver_rcu()](https://elixir.bootlin.com/linux/v5.10.51/source/net/ipv4/ip_input.c#L187)存在没找到协议时的处理逻辑.
+
+[__udp4_lib_rcv](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/udp.c#L2339)接收udpv4数据包时, 将由__udp4_lib_lookup_skb()查找匹配的udp套接字, 如果没有, 将检查checksum是否正确. 如果不正确, 直接丢弃; 如果正确则更新统计信息, 并返回code是ICMP_PORT_UNREACH的ICMP_DEST_UNREACH消息.
+
+[ip_forward()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/ip_forward.c#L86)转发数据包时, 如果其长度超过了出站链路的MTU, 且在ipv4报头没有设置分段(DF)标志, 则将数据包丢弃, 并返回一条`ICMP_FRAG_NEEDED`. 同时在ip_forward()中其严格路由选择和网关选项(`if (opt->is_strictroute && rt->rt_uses_gateway)`)被设置, 将数据包丢弃并返回code是ICMP_SR_FAILED的ICMP_DEST_UNREACH.
+
+icmp_reply()和icmp_send()还支持限速, 通过调用[icmpv4_xrlim_allow()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/icmp.c#L313)实现, 它返回true表示允许发送, 但它也存在部分不需要限速的流量类型:
+- 消息的类型未知
+- 数据包为PMTU发现数据包
+- 设备是环回设备
+- ICMP类型在限速掩码中未指定
+
+仅当不满足上述任何条件时, 它才调用inet_peer_xrlim_allow()限速.
+
+icmp_send()的参数:
+- skb_in : 要发送的skb
+- type : icmpv4消息类型
+- code : icmpv4消息code
+- info
+
+    - 对于ICMP_PARAMETERPROB, 表示ipv4报头中发生分析问题的位置的偏移量
+    - 对于ICMP_FRAG_NEEDED的ICMP_DEST_UNREACH是表示MTU
+    - 对于ICMP_REDIR_HOST的ICMP_REDIRECT, 表示skb的ipv4报头中的目标ip地址
+
+[icmp_send()](https://elixir.bootlin.com/linux/v5.10.53/source/include/net/icmp.h#L41)发送时会先进行完整性检查, 接着, 组播和广播包会被拒绝. 为检查数据包是否经过分段, 需要检查ipv4报头的frag_off字段. 如果已分段, 将发送一条ICMPv4消息, 但这仅针对第一个分段才这样做. 因此首先需要检查发送的icmpv4消息是不是错误消息, 如果是, 在检查skb包含的是不是icmpv4错误消息, 如果仍是则直接返回, 而不发送icmpv4消息. 另外, 如果类型是icmpv4未知类型(`>NR_ICMP_TYPES`), 也不发送, 直接返回. 之后由net->ipv4.sysctl_icmp_errors_use_inbound_ifaddr的值确定目标地址, 然后调用ip_options_echo()来复制skb的ipv4报头中的ip选项, 分配并初始化一个icmp_bxm对象, 并调用icmp_route_lookup()在路由选择子系统中执行查找操作, 最终调用icmp_push_reply().
+
+[icmp_push_reply()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/icmp.c#L366)首先需要确定通过哪个套接字发送数据包`icmp_sk(dev_net((*rt)->dst.dev))`. dev_net()返回出站网络设备的网络命名空间. 接下来由icmp_sk()获取该套接字(在SMP中, 每个cpu都由一个套接字). 然后, 调用[ip_append_data()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/ip_output.c#L1306)将数据包交给ip层. 如果ip_append_data()失败将更新统计信息即ICMP_MIB_OUTERRORS加1, 并通过ip_flush_pending_frames()释放skb.
+
+## ICMPv6
+在L3报告错误方面, icmpv6与icmpv4很类似, 但icmpv6也支持更多的任务:
+- 用于邻居发现(Neighbour Discovery, ND)协议, ND协议取代并改进了ipv4的ARP协议.
+- 组播侦听者发现(Multicast Listener Discovery, MLD)协议, MLD协议相当于ipv4中的IGMP协议.
+
+icmpv6在rfc 4443中定义, 它的实现基于ipv4, 但更复杂.
