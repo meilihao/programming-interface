@@ -237,3 +237,25 @@ icmpv6_send()会调用icmpv6_xrlim_allow()来实现限速, 和ICMPv4一样, 也�
 [icmp6_send()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L447)与icmp_send()类似, 执行一系列完整性检查后， 调用is_ineligible()来检查触发消息是否为ICMPv6错误消息, 如果是就退出了. 这种消息的长度不应超过1280, 即ipv6最小MTU: IPV6_MIN_MTU, 这是RFC 4443的2.4(c)节规定的: 所有ICMPv6错误消息多必须在长度不超过IPv6最小MTU的情况下, 尽可能多地包含IPv6触发数据包(导致错误的数据包)的内容. 接下来, 调用ip6_append_data()将消息交给ipv6层， 并调用icmpv6_push_pending_frames()释放skb.
 
 [icmpv6_echo_reply()](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/icmp.c#L713), 是响应ICMPV6_ECHO消息时被调用. 它创建一个icmpv6_msg对象, 并将其类型设置为ICMPV6_ECHO_REPLY, 在调用ip6_append_data()和icmpv6_push_pending_frames()将这条消息交给ipv6层. 如果ip6_append_data()失败, 会把SNMP计数器(ICMP6_MIB_OUTERRORS)加1, 并调用ip6_flush_pending_frames()释放skb.
+
+## icmp套接字(也叫ping套接字)
+创建方法:
+- ipv4 : `socket(PF_INET, SOCK_DGRAM, IPPROTO_ICMP)`
+- ipv6 : `socket(PF_INET6, SOCK_DGRAM, IPPROTO_ICMP)`
+
+icmp套接字的大部分实现代码在`net/ipv4/ping.c`中, 实际上`net/ipv4/ping.c`的大部分代码是双栈代码. 启用icmp套接字需设置`/proc/sys/net/ipv4/ping_group_range`, ipv4/6共用该参数, 默认情况下是`1 0`即禁止使用icmp套接字(包括root). `echo 0 2147483647 > /proc/sys/net/ipv4/ping_group_range`(其中 2147483647是[GID_T_MAX](https://elixir.bootlin.com/linux/v5.10.53/source/include/net/ping.h#L26)) 即可启用它. ICMP套接字只支持ICMP_ECHO和ICMPV6_ECHO_REQUEST, 且它们的code都必须是0.
+
+[`ping_supported()`](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/ping.c#L453)可用于检查创建icmpv4/6消息的参数是否有效.
+
+icmp套接字导出了procfs: `/proc/net/icmp`和`/proc/net/icmp6`, 更多见`<<精通Linux内核网络>> 3.5.3 procfs条目`
+
+## 实践
+### 通过iptables创建"目的地不可达"消息
+iptables rule由netfilter子系统处理.
+
+`iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited`, `--reject-with`指定了应答icmpv4消息的类型, 其他可指定类型见[net/ipv4/netfilter/ipt_REJECT.c](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv4/netfilter/ipt_REJECT.c).
+
+`iptables -A INPUT -s 2001::/64 -p ICMPv6 -j REJECT --reject-with icmp-adm-prohibited`, `--reject-with`指定了应答icmpv6消息的类型, 其他可指定类型见[net/ipv6/netfilter/ip6t_REJECT.c](https://elixir.bootlin.com/linux/v5.10.53/source/net/ipv6/netfilter/ip6t_REJECT.c)
+
+## icmp重要方法
+见`<<精通Linux内核网络>> 3.5.1 方法`
