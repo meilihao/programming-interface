@@ -87,39 +87,6 @@ linux通过设备号来区分不同的设备.设备号由两部分组成:[主设
 
 > 部分相关代码: [udev-builtin-path_id.c](https://cgit.freedesktop.org/systemd/systemd/tree/src/udev/udev-builtin-path_id.c)
 
-## gpt
-参考:
-- [GPT分区数据格式分析](https://blog.csdn.net/diaoxuesong/article/details/9406015)
-
-gpt特点:
-- GPT 只使用 LBA
-- GPT 数据结构在磁盘上存储两次：开始和结束各一次. 在因事故或坏扇区导致损坏的情况下，这种重复提高了成功恢复的几率.
-循环冗余检验 (CRC) 值针对关键数据结构而计算，提高了数据崩溃的检测几率.
-- GPT 将所有分区存储在单个分区表中（带有备份），因此扩展分区或逻辑分区没有存在的必要. GPT 默认支持 128 个分区，当然也可以更改分区表的大小(分区软件支持的话)
-- GPT 使用一个 16 字节的全局唯一标识符 (GUID) 值来标识分区类型。这使分区类型更不容易冲突.
-- GPT 支持存储人类可读的分区名称.
-
-使用 GPT需有三类主要的软件的支持：内核、引导装载程序和低级别磁盘实用工具.
-
-Linux 提供三种主要的分区工具系列，均不同程度支持 GPT：
-- fdisk系列
-
-    这些程序（fdisk、cfdisk和sfdisk）是文本模式的工具，可以处理 MBR 和一些更独特的分区表，但它们不能处理 GPT.
-
-- GNU Parted (libparted)
-
-    GNU Parted 项目提供一个库 (libparted) 和一个文本模式的实用工具 (parted) 进行分区. 若干个图形用户界面 (GUI) 实现工具也构建于libparted之上. libparted库可以处理 MBR、GPT 和几种其他分区表类型.
-
-- GPTfdisk
-
-    该系列（gdisk、cgdisk和sgdisk）根据fdisk系列进行建模，但可以在 GPT 磁盘上工作
-
-作为一般性规则，基于 GNU Parted 的工具（尤其是 GParted 或 Palimpsest Disk Utility 等 GUI 工具）易于使用；不过，GPTfdisk（特别是gdisk）可以使用更多 GPT 特性. 因此，推荐使用 GParted 或其他 GUI 工具来设置磁盘，但使用 GPTfdisk来微调配置或修复 GPT 磁盘的损坏.
-
-> 512e磁盘在分区与物理扇区边界不一致时会导致潜在的严重性能问题. 自 2010 年年底发布的分区工具一般能够很好地处理这个问题，但如果在使用较旧版本的工具，请务以创建正确匹配的分区.
-
-在GPT分区中，每一个数据读写单元成为LBA（逻辑块地址, 即`gdisk -l /dev/sd<x>`中的logical sector size）, 一个“逻辑块”相当于传统MBR分区中的一个“扇区”，之所以会有区别，是因为GPT除了要支持传统硬盘，还需要支持以NAND FLASH为材料的SSD硬盘，这些硬盘的一个读写单元是2KB或4KB，所以GPT分区中干脆用LBA来表示一个基础读写块，当GPT分区用在传统硬盘上时，通常，LBA就等于扇区号，有些物理硬盘支持2KB对齐，此时LBA所表示的一个逻辑块就是2KB的空间. 换句话说，**对于 512 字节的扇区，Partition table header (LBA 1)从磁盘开头的第 512 个字节开始，而对于 4 KB 的扇区，它从第 4096 个字节开始**.
-
 ## `/dev/loopN`
 一种伪设备，使得文件可以如同块设备一般被访问.
 
