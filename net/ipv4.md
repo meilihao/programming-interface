@@ -96,7 +96,7 @@ ip选项分:
 1. 单字节选项
 
     只有1B的类型字段, 只有:
-    - IPOPT_NOOP(无操作) : 用于选项间填充1B选项, 确保后续选项落在4B边界上, 比如常与多字节选项中的type,len,offset凑成4个字节
+    - IPOPT_NOOP(无操作) : 用于选项间填充1B选项, 确保后续选项落在4B边界上, 比如**IPOPT_NOOP+常与多字节选项中的type,len,offset凑成4个字节**
     - IPOPT_END(选项表的结尾) : 用于填充在所有ip选项的后面, 确保ip选项的总长度必须是4B的倍数
 1. 多字节选项
 
@@ -121,7 +121,10 @@ ip选项分:
 
     - IPOPT_SEC : 该选项使得主机能够发送安全信息, 处理约束和TCC(闭合用户群)参数, 详情见RFC 791和1108
     - IPOPT_LSRR : 指定了数据包必须经过的路由器清单. 在该清单中, 任何两台相邻路由器之间都可以存在其他未出现在该清单中的中间路由器, 但经过的顺序不能改变
+    - IPOPT_SSRR : 指定了数据包必须经过的路由器清单. 经过的顺序必须保持不变, 在传输过程中不能修改. 出于安全考虑, 很多路由器比支持IPOPT_LSRR和IPOPT_SSRR
     - IPOPT_CIPSO : 是一个IETF草案, 它定义的是一种网络标志标准. CIPSOUI套接字进行了标记， 即在经该套接字离开系统的数据包中都添加CIPSO IP选项. 收到数据包后, 将对该选项进行验证.
+    - IPOPT_SID : 提供了一种在数据包穿越不支持流概念的网络时携带16bit的satnet流标识符的方法
+    - IPOPT_RA : 用于通知路由器对数据包的内容进行更详细的检查, 定义在RFC 2113中.
 
     linux网络栈未包含所有的ip选项, 完整清单见[iana](https://www.iana.org/assignments/ip-parameters/ip-parameters.xml)
 选项表:
@@ -140,3 +143,27 @@ ip选项分:
 ```
 
 ### 时间戳选项
+IPOPT_TIMESTAMP由RFC 781进行规范, 最长40B, 用于存储数据包所经过的主机的时间戳(4B), 表示距当天UTC 0时的毫秒数. 另外, 它还可以存储数据包经过的所有主机的地址或只存储部分主机的时间戳.
+
+它的数据段的第一个字节是offset. 第2个字节的前4bit是溢出计数器, 每当缺少足够的空间用来存储必要的数据时就加1, 一但该计数器超过15, 就发送一条ICMP "参数问题"的消息; 后4bit是标志位:`0`只包含时间戳(IPOPT_TS_TSONLY, 经过的每台路由器均会添加时间戳), `1`包含时间戳和地址(IPOPT_TS_TSANDADDR, 经过的每台路由器均会添加`4B ip地址+4B时间戳`), `3`只包含指定跳的时间戳(IPOPT_TS_PRESPEC, 进过的每台路由器仅出现在指定列表(IPOPT_LSRR/IPOPT_SSRR)中才会添加时间戳). 其余均是时间戳或地址.
+
+> `ping -T tsonly/tsandaddr/tsprespec`即指定了上面3中时间戳选项的子类型.
+
+### 记录路由(IPOPT_RR)
+将数据包的路由记录下来, 即经过的每台路由器都添加其地址, 详情见rfc 791 3.1节. ipv4报头最多可存储9台路由器的地址, 没有空间时仅转发.
+
+> `ping -R`就使用该选项. 但出于安全考虑, 很多路由器会忽略该选项.
+
+### 处理ip选项
+在linux中, ip选项用[ip_options](https://elixir.bootlin.com/linux/v5.10.55/source/include/net/inet_sock.h#L39)表示:
+- faddr : 存储第一跳的地址. 如果不是在接收逻辑中被调用(SKB为NULL), ip_options_compile()将在处理宽松和严格路由选择时设置该成员
+- nexthop : 存储LSRR和SSRR中的下一条地址
+- optlen : 以字节为单位的选项长度, 不能超过40
+- is_strictroute : 指定使用严格源路由的标志, 该标志是ip_options_compile()中分析严格路由选项(IPOPT_SSRR)时设置; 对于宽松路由, 则不设置
+- srr_is_hit : 指定数据包目标地址为当前主机的标志, 在ip_options_rcv_ssr()中设置
+- is_changed : ip校验和不再有效(ip选项发生变化就会设置)
+- rr_needaddr : 需要记录外出设备的ip地址， 针对记录路由选项来设置该标志
+- ts_needtime : 需要记录时间戳, 当设置了时间戳选项的3个标志IPOPT_TS_TSANDADDR/IPOPT_TS_TSANDADDR/IPOPT_TS_PRESPEC时将设置该标志
+- ts_needaddr : 需要记录外出设备的ipv4地址, 仅当设置了时间戳选项中的IPOPT_TS_TSANDADDR时才设置该标志, 表明必须添加数据包途径的每个节点的ipv4地址
+- router_alert : 在ip_options_compile()中分析路由器警告选项时设置
+- `_data[]` : 一个缓冲区, 用于存储setsockopt()从用户空间获得的选项, 见`net/ipv4/ip_options.c`中的ip_options_get_from_user()和ip_options_get_finish().
