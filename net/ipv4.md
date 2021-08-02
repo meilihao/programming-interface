@@ -90,3 +90,53 @@ ip_rcv()也是组播数据包处理程序. 它执行ip_rcv_finish()->ip_route_in
 在[ip_mr_input()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ipmr.c#L2071)中发现, 组播层存储了一种叫组播转发缓存(Multicast Forwarding Cache, MFC)的数据结构, 如果在MFC中找到了有效的条目, 将调用[ip_mr_forward()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ipmr.c#L1925). ip_mr_forward()执行一些检查, 并最终调用[ipmr_queue_xmit()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ipmr.c#L1813). 在ipmr_queue_xmit()中, 调用ip_decrease_ttl()将ttl减1, 并更新checksum. 接下来调用NFHOOK NF_INET_FORWARD来调用ipmr_forward_finish().
 
 [ipmr_forward_finish()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ipmr.c#L1775), 它先更新统计信息, 在存在ipv4报头选项时调用ip_forward_options(), 在调用dst_output().
+
+## ip选项
+ip选项分:
+1. 单字节选项
+
+    只有1B的类型字段, 只有:
+    - IPOPT_NOOP(无操作) : 用于选项间填充1B选项, 确保后续选项落在4B边界上, 比如常与多字节选项中的type,len,offset凑成4个字节
+    - IPOPT_END(选项表的结尾) : 用于填充在所有ip选项的后面, 确保ip选项的总长度必须是4B的倍数
+1. 多字节选项
+
+    包含1B的类型字段 + 1B的长度字段(整个选项的长度) + 数据段(许多选项的数据字段的第一个字节是1字节的位移（offset）字段, 指向数据字段内的某个字节)
+
+选项类型包括: 
+1. 复制标志(1bit)
+
+    被设置意味着, 该选项应被复制到所有分段中; 否则只要在第一个分段中即可. [IPOPT_COPIED](https://elixir.bootlin.com/linux/v5.10.55/source/include/uapi/linux/ip.h#L47)宏被用于检查该标志, ip_options_fragment()也使用它来检测不被复制的选项并插入IPOPT_NOOP.
+1. 选项类别(2bit)
+
+    共4中:
+    - `00` : 控制类别(IPOPT_CONTROL)
+    - `01` : 保留类别1(IPOPT_RESERVED1)
+    - `10` : 调试和测量类别(IPOPT_MEASUREMENT)
+
+                在linux网络栈中仅IPOPT_TIMESTAMP是IPOPT_MEASUREMENT, 其他都是IPOPT_CONTROL
+    - `11` : 保留类别2(IPOPT_RESERVED2)
+1. 选项号(5bit)
+
+    取值: 0~31, 唯一标识选项:
+
+    - IPOPT_SEC : 该选项使得主机能够发送安全信息, 处理约束和TCC(闭合用户群)参数, 详情见RFC 791和1108
+    - IPOPT_LSRR : 指定了数据包必须经过的路由器清单. 在该清单中, 任何两台相邻路由器之间都可以存在其他未出现在该清单中的中间路由器, 但经过的顺序不能改变
+    - IPOPT_CIPSO : 是一个IETF草案, 它定义的是一种网络标志标准. CIPSOUI套接字进行了标记， 即在经该套接字离开系统的数据包中都添加CIPSO IP选项. 收到数据包后, 将对该选项进行验证.
+
+    linux网络栈未包含所有的ip选项, 完整清单见[iana](https://www.iana.org/assignments/ip-parameters/ip-parameters.xml)
+选项表:
+```c
+// https://elixir.bootlin.com/linux/v5.10.55/source/include/uapi/linux/ip.h#L56
+#define IPOPT_END   (0 |IPOPT_CONTROL) // 选线列表末尾
+#define IPOPT_NOOP  (1 |IPOPT_CONTROL) // 无操作
+#define IPOPT_SEC   (2 |IPOPT_CONTROL|IPOPT_COPY) // 安全
+#define IPOPT_LSRR  (3 |IPOPT_CONTROL|IPOPT_COPY) // 宽松源记录路由
+#define IPOPT_TIMESTAMP (4 |IPOPT_MEASUREMENT)    // 时间戳
+#define IPOPT_CIPSO (6 |IPOPT_CONTROL|IPOPT_COPY) // 商用internet协议安全选项
+#define IPOPT_RR    (7 |IPOPT_CONTROL)            // 记录路由
+#define IPOPT_SID   (8 |IPOPT_CONTROL|IPOPT_COPY) // 流id
+#define IPOPT_SSRR  (9 |IPOPT_CONTROL|IPOPT_COPY) // 严格源记录路由
+#define IPOPT_RA    (20|IPOPT_CONTROL|IPOPT_COPY) // 路由器警告
+```
+
+### 时间戳选项
