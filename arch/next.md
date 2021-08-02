@@ -1,4 +1,5 @@
 # 趋势
+高带宽、低延迟是目前数据中心应用的基本需求. NVM（Non-Volatile Memory）和 RDMA（Remote Direct Memory Access）可以称得上加速数据中心应用的两架马车，分别从存储和网络方面满足高带宽、低延迟的需求.
 
 ## 硬件
 ### Bare metal（裸机服务器）方案
@@ -95,7 +96,7 @@ DPDK思路:
 > [全用户态网络开发套件 F-Stack 架构分析](https://cloud.tencent.com/developer/article/1005218)
 
 RDMA思路:
-网卡硬件收发包并进行协议栈封装/解析，然后将数据存放到指定内存地址，而不需要CPU干预. 即消除主机CPU 中不必要的频繁数据传输，减少通信对CPU的占用, RDMA就是由此来优化通信性能.
+网卡硬件收发包并进行协议栈封装/解析，然后将数据存放到指定内存地址，而不需要CPU干预. 即消除主机CPU 中不必要的频繁数据传输，减少通信对CPU的占用, RDMA就是由此来优化通信性能. RDMA 通过 Memory Region 机制使得网卡能够直接读写用户态的内存数据，避免了数据拷贝和上下文切换.
 
 RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 

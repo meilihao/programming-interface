@@ -5,6 +5,8 @@
 
 ## quic
 - [面向5G的阿里自研标准化协议库XQUIC](https://developer.aliyun.com/article/770062)
+- [The Road to multipath QUIC: 阿里自研多路径传输技术XLINK](https://www.bilibili.com/read/cv11319597)
+- [XLINK: QoE-Driven Multi-Path QUIC Transport in Large-scale Video Services](http://www.hongqiangliu.com/uploads/5/2/7/4/52747939/sigcomm2021-xlink.pdf)
 
 ## next
 - [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
