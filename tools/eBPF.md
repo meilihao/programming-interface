@@ -4,6 +4,7 @@
 - [BPF社区和生态](https://mp.weixin.qq.com/s?__biz=MzI3NzA5MzUxNA==&mid=2664608487&idx=1&sn=6f3ddadb16ffa71557b41907999d5261)
 - [Libbpf-tools —— 让 Tracing 工具身轻如燕](https://pingcap.com/blog-cn/libbpf-tools/)
 - [kernel bpf examples](https://elixir.bootlin.com/linux/v5.10-rc7/source/samples/bpf)
+- [如何将 eBPF 添加到可观察性产品中](https://brendangregg.com/blog/2021-07-03/how-to-add-bpf-observability.html)
 
 BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
 
