@@ -154,6 +154,8 @@ IPOPT_TIMESTAMP由RFC 781进行规范, 最长40B, 用于存储数据包所经过
 
 > `ping -R`就使用该选项. 但出于安全考虑, 很多路由器会忽略该选项.
 
+选项组成: IPOPT_NOOP + 选项类型1B + 选项长度1B + 偏移量1B(相对于选项开头的偏移量) + N * ipv4 地址(4B)
+
 ### 处理ip选项
 在linux中, ip选项用[ip_options](https://elixir.bootlin.com/linux/v5.10.55/source/include/net/inet_sock.h#L39)表示:
 - faddr : 存储第一跳的地址. 如果不是在接收逻辑中被调用(SKB为NULL), ip_options_compile()将在处理宽松和严格路由选择时设置该成员
@@ -167,3 +169,50 @@ IPOPT_TIMESTAMP由RFC 781进行规范, 最长40B, 用于存储数据包所经过
 - ts_needaddr : 需要记录外出设备的ipv4地址, 仅当设置了时间戳选项中的IPOPT_TS_TSANDADDR时才设置该标志, 表明必须添加数据包途径的每个节点的ipv4地址
 - router_alert : 在ip_options_compile()中分析路由器警告选项时设置
 - `_data[]` : 一个缓冲区, 用于存储setsockopt()从用户空间获得的选项, 见`net/ipv4/ip_options.c`中的ip_options_get_from_user()和ip_options_get_finish().
+
+[ip_rcv_options()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ip_input.c#L257)逻辑:
+1. `iph = ip_hdr(skb)` : 获取ipv4报头
+1. `opt = &(IPCB(skb)->opt)` : 从与skb关联的inet_skb_parm对象中获取ip_options对象
+1. `opt->optlen = iph->ihl*4 - sizeof(struct iphdr)` : 计算预期的选项长度
+1. `ip_options_compile()` : 根据skb生成ip_options对象
+
+    在接收路径中(在ip_rcv_options()中)调用ip_options_compile()时, 它会对指定skb的ipv4报头进行分析, 并在确定选项有效后, 根据报头内容生成一个ip_options对象. 在ip_options_get_finish()中, 通过设置了IPPROTO_IP和IP_OPTIONS的系统调用setsockopt()从用户空间获取选项时, 也可能调用该方法. 此时数据将从用户空间复制到opt->data, 同时ip_options_compile()的skb参数是NULL, 它将根据`opt->_data`创建op_options对象. 在接收路径中, 如果分析选项发现错误, 将返回一条icmpv4 ICMP_PARAMTERPROB. 在接收路径中, ip_options_compile()生成的ip_options对象会被存储在skb的控制缓冲区cb中, 它是由`opt = &(IPCB(skb)->opt)`实现的.
+
+    [`ip_options_compile()`](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ip_options.c#L478)具体逻辑: 让指针optptr执行ip选项对象的开头, 在一个循环中迭代所有的选项. 对于接收路径(在ip_rcv_options()中调用ip_options_compile())时, ip_rcv()会将收到的skb传给ip_options_compile(), 此时skb显然不为NULL, 那么ip选项在ipv4报头的位置是固定的(在数据包开头的20B后). 当ip_options_compile()由ip_options_get_finish()调用时, 指针optptr被设置为`opt->__data`, 因为ip_options_get_from_user()将来自用户空间的选项复制到`opt->__data`. 此外ip_options_get_finish()为了选项的4B对齐, 会将IPOPT_END写入`opt->__data`.
+
+    考虑skb是否为NULL, 因此没法使用`iph = ip_hdr(skb)`, 而是用`iph = optptr - sizeof(struct iphdr)`.
+
+    `for (l = opt->optlen; l > 0; )`将l设为选项的长度, 每次迭代就减去当前选项的长度. 如果出现IPOPT_END, 表明已到选项末尾, 没有其他选项了, 此时需要将剩余的每个字节都改为IPOPT_END, 并设置is_changed, 表示ipv4报头发生变化(需要计算checksum); 如果是IPOPT_NOOP, 则l减1, optptr加1, 然后处理下一个选项.
+
+    `optlen = optptr[1]`是获取当前选项的长度.
+
+    发生错误时, 让指针pp_ptr指向错误的原因并退出循环, 如果在接收路径中, 会发送一条ICMPv4 "参数问题" 消息, 并将问题发生的位置作为参数, 以便对方分析问题.
+1. `if (unlikely(opt->srr))`
+
+    通过`ip_options_compile()`创建ip_options对象后, 将处理严格路由选择. 首先检查`/proc/sys/net/ipv4/conf/all/accept_source_route`和`/proc/sys/net/ipv4/conf/<deviceName>/accept_source_route`, 如果都不满足则丢包.
+
+    `ip_options_rcv_srr()`会迭代源路由地址列表, 并在分析期间, 在循环中做些完整性检查, 以查看是否存在错误. 遇到第一个非本地地址后将退出循环, 并设置:
+    1. `opt->srr_is_hit = 1` : 设置ip选项的标志srr_is_hit
+    1. `opt->is_changed = 1`
+
+    现在需要对数据包进行转发. ip_forward_finish()会调用ip_forward_options, 检查ip选项对象的srr_is_hit是否被设置, 如果已设置, 就将ipv4报头的daddr改为opt->nexthop, 将偏移量加4(使其指向源路由地址列表中的下一个地址), 并调用ip_send_check()重新计算checksum.
+
+### ip选项和分段
+分段时处理ip选项的工作由[ip_options_fragment()](https://elixir.bootlin.com/linux/v5.10.55/source/net/ipv4/ip_options.c#L208)完成且仅针对第一个分段, 它由用于准备分段的[ip_fragment()]()调用.
+
+ip_options_fragment()的`while (l > 0)`循环迭代各种选项, 并读取选项类型. optptr是一个指向选项列表的指针(选项列表位于ipv4报头的前20B之后). l是选项列表的长度, 每次循环迭代都减1. 如果选项是IPOPT_END表示读取选项的工作已结束; 如果是IPOPT_NOOP, optptr加1而l减1, 再继续处理下一个选项. 之后检查选项长度的合法性. 再检查是否要复制选项, 如果不复制, 就用memset(), 用一个或多个IPOPT_NOOP代替它, 其参数optlen即是当前选项的长度, 然后修正偏移量处理下一个选项. 选项IPOPT_TIMESTAMP和IPOPT_RR的复制标志是0, 它们在前面的循环中被替换为IPOPT_NOOP, 而ip选项对象中与它们对应的字段需要被重置为0.
+
+### 创建ip选项
+ip_options_build()的功能与ip_options_compile()相反, 它将一个ip_options对象作为参数, 并将其内容写入到ipv4报头中.
+
+ip_forward_options()用于处理记录路由选项和严格记录路由选项. 对于ipv4报头发生了变化(opt->is_changed=1)的数据包, 它调用ip_send_check()来计算checksum, 并将opt->is_changed重置为0.
+
+## 发送ipv4数据包
+从L4(传输层)发送ipv4数据包的主要方法有两个:
+- ip_queue_xmit()
+
+    供由自己处理分段的传输协议(比如TCPv4)使用. TCPv4还使用ip_build_and_send_pkt()来发送SYN ACK信息(见`net/ipv4/tcp_ipv4.c#tcp_v4_send_synack()`).
+
+- ip_append_data()
+
+    供不处理分段的传输协议(如UDPv4和ICMPv4)使用.
