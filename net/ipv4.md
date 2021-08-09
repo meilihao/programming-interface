@@ -28,6 +28,8 @@ ipv4数据包的以太类型是0x0800([ETH_P_IP](https://elixir.bootlin.com/linu
 ipv4协议的主要功能体现在接收路径和传输路径两部分.
 
 ## 接收ipv4数据包
+![接收ipv4数据包](/misc/img/net/ipv4/20190425151455380.png)
+
 ipv4数据包的主要接收方法是[ip_rcv()](https://elixir.bootlin.com/linux/v5.10.54/source/net/ipv4/ip_input.c#L530), 它是所有ipv4数据包(包括组播和广播)的处理程序. 它通过ip_rcv_core()完成完整性检查, 但实际工作由ip_rcv_finish()完成, 在这俩方法中间是NF_HOOK(netfilter钩子) NF_INET_PRE_ROUTING. 数据包在网络栈传输中, netfilter允许在6个挂接点注册回调函数, 添加netfilter钩子旨在支持在kernel运行阶段加载netfilter内核模块. NF_HOOK_COND是NF_HOOK宏的变种, 支持接收一个bool参数, 在其true时才执行该钩子. netfilter钩子也可丢弃数据包.
 
 > netfilter钩子共计6中, 见[enum nf_inet_hooks](https://elixir.bootlin.com/linux/v5.10.55/source/include/uapi/linux/netfilter.h#L42).
@@ -208,6 +210,8 @@ ip_options_build()的功能与ip_options_compile()相反, 它将一个ip_options
 ip_forward_options()用于处理记录路由选项和严格记录路由选项. 对于ipv4报头发生了变化(opt->is_changed=1)的数据包, 它调用ip_send_check()来计算checksum, 并将opt->is_changed重置为0.
 
 ## 发送ipv4数据包
+![发送ipv4数据包](/misc/img/net/ipv4/20210809093542.png)
+
 从L4(传输层)发送ipv4数据包的主要方法有两个:
 - ip_queue_xmit()
 
@@ -215,4 +219,53 @@ ip_forward_options()用于处理记录路由选项和严格记录路由选项. �
 
 - ip_append_data()
 
-    供不处理分段的传输协议(如UDPv4和ICMPv4)使用.
+    供不处理分段的传输协议(如UDPv4和ICMPv4)使用. 它并不发送数据包而是准备数据包. 实际发送数据由ip_push_pending_frames(), 被ICMPv4和原始套接字使用. 调用ip_push_pending_frames()后, 它将调用ip_send_skb()来开始实际的传输过程, 而ip_send_skb()最终会调到ip_local_out().
+
+    > 在2.6.39前, udpv4使用ip_push_pending_frames()发送数据包, 但之后引入新api ip_finish_skb后, 使用ip_send_skb(), 它们都定义在`net/ipv4/ip_output.c`中.
+- dst_output()
+
+    利用使用了套接字选项IP_HDRINCL的原始套接字发送数据包时, 不需要准备ipv4报头, 比如ping和nping命令. 内核例子见[`raw_send_hdrinc()`](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/raw.c#L344).
+
+
+[`ip_queue_xmit()`](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_output.c#L544)具体逻辑:
+1. `rt = (struct rtable *)__sk_dst_check(sk, 0)` : 确保能够路由该数据包
+
+    rtable对象是路由选择子系统查找结果. 当rtable为NULL时, 即需要执行路由选择子系统查找的情形, 如果设置了严格路由选择选项标志, 就将目标地址设为ip选项中的第一个地址. 接下来, ip_route_output_ports()在路由选择子系统中执行查找, 如果查找失败, 则丢包, 并返回`-EHOSTUNREACH`; 如果查找成功, 但选项的is_strictroute标志和路由选择条目的rt_uses_gateway标志都被设置时(`if (inet_opt && inet_opt->opt.is_strictroute && rt->rt_uses_gateway)`)也丢包, 并返回`-EHOSTUNREACH`.
+1. 接下来, 生成ipv4报头
+
+    当前数据包是L4, skb->data指向的是传输层报头, 此时用skb_push()将指针skb->data后移, 移动量为ipv4报头的长度, 如果使用了ip选项还要加上ip选项列表的长度optlen.
+    再通过`skb_reset_network_header(skb)`设置L3报头(skb->network_header), 使其指向skb->data.
+
+    ```c
+    if (inet_opt && inet_opt->opt.optlen) {
+        iph->ihl += inet_opt->opt.optlen >> 2;
+        ip_options_build(skb, &inet_opt->opt, inet->inet_daddr, rt, 0);
+    }
+    ```
+
+    上面将选项长度optlen除以4， 并将结果与ipv4报头长度(iph->ihl)相加. 再调用[`ip_options_build(struct sk_buff *skb, struct ip_options *opt,
+              __be32 daddr, struct rtable *rt, int is_frag)`](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_options.c#L44), 根据指定ip选项的内容在ipv4报头中构建选项, is_frag=0表示不分段
+
+    `ip_select_ident_segs`会设置ipv4报头中的id
+1. `res = ip_local_out(net, sk, skb)`
+
+    发送数据包
+
+
+getfrag()是ip_append_data()的一个参数, 用于将实际数据从用户空间复制到skb中的回调函数. 在udpv4中, 它是通用方法ip_generic_getfrag(); 在ICMPv4中, 它被设置为协议专用方法icmp_glue_bits().
+
+> 使用setsockopt()设置了套接字选项UDP_CORK或MSG_MORE时使用ip_append_data(); 而没有设置UDP_CORK时, 在udp_sendmsg()中调用ip_make_skb(), 该路径没有套接字锁, 速度更快, 它的效果和`ip_append_data() + ip_push_pending_frames()`类似, 只是不发送生成的skb, 发送skb由ip_send_skb()完成.
+
+[`ip_append_data()`](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_output.c#L1306)具体逻辑:
+1. `if (flags&MSG_PROBE)`
+
+    如果设置了MSG_PROBE, 意味着调用者只对部分信息(通常是MTU, 用于PMTU发现)感兴趣, 没必要实际发送数据包, 因此直接返回0.
+
+1. `ip_setup_cork(sk, &inet->cork.base, ipc, rtp)`
+
+    ip_setup_cork()创建一个抑制(cork)ip选项对象(如果该对象不存在), 并将指定ipc(ipcm_cookie对象)的ip选项复制到其中.
+1. `__ip_append_data()`
+
+    实际工作由它完成.
+
+    这个方法会根据网络设备是否支持分散/聚集(scatter/gather), 即是否设置了NETIF_F_SG标志而采用两种不同的分段处理方式. 如果由该标志, 使用skb_shinfo(skb)->flags, 否则使用skb_shinfo(skb)->frag_list. 设置了MSG_MORE时, 内存分配方式也不同, 它表示应立即发送另一个数据包, udp套接字从2.6开始支持该标志.
