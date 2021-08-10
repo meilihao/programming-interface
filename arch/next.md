@@ -134,8 +134,16 @@ RDMA三大特性：CPU offload 、kernel bypass、zero-copy.
 参考:
 - [AIO 的新归宿：io_uring](https://zhuanlan.zhihu.com/p/62682475)
 - [Alibaba Cloud Linux 2 LTS 率先提供支持 io_uring](https://developer.aliyun.com/article/764720)
+- [网络编程的未来，io_uring？](https://www.sdnlab.com/24474.html)
 
 io_uring和SPDK
+
+> [对于SPDK中VPP的整合, 目前的状况是在SPDK中的集成, 将会在20.07停止, 20.10中把VPP的sock实现从SPDK 中删除. 其主要原因是基于VPP的sock实现并没有体现出相应的性能优势](https://lists.01.org/hyperkitty/list/spdk@lists.01.org/thread/L7FST3E5CKUCUK4SX24IYXMDWBHH4VAA/)
+
+SPDK 中使能io_uring:
+1. 至少满足内核版本大于5.4.3. 当然越高版本的内核对于io_uring的支持越好，比如Linux kernel 版本5.7-rc1以上的特性应该丰富，诸如支持IORING_FEAT_FAST_POLL
+1. 下载和安装liburing的库：https://github.com/axboe/liburing
+1. 编译SPDK， 打开如下开关：./configure --with-uring. 如果liburing没有安装在系统指定的目录, 需要自己指定. 这样编译出的SPDK可执行文件, 会优先使用SPDK的uring socket实现, 而不是POSIX. 比如启动SPDK NVMe-oF tcp target, 就会采用SPDK uring 的socket实现.
 
 ## 媒体系统
 [Pipewire代替PulseAudio, 并使用WirePlumber管理Pipewire](https://www.oschina.net/news/151623/fedora-may-use-wireplumber).
