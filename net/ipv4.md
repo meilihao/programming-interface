@@ -269,3 +269,43 @@ getfrag()是ip_append_data()的一个参数, 用于将实际数据从用户空�
     实际工作由它完成.
 
     这个方法会根据网络设备是否支持分散/聚集(scatter/gather), 即是否设置了NETIF_F_SG标志而采用两种不同的分段处理方式. 如果由该标志, 使用skb_shinfo(skb)->flags, 否则使用skb_shinfo(skb)->frag_list. 设置了MSG_MORE时, 内存分配方式也不同, 它表示应立即发送另一个数据包, udp套接字从2.6开始支持该标志.
+
+## 分段
+网络接口对数据包的长度有限制, 在10/100/1000 Mb/s以太网中通常是1500B, 但有些网络接口支持巨型帧, MTU可能高达9KB. 发送长于出站网卡MTU的数据包需要分段, 由[ip_fragment()](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_output.c#L574)处理. 收到分段后的数据包需要重组, 由[ip_defrag()](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_fragment.c)完成.
+
+ip_fragment()的回调函数output是要使用的传输方式. 从ip_finish_output()调用ip_fragment()时, output是ip_finish_output2(). ip_fragment()包含两条路径: 快速路径和慢速路径, 其中快速路径用于skb的frag_list不为NULL的数据包, 其他数据包走慢速路径. ip_fragment()首先检查是否允许分段, 如果不允许, 向发送方发送一条"需要分段"的icmpv4 "目的地不可达"消息, 再更新统计信息IPSTATS_MIB_FRAGFAILS, 并丢包.
+
+### 快速路径
+首先调用skb_has_frag_list()来核实是否应采用快速路径处理数据包. 它只是用来检查skb_shinfo(skb)->frag_list是否为NULL, 如果为NULL, 就执行一些完整性检查;如果发现错误就转用慢速路径--调用goto slow_path. 接下来为第一个分段创建ipv4, 这个ipv4报头的frag_off被设置为hton(IP_MF), 指明后面还有其他分段, 除最后一个分段不设置IP_MF外其他分段均需设置IP_MF. `skb = ip_fraglist_next(&iter)`是取下一个skb.
+
+[ip_fraglist_prepare()](https://elixir.bootlin.com/linux/v5.10.57/source/net/ipv4/ip_output.c#L628), 它的外层for循环是创建分段并发送的循环, 因此它本身的作用是准备下一帧的报头.
+
+```c
+void ip_fraglist_prepare(struct sk_buff *skb, struct ip_fraglist_iter *iter)
+{
+    unsigned int hlen = iter->hlen;
+    struct iphdr *iph = iter->iph;
+    struct sk_buff *frag;
+
+    frag = iter->frag;
+    frag->ip_summed = CHECKSUM_NONE;
+    skb_reset_transport_header(frag);
+    __skb_push(frag, hlen); // ip_fragment()是在传输层L4调用的, 因此skb->data指向的是传输层报头, `__skb_push(frag, hlen)`会将skb->data后移hlen(已字节为单位的ipv4报头长度), 使其指向ipv4报头
+    skb_reset_network_header(frag); // 设置L3报头(skb->network_header), 使其指向skb->data
+    memcpy(skb_network_header(frag), iph, hlen); // 将前面创建的ipv4报头复制到网络层L3报头中, 在这个for循环的第一次迭代中, 复制的是在for循环外面的为第一个分段创建的ipv4报头
+    //  初始化下一个分段的ipv4报头及其tot_len
+    iter->iph = ip_hdr(frag);
+    iph = iter->iph;
+    iph->tot_len = htons(frag->len);
+    // 将各个skb字段(如pkt_type, priority, protocol)复制到frag中
+    ip_copy_metadata(frag, skb);
+    iter->offset += skb->len - hlen;
+    iph->frag_off = htons(iter->offset >> 3); //ipv4报头的frag_off以8B为单位, 因此要除8
+    // 对于除最后一个分段外, 都需设置IP_MF标志
+    if (frag->next)
+        iph->frag_off |= htons(IP_MF);
+    /* Ready, complete checksum */
+    ip_send_check(iph); // 重新计算checksum
+}
+EXPORT_SYMBOL(ip_fraglist_prepare);
+```
