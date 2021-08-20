@@ -78,7 +78,11 @@ linux通过设备号来区分不同的设备.设备号由两部分组成:[主设
 > Linux 专有文件/proc/partitions 记录了系统中每个磁盘分区的主辅设备编号、大小和名称.
 
 ## udev
-在用户空间实现的一种设备管理fs(devtmpfs), 它会将设备文件自动放在/dev下, 即/dev完全由udev管理. 它依赖sysfs(/sys下的虚拟文件系统)来了解系统的设备变化, 并使用一系列udev特有的规则来指定其对设备的管理以及命令, 默认规则在`/lib/udev/rules.d`下, 自定义规则在`/etc/udev/rules.d`下.
+参考:
+- [在 Linux 使用 systemd-udevd 管理你的接入硬件](https://linux.cn/article-13691-1.html)
+udev 负责监听 Linux 内核发出的改变设备状态的事件.
+
+在用户空间实现的一种设备管理fs(devtmpfs), 它会将设备文件自动放在/dev下, 即/dev完全由udev管理. 它依赖sysfs(/sys下的虚拟文件系统)来了解系统的设备变化, 并试图将它收到的每个系统事件匹配一系列udev特有的规则集来指定其对设备的管理以及命令, 默认规则在`/lib/udev/rules.d`下, 自定义规则在`/etc/udev/rules.d`下.
 
 ```bash
 # grep -ri '/dev/disk' /lib/udev/rules.d # 查找生成/dev/disk下信息的规则
@@ -86,6 +90,29 @@ linux通过设备号来区分不同的设备.设备号由两部分组成:[主设
 ```
 
 > 部分相关代码: [udev-builtin-path_id.c](https://cgit.freedesktop.org/systemd/systemd/tree/src/udev/udev-builtin-path_id.c)
+
+使用 systemd 的机器上，udev 操作由 systemd-udevd 守护进程管理，可以通过`systemctl status systemd-udevd` 检查 udev 守护进程的状态.
+
+规则集文件包括匹配键和分配键，可用的匹配键包括 action、name 和 subsystem, 这意味着如果探测到一个属于某个子系统的、带有特定名称的设备，就会给设备指定一个预设的配置.
+
+接着，“分配”键值对被拿来应用想要的配置。例如，可以给设备分配一个新名称、将其关联到文件系统中的一个符号链接、或者限制为只能由特定的所有者或组访问.
+
+比如:
+```conf
+$ cat /lib/udev/rules.d/73-usb-net-by-mac.rules
+# Use MAC based names for network interfaces which are directly or indirectly
+# on USB and have an universally administered (stable) MAC address (second bit
+# is 0). Don't do this when ifnames is disabled via kernel command line or
+# customizing/disabling 99-default.link (or previously 80-net-setup-link.rules).
+IMPORT{cmdline}="net.ifnames"
+ENV{net.ifnames}=="0", GOTO="usb_net_by_mac_end"
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME=="", \
+    ATTR{address}=="?[014589cd]:*", \
+    TEST!="/etc/udev/rules.d/80-net-setup-link.rules", \
+    TEST!="/etc/systemd/network/99-default.link", \
+    IMPORT{builtin}="net_id", NAME="$env{ID_NET_NAME_MAC}"
+```
+add 动作告诉 udev，只要新插入的设备属于网络子系统，并且是一个 USB 设备，就执行操作. 此外，只有设备的 MAC 地址由特定范围内的字符组成，并且 80-net-setup-link.rules 和 99-default.link 文件不存在时，规则才会生效.
 
 ## `/dev/loopN`
 一种伪设备，使得文件可以如同块设备一般被访问.

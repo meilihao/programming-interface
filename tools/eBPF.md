@@ -5,8 +5,9 @@
 - [Libbpf-tools —— 让 Tracing 工具身轻如燕](https://pingcap.com/blog-cn/libbpf-tools/)
 - [kernel bpf examples](https://elixir.bootlin.com/linux/v5.10-rc7/source/samples/bpf)
 - [如何将 eBPF 添加到可观察性产品中](https://brendangregg.com/blog/2021-07-03/how-to-add-bpf-observability.html)
+- [Linux网络新技术基石 eBPF and XDP](https://mp.weixin.qq.com/s/BOamc7V7lZQa1FTuJMqSIA)
 
-BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）.
+BPF全称是Berkeley Packet Filter, 伯克利包过滤器. 它发明之处是网络过滤神器, tcpdump就是基于此. 它是 Linux 内核提供的基于 BPF 字节码的动态注入技术（常应用于 tcpdump、raw socket 过滤等）. eBPF(extended Berkeley Packet Filter)是针对于 BPF 的扩展增强，丰富了 BPF 指令集，提供了 Map 的 KV 存储结构. 开发者可以利用 bpf() 系统调用，初始化 eBPF 的 Program 和 Map，利用 netlink 消息或者 setsockopt() 系统调用，将 eBPF 字节码注入到特定的内核处理流程中（如 XDP、socket filter 等）, 允许以安全的方式在各个挂钩点执行字节码. 它用于许多 Linux 内核子系统，最突出的是网络、跟踪和安全（例如沙箱）.
 
 > 原有的BPF被称为了cBPF(classic BPF, 目前基本已废弃, linux kernel只运行eBPF, 内核会将cBPF转成eBPF再执行).
 
@@ -20,7 +21,9 @@ eBPF演进成为了一套通用执行引擎，提供可基于系统或程序事�
 
 eBPF 由执行字节码指令、存储对象和辅助函数组成. eBPF字节码指令在内核执行前必须通过 BPF 验证器的验证，同时在启用 BPF JIT 模式的内核中，会直接将字节码指令转成内核可执行的本地指令运行，具有很高的执行效率.
 
+![bpf架构](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21YHTH1k6dfB5BDCT6JX9btibcIvzOISVcgMXJSeM7BXPfovUDC7KfWMg/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
 ![](/misc/img/net/640.webp)
+![ebpf总体设计](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21ckKpFCZ7s0c5M3nbgw3y68WbLJoficiaGS9STIyxZBRia8cHnOdfqn6Bw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
 ![eBPF注入位置](/misc/img/net/eeuMjee.webp)
 
 BPF优势:
@@ -34,6 +37,78 @@ BPF优势:
 
 - 高性能：一旦通过了BPF验证器，那么它就会进入JIT编译阶段，利用Just-In-Time编译器，编译生成的是通用的字节码，它是完全可移植的，可以在x86和ARM等任意球CPU架构上加载这个字节码，这样我们能获得本地编译后的程序运行速度，而且是安全可靠的
 - 持续交付：通过JIT编译后，就会把编译后的程序附加到内核中各种系统调用的钩子（hook）上，而且可以在不影响系统运行的情况下，实时在线地替换这些运行在Linux内核中的BPF程序. 举个例子，拿一个处理网络数据包的应用程序来说，在每秒都要处理几十万个数据包的情况下，在一个数据包和下一个数据包之间，加载到网络系统调用hook上的BPF程序是可以自动替换的，可以预见到的结果是，上一个数据包是旧版本的程序在处理，而下一个数据包就会看到新版本的程序了，没有任何的中断. 这就是无缝升级，从而实现持续交付的能力.
+
+## ebpf总体设计
+![ebpf总体设计](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21ckKpFCZ7s0c5M3nbgw3y68WbLJoficiaGS9STIyxZBRia8cHnOdfqn6Bw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+包括:
+1. eBPF Runtime
+
+    ![eBPF Runtime](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21S0hYUdncRriaWljziaUCKOJ7XOQ1UAswCCYliaFI7icYtrEV0SZPtTRGSw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+
+    - 安全保障 ： eBPF的verifier 将拒绝任何不安全的程序并提供沙箱运行环境
+    - 持续交付： 程序可以更新在不中断工作负载的情况下
+    - 高性能：JIT编译器可以保证运行性能
+1. eBPF Hooks
+
+    ![eBPF Hooks](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21ZfPGXWKXeYTfHLLAa2IKDic6hUfPnHVK6GiaBs301SYiaRyNId2y5ZwjA/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+    hooks位置: 内核函数 (kprobes)、用户空间函数 (uprobes)、系统调用、fentry/fexit、跟踪点、网络设备 (tc/xdp)、网络路由、TCP 拥塞算法、套接字（数据面）
+1. eBPF Maps
+
+    Map 类型:
+    - Hash tables, Arrays
+    - LRU (Least Recently Used)
+    - Ring Buffer
+    - Stack Trace
+    - LPM (Longest Prefix match)
+
+    作用:
+    - 程序状态
+    - 程序配置
+    - 程序间共享数据
+    - 和用户空间共享状态、指标和统计
+1. eBPF Helpers
+
+    ![eBPF Helpers](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21DLLOvQrSbBIgPOxYWzeXefgibrJao4M4DxibibSX5txvGkgIlf6rKpicvA/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+    比如:
+    - 随机数
+    - 获取当前时间
+    - map访问
+    - 获取进程/cgroup 上下文
+    - 处理网络数据包和转发
+    - 访问套接字数据
+    - 执行尾调用
+    - 访问进程栈
+    - 访问系统调用参数
+    - ...
+
+1. eBPF Tail and Function Calls
+
+    ![eBPF Tail and Function Calls](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21bvdQhByhRib1icXPaj8nEG4pVSh5d0TvUygSzfWGdEBibDPbp9kFuRZlw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+    尾调用作用:
+    - 将程序链接在一起
+    - 将程序拆分为独立的逻辑组件
+    - 使 BPF 程序可组合
+
+    函数调用作用:
+    - 重用内部的功能程序
+    - 减少程序大小（避免内联）
+- eBPF JIT Compiler
+
+    ![eBPF JIT Compiler](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21mfgzOuEDWO2oyHkTEVlcFW3b8qyk8ickEuT9kTicEWibuwLBuyL3gNibPA/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+    - 确保本地执行性能而不需要了解CPU
+    - 将 BPF字节码编译到CPU架构特定指令集
+
+
+
+[eBPF可以做什么？](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21mqT3QgJoEibaGNrAPCBaezMtw51MY6RDrjkywQMKeVL9d261588fLwQ/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+[eBPF 开源 Projects](https://mp.weixin.qq.com/s/BOamc7V7lZQa1FTuJMqSIA)
 
 ## BPF超能的核心技能点
 ### 1. BPF Hooks
@@ -215,13 +290,16 @@ BPF程序可以使用尾部调用来调用其他BPF程序. 这是一个强大的
     ![](/misc/img/net/eBPF_cilium.png)
     ![配合eBPF Map存储后端Pod地址和端口，实现高效查询和更新](/misc/img/net/cilium_pod.png)
 
-### bpf tools
+## bpf tools
+### bcc
 参考:
 - [bcc开发](https://www.cnblogs.com/charlieroro/p/13265252.html)
 
 ![](https://github.com/iovisor/bcc/blob/master/images/bcc_tracing_tools_2019.png)
 
-Bcc是ebpf的编译工具集合，前端提供python/lua调用，本身通过c语言实现，集成llvm/clang，将ebpf代码注入kernel，提供一些更人性化的函数给用户使用.
+Bcc(BPF Compiler Collection)是ebpf的编译工具集合，前端提供python/lua调用，本身通过c语言实现，集成llvm/clang，将ebpf代码注入kernel，提供一些更人性化的函数给用户使用.
+
+> 该框架主要针对涉及应用程序和系统分析/跟踪的用例，其中 eBPF 程序用于收集统计信息或生成事件，用户空间中的对应部分收集数据并以人类可读的形式显示.
 
 > bcc使用`BPF.get_kprobe_functions(b'blk_start_request')`函数校验kernel函数是否存在，其是在/proc/kallsyms中进行检查的，因为/proc/kallsyms保存了Linux内核符号表.
 
@@ -330,6 +408,20 @@ bcc/tools列表:
 - zfsdist.py : 打印 ZFS read/write/open/fsync 耗时直方图
 - zfsslower.py : 打印 ZFS 慢请求
 
+### bpftrace
+bpftrace 是一种用于 Linux eBPF 的高级跟踪语言，可在最近的 Linux 内核 (4.x) 中使用。bpftrace 使用 LLVM 作为后端将脚本编译为 eBPF 字节码，并利用 BCC 与 Linux eBPF 子系统以及现有的 Linux 跟踪功能进行交互：内核动态跟踪 (kprobes)、用户级动态跟踪 (uprobes) 和跟踪点. bpftrace 语言的灵感来自 awk、C 和前身跟踪器，例如 DTrace 和 SystemTap.
+
+![bpftrace](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21gAw4gv6HhkzJjqmwbBheAxVtsl4uCSMHr9zYyVjiavlFXAYE5zc5gDA/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+### eBPF Go 库
+eBPF Go 库提供了一个通用的 eBPF 库，它将获取 eBPF 字节码的过程与 eBPF 程序的加载和管理解耦。eBPF 程序通常是通过编写高级语言创建的，然后使用 clang/LLVM 编译器编译为 eBPF 字节码.
+
+![eBPF Go 库](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21D4ZF1sFleoI6w86ksriaQv9zGhBa1XcX7B6lqUFPFxYLEnlzs7xic6bg/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+### libbpf C/C++ 库
+libbpf 库是一个基于 C/C++ 的通用 eBPF 库，它有助于解耦从 clang/LLVM 编译器生成的 eBPF 目标文件加载到内核中，并通过提供易于使用的库 API 来抽象与 BPF 系统调用的交互应用程序.
+
+![libbpf C/C++ 库](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21zS9gak7grtSYlDdITV1pYXF2P6BScdWZnR0h2mYAXzbwib7Am6hYA6A/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
 
 ### next net acl
 参考:
@@ -338,9 +430,142 @@ bcc/tools列表:
 
 随着 eBPF 技术的快速发展，bpfilter 有望取代 iptables/nftables，成为下一代网络 ACL 的解决方案.
 
-XDP（eXpress Data Path）是基于 eBPF 实现的高性能、可编程的数据平面技术. 它能够在网络包进入用户态直接对网络包进行过滤或者处理.
+XDP（eXpress Data Path）是基于 eBPF 实现的高性能、可编程的数据平面技术, 是Linux 内核中提供高性能、可编程的网络数据包处理框架. 它能够在网络包进入用户态直接对网络包进行过滤或者处理.
 
 ![xdp架构](/misc/img/net/2M36Vbb.webp)
+![XDP整体框架](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21yEsfia4WFia9sz6NXOFx163Wt5ymHQjbeQ4pib52eOPkAzIsgRPuzxtCw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+xdp优点:
+- 直接接管网卡的RX数据包（类似DPDK用户态驱动）处理
+- 通过运行BPF指令快速处理报文
+- 和Linux协议栈无缝对接
+
+XDP总体设计:
+![XDP总体设计](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ21oiblJrLqn4u6psXmQMOHX0v69bb9nrn2RxYhXlCuYxQvKqG6oRMB4aA/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+XDP总体设计包括以下几个部分：
+- XDP驱动
+
+    网卡驱动中XDP程序的一个挂载点，每当网卡接收到一个数据包就会执行这个XDP程序；XDP程序可以对数据包进行逐层解析、按规则进行过滤，或者对数据包进行封装或者解封装，修改字段对数据包进行转发等；
+- BPF虚拟机
+
+    一个XDP程序首先是由用户编写用受限制的C语言编写的，然后通过clang前端编译生成BPF字节码，字节码加载到内核之后运行在eBPF虚拟机上，虚拟机通过即时编译将XDP字节码编译成底层二进制指令；eBPF虚拟机支持XDP程序的动态加载和卸载
+- BPF maps
+
+    存储键值对，作为用户态程序和内核态XDP程序、内核态XDP程序之间的通信媒介，类似于进程间通信的共享内存访问；用户态程序可以在BPF映射中预定义规则，XDP程序匹配映射中的规则对数据包进行过滤等；XDP程序将数据包统计信息存入BPF映射，用户态程序可访问BPF映射获取数据包统计信息；
+- BPF程序校验器
+
+    XDP程序肯定是我们自己编写的，那么如何确保XDP程序加载到内核之后不会导致内核崩溃或者带来其他的安全问题呢？程序校验器就是在将XDP字节码加载到内核之前对字节码进行安全检查，比如判断是否有循环，程序长度是否超过限制，程序内存访问是否越界，程序是否包含不可达的指令；
+- XDP Action
+    XDP用于报文的处理，支持如下action：
+    ```c
+    enum xdp_action {
+        XDP_ABORTED = 0,
+        XDP_DROP,
+        XDP_PASS,
+        XDP_TX,
+        XDP_REDIRECT,
+    };
+    ```
+
+    - XDP_DROP：在驱动层丢弃报文，通常用于实现DDos或防火墙
+    - XDP_PASS：允许报文上送到内核网络栈，同时处理该报文的CPU会分配并填充一个skb，将其传递到GRO引擎。之后的处理与没有XDP程序的过程相同。
+    - XDP_TX：从当前网卡发送出去。
+    - XDP_REDIRECT：从其他网卡发送出去。
+    - XDP_ABORTED：表示程序产生了异常，其行为和 XDP_DROP相同，但 XDP_ABORTED 会经过 trace_xdp_exception tracepoint，因此可以通过 tracing 工具来监控这种非正常行为。
+
+- AF_XDP
+
+    AF_XDP 是为高性能数据包处理而优化的地址族，AF_XDP 套接字使 XDP 程序可以将帧重定向到用户空间应用程序中的内存缓冲区。
+
+XDP设计原则
+- XDP 专为高性能而设计。它使用已知技术并应用选择性约束来实现性能目标
+- XDP 还具有可编程性。无需修改内核即可即时实现新功能
+- XDP 不是内核旁路。它是内核协议栈的快速路径
+- XDP 不替代TCP/IP 协议栈。与协议栈协同工作
+- XDP 不需要任何专门的硬件。它支持网络硬件的少即是多原则
+
+XDP技术优势
+- 及时处理
+
+    - 在网络协议栈前处理，由于 XDP 位于整个 Linux 内核网络软件栈的底部，能够非常早地识别并丢弃攻击报文，具有很高的性能。可以改善 iptables 协议栈丢包的性能瓶颈
+    - DDIO
+    - Packeting steering
+    - 轮询式
+- 高性能优化
+
+    - 无锁设计
+    - 批量I/O操作
+    - 不需要分配skbuff
+    - 支持网络卸载
+    - 支持网卡RSS
+
+- 指令虚拟机
+
+    - 规则优化，编译成精简指令，快速执行
+    - 支持热更新，可以动态扩展内核功能
+    - 易编程-高级语言也可以间接在内核运行
+    - 安全可靠，BPF程序先校验后执行，XDP程序没有循环
+
+- 可扩展模型
+
+    - 支持应用处理（如应用层协议GRO）
+    - 支持将BPF程序卸载到网卡
+    - BPF程序可以移植到用户空间或其他操作系统
+
+- 可编程性
+
+    - 包检测，BPF程序发现的动作
+    - 灵活（无循环）协议头解析
+    - 可能由于流查找而有状态
+    - 简单的包字段重写（encap/decap）
+
+XDP 有三种工作模式:
+- Native XDP
+
+    默认模式，在这种模式中，XDP BPF 程序直接运行在网络驱动的早期接收路径上（early receive path）
+
+- Offloaded XDP
+
+    在这种模式中，XDP BPF程序直接 offload 到网卡
+
+- Generic XDP
+
+    对于还没有实现 native 或 offloaded XDP 的驱动，内核提供了一个 generic XDP 选项，这种设置主要面向的是用内核的 XDP API 来编写和测试程序的开发者，对于在生产环境使用XDP，推荐要么选择native要么选择offloaded模式.
+
+XDP vs DPDK
+![XDP vs DPDK](https://mmbiz.qpic.cn/mmbiz_png/cYSwmJQric6mhcZBGEw04CPU7YpgGCQ219cJF9wSlSJUZxLRMu8Zj1MNRWxBvNWVbT97ciaIpCATchL742BA1nicw/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
+
+相对于DPDK，XDP：
+- 优点
+
+    - 无需第三方代码库和许可
+    - 同时支持轮询式和中断式网络
+    - 无需分配大页
+    - 无需专用的CPU
+    - 无需定义新的安全网络模型
+
+- 缺点
+    
+    注意XDP的性能提升是有代价的，它牺牲了通用型和公平性
+
+    - XDP不提供缓存队列（qdisc），TX设备太慢时直接丢包，因而不要在RX比TX快的设备上使用XDP
+    - XDP程序是专用的，不具备网络协议栈的通用性
+
+如何选择？
+
+- 内核延伸项目，不想bypass内核的下一代高性能方案
+- 想直接重用内核代码
+- 不支持DPDK程序环境
+
+XDP适合场景
+- DDoS防御
+- 防火墙
+- 基于XDP_TX的负载均衡
+- 网络统计
+- 流量监控
+- 栈前过滤/处理
+- ...
 
 XDP 位于网卡驱动层, 当数据包经过 DMA 存放到 ring buffer 之后, 分配 skb 之前即可被 XDP 处理. 数据包经过 XDP 之后, 会有 4 种去向：
 - XDP_DROP：丢包
