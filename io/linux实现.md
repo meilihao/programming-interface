@@ -2,6 +2,7 @@
 - ![io抽象层次](/misc/img/io/80e152fe768e3cb4c84be62ad8d6d07f.jpg)
 - ![The Linux Storage Stack Diagram](/misc/img/io/The Linux Storage Stack Diagram.svg)
 - [大话 Block 层：数据单元](https://kernel.taobao.org/2020/08/Block_Story_Data_Unit/)
+- [sysfs-block属性](https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-block)
 
 virtio-scsi是一种新的半虚拟化SCSI控制器设备, 它是替代virtio-blk并改进其功能的KVM Virtualization存储堆栈的替代存储实现的基础.
 
