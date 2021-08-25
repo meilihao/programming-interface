@@ -533,6 +533,13 @@ $ nc localhost 9000
 
 由三次握手可以看出, 服务器收到 SYN 数据报文段后将为连接分配资源, 果服务器没有收到 ACK 报文段就会造成半开连接, 费服务器资源. SYN 洪水攻击就是利用 TCP 的这个缺陷, 过向服务器发送海量的 SYN 报文段而耗尽服务器资源. 详见[TCP洪水攻击（SYN Flood）的诊断和处理](https://cloud.tencent.com/developer/article/1115567)
 
+为什么3次握手总结:
+1. 能力确认
+
+    1. client第一次发和第一次收, 确认client收发ok
+    1. server第一次发和第二次收, 确认server收发ok
+1. 超时控制
+
 ### 四次分手
 ![TCP连接的释放](/misc/img/net/tcp_close_handle.png)
 
