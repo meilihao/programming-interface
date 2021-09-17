@@ -1,5 +1,6 @@
 # paxos
 参考:
+- [深入浅出paxos](https://rebootcat.com/2020/12/05/paxos/)
 - [如何评价阿里最近推出的paxos基础库？](https://www.zhihu.com/question/63479409)
 - [阿里如何实现高性能分布式强一致的独立 Paxos 基础库？](https://mp.weixin.qq.com/s?__biz=MjM5MDE0Mjc4MA==&mid=2650997287&idx=1&sn=4b3ef76bb90c2e28e259802866dc934e&scene=21)
 - [X-Paxos — 阿里巴巴的高性能分布式强一致Paxos独立基础库](https://mp.weixin.qq.com/s/EN09RG8c695iDm0edoM5mg)
