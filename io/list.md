@@ -34,3 +34,15 @@
 
 ## target
 - TCM( Target Core Module )是LINUX LIO 的另一个名称， TCMU（TCM in Userspace） 是 TCM 的 用户态实现
+
+## 用户态
+- [DatenLord : 王璞博士开源的云原生分布式存储系统, 用Rust实现了高性能用户态存储，通过绕过Linux内核，避免进程上下文切换以及自行调度IO任务，从而更好地发挥出存储硬件的性能](https://github.com/datenlord/datenlord)
+- [打造用户态存储利器，基于SPDK的存储引擎Blobstore & BlobFS](https://www.sdnlab.com/22880.html)
+- [基于SPDK的用户态存储引擎：FusionEngine 2.0](https://ci.spdk.io/download/2019-summit-prc/02_Presentation_03_FusionEngine_2.0--Alibaba_User-Space_Full_Stack_Solution_for_Storage_Alibaba_Zhengyong_Yi.pdf)
+
+## 生态
+- [浪潮AS13000-H并行存储系统是专门针对高性能计算开发和优化的并行文件存储系统。它基于BeeGFS文件系统商业版本开发，为提高应用的扩展性能和灵活性实现了分布式元数据架构](https://www.inspur.com/lcjtww/2527583/2527584/2527588/2527688/index.html)
+- [软件定义存储，看这一篇就够了！](https://www.sohu.com/a/397070625_505795)
+
+## cdp
+- [linux CDP（连续性数据保护）实现方案](https://blog.csdn.net/weixin_34621309/article/details/116324494)

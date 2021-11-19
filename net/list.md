@@ -11,6 +11,11 @@
 ## next
 - [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
 - [阿里云如何构建高性能云原生容器网络-直播](https://yq.aliyun.com/live/2626)
+- [超大规模云网络数据中心创新（上/下）](https://www.51openlab.com/article/28/)
+
+    - 大型 OTT纷纷开始在其数据中心中采用CLOS架构，利用数量众多，小规模的基本交换矩阵（CrossBar）来构建超大规模网络Fabric.
+    - SRv6 Overlay是趋势
+- [SRv6开启网络服务化变革之旅](https://cloud.tencent.com/developer/article/1779041)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)

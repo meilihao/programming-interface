@@ -32,3 +32,6 @@
 
     virtio1.1 关键的最大改动点就是引入了packed virtqueues(新的 virtqueues 内存布局, 旧的布局叫split virtqueues). packed的关键变化是desc ring的变化，为了更好的利用cache和硬件的亲和性（方便硬件实现virtio）, 将split方式中的三个ring（desc，avail，used）打包成一个packed desc ring.
 - [^Virtio Spec Overview](https://kernelgo.org/virtio-overview.html)
+
+## next
+- [浅谈Linux设备虚拟化技术的演进之路](https://www.modb.pro/db/110904)
