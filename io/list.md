@@ -46,3 +46,15 @@
 
 ## cdp
 - [linux CDP（连续性数据保护）实现方案](https://blog.csdn.net/weixin_34621309/article/details/116324494)
+
+## 缓存
+- [缓存那些事](https://tech.meituan.com/2017/03/17/cache-about.html)
+
+## 分布式
+- [一文看懂分布式存储架构](https://stor.51cto.com/art/202005/616378.htm)
+- [分布式块存储系统Ursa的设计与实现](https://tech.meituan.com/2016/03/11/block-store.html)
+- [深入浅出分布式存储性能优化方案](https://xie.infoq.cn/article/e258215d7bfdf1c89cc319e04)
+- [**华为存储 OceanStor SmartMatrix 架构**](https://zhuanlan.zhihu.com/p/81871403)
+- [面向核心业务的全闪分布式存储架构设计与实践 - QingStor NeonSAN](https://new.qq.com/omn/20210324/20210324A0B49G00.html)
+- [**FASS白皮书|探秘分布式全闪存储原理架构**](https://mp.weixin.qq.com/s/V5bb6fvg5n2DBqVI69sfUw)
+- [MinIO技术白皮书](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276023&idx=1&sn=58ea3118c4cd30868084571047972dce)
