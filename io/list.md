@@ -58,3 +58,4 @@
 - [面向核心业务的全闪分布式存储架构设计与实践 - QingStor NeonSAN](https://new.qq.com/omn/20210324/20210324A0B49G00.html)
 - [**FASS白皮书|探秘分布式全闪存储原理架构**](https://mp.weixin.qq.com/s/V5bb6fvg5n2DBqVI69sfUw)
 - [MinIO技术白皮书](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276023&idx=1&sn=58ea3118c4cd30868084571047972dce)
+- [**突破硬件瓶颈(一)：Intel体系架构的发展与瓶颈挖掘**](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276427&idx=2&sn=63d0268972c27dd721517a5c08e1fe27)
