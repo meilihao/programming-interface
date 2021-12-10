@@ -55,7 +55,17 @@
 - [分布式块存储系统Ursa的设计与实现](https://tech.meituan.com/2016/03/11/block-store.html)
 - [深入浅出分布式存储性能优化方案](https://xie.infoq.cn/article/e258215d7bfdf1c89cc319e04)
 - [**华为存储 OceanStor SmartMatrix 架构**](https://zhuanlan.zhihu.com/p/81871403)
+
+    多控前后端的全互联共享架构. 4控制器通过PCIe交换机互联.
+
+    四个控制器放在一个控制框, 可通过PCIE交换机连接控制框, 实现Scale Out.
+
+    > SVP（service processor）与KVM（keyboard, video, and mouse）配套使用，是OceanStor 18500 V3/18800 V3存储系统管理、配置、维护等的核专心部件。其上安属装了OceanStor 18500 V3/18800 V3存储系统所需的维护、管理等工具，可以在本地或远程轻松完成全套的管理、配置、鉴等一系列工作. 其本质推测应是一个台刀片服务器.
 - [面向核心业务的全闪分布式存储架构设计与实践 - QingStor NeonSAN](https://new.qq.com/omn/20210324/20210324A0B49G00.html)
 - [**FASS白皮书|探秘分布式全闪存储原理架构**](https://mp.weixin.qq.com/s/V5bb6fvg5n2DBqVI69sfUw)
 - [MinIO技术白皮书](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276023&idx=1&sn=58ea3118c4cd30868084571047972dce)
 - [**突破硬件瓶颈(一)：Intel体系架构的发展与瓶颈挖掘**](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276427&idx=2&sn=63d0268972c27dd721517a5c08e1fe27)
+- [搜索"华为 OceanStor   Data Sheet/技术白皮书"]
+
+    - [华为OceanStor 6800 V5高端混合闪存存储系统技术白皮书](https://e.huawei.com/cn/material/datacenter/storage/cb4e8571742743498c1012a8190e64c3)
+    - [Huawei OceanStor 18500 and 18800 V5 Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://actfornet.com/ueditor/php/upload/file/20190104/1546532119794412.pdf)
