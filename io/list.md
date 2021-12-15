@@ -21,6 +21,9 @@
 - [基于SPDK的用户态存储引擎：FusionEngine 2.0](/misc/pdf/io/02_Presentation_03_FusionEngine_2.0--Alibaba_User-Space_Full_Stack_Solution_for_Storage_Alibaba_Zhengyong_Yi.pdf)
 - [用户态本地存储引擎 — 百万IOPS背后的故事](/misc/pdf/io/f0f8a513fb12402fa52ff9772c3c8f79.pdf)
 - [使用 SPDK 技术优化虚拟机本地存储的 IO 性能](https://zhuanlan.zhihu.com/p/52970477)
+- [利用SPDK配合QLogic HBA创建FC target系统](https://qlogicbj.github.io/2020/09/08/qfc-spdk-target-v2/)
+
+    但互联网上找不到QFC 4.5.3a
 
 ## 性能
 - [【冬瓜哥手绘】它保你上线性能也吊炸天！](https://mp.weixin.qq.com/s?__biz=MzAwNzU3NzQ0MA==&mid=2652088576&idx=1&sn=af2557735037e254b2f1a5b6ad93e541)
@@ -63,9 +66,14 @@
     > SVP（service processor）与KVM（keyboard, video, and mouse）配套使用，是OceanStor 18500 V3/18800 V3存储系统管理、配置、维护等的核专心部件。其上安属装了OceanStor 18500 V3/18800 V3存储系统所需的维护、管理等工具，可以在本地或远程轻松完成全套的管理、配置、鉴等一系列工作. 其本质推测应是一个台刀片服务器.
 - [面向核心业务的全闪分布式存储架构设计与实践 - QingStor NeonSAN](https://new.qq.com/omn/20210324/20210324A0B49G00.html)
 - [**FASS白皮书|探秘分布式全闪存储原理架构**](https://mp.weixin.qq.com/s/V5bb6fvg5n2DBqVI69sfUw)
+
+    FASS目前支持NVMeoF运行在RDMA transport(IB or RoCE v2)之上, 分为host端和target端，host端采用工具nvme-cli，target端采用SPDK的NVMeoFtarget，完成协议解析后，对接到后端suzaku存储系统.
 - [MinIO技术白皮书](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276023&idx=1&sn=58ea3118c4cd30868084571047972dce)
 - [**突破硬件瓶颈(一)：Intel体系架构的发展与瓶颈挖掘**](https://mp.weixin.qq.com/s?__biz=MzAwMzgyMDk1Mw==&mid=2649276427&idx=2&sn=63d0268972c27dd721517a5c08e1fe27)
 - [搜索"华为 OceanStor   Data Sheet/技术白皮书"]
 
     - [华为OceanStor 6800 V5高端混合闪存存储系统技术白皮书](https://e.huawei.com/cn/material/datacenter/storage/cb4e8571742743498c1012a8190e64c3)
     - [Huawei OceanStor 18500 and 18800 V5 Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://actfornet.com/ueditor/php/upload/file/20190104/1546532119794412.pdf)
+
+## 多活
+- [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)
