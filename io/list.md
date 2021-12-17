@@ -24,6 +24,26 @@
 - [利用SPDK配合QLogic HBA创建FC target系统](https://qlogicbj.github.io/2020/09/08/qfc-spdk-target-v2/)
 
     但互联网上找不到QFC 4.5.3a
+- [H3C 全闪（NVMe）存储使用SPDK 加速前后端I/O](https://www.intel.cn/content/dam/www/public/cn/zh/documents/case-studies/h3c-nvme-storage-expedite-front-back-io-cn.pdf)
+- [基于SPDK的高效NVMe-oF target](https://www.sdnlab.com/21082.html)
+
+    总体而言iSCSI target更加通用，NVMe-oF target的设计初衷则是考虑性能, 当然在兼容性和通用性方面，NVMe-oF target也在持续进步: NVMe-oF 协议一样可以export 出非PCIe SSD，即SPDK 的NVMe-oF target提供了后端存储的简单抽象, 可以虚拟出相应的NVMe盘(在SPDK 中可以用malloc的bdev或者基于libaio的bdev来模拟出NVMe 盘，把NVMe协议导入到SPDK通用bdev的语义，远端看到的依然是NVMe的盘), 这解决了通用性的问题.
+
+    SPDK NVMe-oF target代码的架构说明.
+
+- [NVMe-oF不只是RDMA，还有TCP](https://www.cnblogs.com/whl320124/articles/11358669.html)
+
+    NVMe-oF协议在某种程度上希望替换掉iSCSI 协议.
+
+    Software RoCE，把网络设备模拟成一个具有RDMA功能的设备.
+
+    NVMe/TCP PDU(Protocol Data Unit)的定义说明.
+
+    **基于SPDK的NVMe-oF TCP 的transport 的实现以及使用介绍(包含"测试 SPDK NVMe-oF target")**.
+
+- [通过 SPDK NVMe/TCP 进行的应用设备队列 (ADQ) 性能测试](https://www.intel.cn/content/www/cn/zh/customer-spotlight/cases/performance-testing-adq-nvme-tcp-spdk.html)
+
+    部分测试配置(没有测试步骤)
 
 ## 性能
 - [【冬瓜哥手绘】它保你上线性能也吊炸天！](https://mp.weixin.qq.com/s?__biz=MzAwNzU3NzQ0MA==&mid=2652088576&idx=1&sn=af2557735037e254b2f1a5b6ad93e541)
