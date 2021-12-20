@@ -253,3 +253,33 @@ rtnetlink(NETLINK_ROUTE)消息并非限制于网络路由选择子系统消息, 
 - ADDRLABEL : 地址标记
 
 每个消息簇都至少有3类: 创建, 删除, 检索消息, 比如ROUTE消息; 部分消息簇有更多类型的消息, 比如LINK消息.
+
+## FAQ
+### `golang.org/x/sys/unix.Recvfrom(netlinkFd, buf,0)`报`no buffer space available`
+参考:
+- [netlink遇到ENOBUFS错误](https://xixitalk.github.io/blog/2016/08/18/netlink-ENOBUFS/)
+- [no buffer space available](https://www.ibm.com/support/pages/no-buffer-space-available)
+
+buf大小是`1<<20 * 32`
+
+系统sk_rcvbuf=sysctl_rmem_default(from `sysctl -a|grep net.core.rmem_default`)=212992=208k, 默认sysctl_rmem_default=sysctl_rmem_max, 因为buf大于k_rcvbuf导致.
+
+解决方法(分两步):
+1. 调大sysctl_rmem上限: `sysctl -w net.core.rmem_max=67108864`, 即64M
+2. 调大sk_rcvbuf
+```go
+// 参考[https://go.dev/src/net/sockopt_posix.go](https://go.dev/src/net/sockopt_posix.go)
+import (
+    "syscall"
+
+    "golang.org/x/sys/unix"
+
+    ...
+)
+if err:=unix.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1<<20*40);err!=nil{
+    return err
+}
+```
+
+### lib
+- [netlink - golang](https://github.com/mdlayher/netlink)
