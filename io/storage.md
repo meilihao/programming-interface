@@ -61,6 +61,8 @@ ext4, xfs, btrfs
 ## 2. linux远程存储服务
 1. 块设备服务
 
+  目前基于SCSI协议的SAS和SATA只能是单个队列而且每个队列的深度也比较低，分别是254和32的队列深度。而NVMe协议设计之初就考虑了该问题，它的最大队列数量可以是64K（65535个命令队列和1个管理队列），而每个队列的深度可以高达64K.
+
   - iscsi
   - nvme over fabrics: nvme协议在fabrics上的延伸, 主要设计目的是让client能更高效地访问远端server上的nvme盘.
   

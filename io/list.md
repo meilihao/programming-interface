@@ -1,5 +1,9 @@
 # list
 
+## base
+- [itworld123](https://www.zhihu.com/people/zhang-shu-zhu-69)
+- [存储系统的快照技术](https://zhuanlan.zhihu.com/p/64595897)
+
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)
 
@@ -21,6 +25,7 @@
 - [基于SPDK的用户态存储引擎：FusionEngine 2.0](/misc/pdf/io/02_Presentation_03_FusionEngine_2.0--Alibaba_User-Space_Full_Stack_Solution_for_Storage_Alibaba_Zhengyong_Yi.pdf)
 - [用户态本地存储引擎 — 百万IOPS背后的故事](/misc/pdf/io/f0f8a513fb12402fa52ff9772c3c8f79.pdf)
 - [使用 SPDK 技术优化虚拟机本地存储的 IO 性能](https://zhuanlan.zhihu.com/p/52970477)
+- [基于SPDK的UDisk全栈优化](https://ci.spdk.io/download/2019-summit-prc/02_Presentation_06_Full_Stack_Optimization_for_Udisk_with_SPDK_UCloud_Yutian.pdf)
 - [利用SPDK配合QLogic HBA创建FC target系统](https://qlogicbj.github.io/2020/09/08/qfc-spdk-target-v2/)
 
     但互联网上找不到QFC 4.5.3a
