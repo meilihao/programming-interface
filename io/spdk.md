@@ -387,6 +387,8 @@ ref:
 
 > SPDK和DPDK的关系: SPDK 提供了一套环境抽象化库 (位于lib/env目录)，主要用于管理SPDK存储应用所使用的CPU资源、内存和PCIe等设备资源，其中DPDK是SPDK缺省的环境库.
 
+> 使用SPDK application framework的应用程序, 都需要用CPU的亲和性（CPU Affinity）绑定某几个CPU, 对于SPDK的线程和应用线程之间的竞争可使用[SPDK RBD bdev的解决方案即spdk_call_unaffinitized](https://www.sdnlab.com/25330.html).
+
 SPDK提供了一套编程框架 (SPDK Application Framework)，用于指导软件开发人员基于SPDK的用户态NVMe驱动以及用户态块设备层 (User space Bdev) 构造高效的存储应用. 用户有两种选择:
 1. 直接使用SPDK应用编程框架实现应用的逻辑
 2. 使用SPDK编程框架的思想，改造应用的编程逻辑，以更好的适配SPDK的用户态NVMe驱动
