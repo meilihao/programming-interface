@@ -381,7 +381,6 @@ ref:
 - [SPDK 应用编程框架](https://mp.weixin.qq.com/s?__biz=MzI3NDA4ODY4MA==&mid=2653334735&idx=1&sn=b81c263cffc74cf42338d2edda371d2c)
 - [使用SPDK lib搭建自己的NVMe-oF Target应用](https://blog.csdn.net/weixin_37097605/article/details/108114450)
 - [搭建远端存储，深度解读SPDK NVMe-oF target](https://mp.weixin.qq.com/s/ohPaxAwmhGtuQQWz--J6WA)
-- [SPDK NVMe-oF target代码分析（转载+改编）](https://www.cnblogs.com/whl320124/articles/10450250.html)
 - [SPDK NVMe Reservation使用简介](https://mp.weixin.qq.com/s?__biz=MzI3NDA4ODY4MA==&mid=2653335852&idx=1&sn=5e08566473a1e2f14b9d1f697c4995cc)
 - [SPDK块设备bdev简介](https://www.cnblogs.com/whl320124/articles/10064186.html)
 - [Writing a Custom Block Device Module](https://spdk.io/doc/bdev_module.html)
