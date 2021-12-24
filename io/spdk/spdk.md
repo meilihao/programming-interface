@@ -6,6 +6,15 @@ ref:
 **spdk v21.10启用io_uring后iscsi_tgt和nvmf_tgt都存在问题无法使用见FAQ**
 
 ## 背景
+越来越多公有云服务提供商采用SPDK技术作为其高性能云存储的核心技术之一.
+
+SPDK(全称Storage Performance Development Kit)，提供了一整套工具和库，以实现高性能、扩展性强、全用户态的存储应用程序. 它是继DPDK之后，intel在存储领域推出的又一项颠覆性技术，旨在大幅缩减存储IO栈的软件开销，从而提升存储性能，可以说它就是为了存储性能而生.
+
+SPDK能实现高性能，得益于以下三个关键技术：
+- 全用户态，它把所有必要的驱动全部移到了用户态，避免了系统调用的开销并真正实现内存零拷贝
+- 轮循模式，针对高速物理存储设备，采用轮循的方式而非中断通知方式判断请求完成，大大降低时延并减少性能波动
+- 无锁机制，在IO路径上避免采用任何锁机制进行同步，降低时延并提升吞吐量
+
 目前这一代的闪存存储，比起传统的磁盘设备，在性能（performance）、功耗（power consumption）和机架密度（rack density）上具有显著的优势. 而且这些优势将会继续增大，使闪存存储作为下一代设备进入市场.
 
 因此面临一个主要的挑战：随着存储设备继续发展，它将面临远远超过正在使用的软件体系结构的风险（即存储设备受制于相关软件的不足而不能发挥全部性能）. 因为吞吐量和延迟性能比传统的磁盘好太多，现在总的处理时间中，存储软件占用了更大的比例. 换句话说，存储软件栈的性能和效率在整个存储系统中越来越重要. 
@@ -28,23 +37,29 @@ ref:
 
     在旋转设备时代（磁带和机械硬盘），中断开销只占整个I/O时间的一个很小的百分比. 然而，在固态设备的时代，持续引入更低延迟的持久化设备，中断开销成为了整个I/O时间中不能被忽视的部分. 这个问题在更低延迟的设备上只会越来越严重.
 
-
 SPDK的指导原则是通过消除每一处额外的软件开销来提供最少的延迟和最高的效率. SPDK的目标是能够把硬件平台的计算、网络、存储的最新性能进展充分发挥出来.
 
-spdk层次:
+spdk整体分为三层:
 1. drivers
+
+    实际把驱动细分成了两层，和块设备强相关的放到了存储服务层，而把和硬件强相关部分放到了驱动层
 
     - NVMe Devices：SPDK的基础组件，这个高优化无锁的驱动提供了高扩展性，高效性和高性能
 
         - NVMe over Fabrics（NVMe-oF）initiator：从程序员的角度来看，本地SPDK NVMe驱动和NVMe-oF启动器共享一套共同的API命令。这意味着，比如本地/远程复制非常容易实现.
     - Inter QuickData Technology：也称为Intel I/O Acceleration Technology（Inter IOAT，英特尔I/O加速技术），这是一种基于Xeon处理器平台上的copy offload引擎。通过提供用户空间访问，减少了DMA数据移动的阈值，允许对小尺寸I/O或NTB的更好利用。
 1. storage services
+
+    该层实现了对块和文件的抽象, 实现了存储服务层定义的抽象接口，以对接不同的存储类型，如NVMe，RBD，virtio，aio等等.
+
     - Block device abstration layer（bdev）：这种通用的块设备抽象是连接到各种不同设备驱动和块设备的存储协议的粘合剂。还在块层中提供灵活的API用于额外的用户功能（磁盘阵列，压缩，去冗等等）
     - Ceph RADOS Block Device（RBD）：使Ceph成为SPDK的后端设备，比如这可能允许Ceph用作另一个存储层
     - Blobstore：为SPDK实现一个高精简的文件式语义（非POSIX）。这可以为数据库，容器，虚拟机或其他不依赖于大部分POSIX文件系统功能集（比如用户访问控制）的工作负载提供高性能基础
     - Linux Asynchrounous I/O（AIO）：允许SPDK与内核设备（比如机械硬盘）交互
     - Logical Volume：类似于内核软件栈中的逻辑卷管理，SPDK通过Blobstore的支持，同样带来了用户态逻辑卷的支持，包括更高级的按需分配、快照、克隆等功能
 - storage protocols
+
+    指SPDK支持存储应用类型
 
     - iSCSI target
 
@@ -374,29 +389,6 @@ perf options:
 # 用ibv_devinfo查看rxe0, 发现active_mtu是max_mtu的1/4.
 # build/examples/perf -c [3] -q 128 -o 4096 -w randread -s 64 -t 10 -r 'trtype:PCIe traddr:0000:06:00.0' # on server for local NVMe over PCIe, traddr from 'scripts/setup.sh status'
 ```
-
-## dev
-ref:
-- [SPDK官方技术文章](https://spdk.io/cn/articles/)
-- [SPDK 应用编程框架](https://mp.weixin.qq.com/s?__biz=MzI3NDA4ODY4MA==&mid=2653334735&idx=1&sn=b81c263cffc74cf42338d2edda371d2c)
-- [使用SPDK lib搭建自己的NVMe-oF Target应用](https://blog.csdn.net/weixin_37097605/article/details/108114450)
-- [搭建远端存储，深度解读SPDK NVMe-oF target](https://mp.weixin.qq.com/s/ohPaxAwmhGtuQQWz--J6WA)
-- [SPDK NVMe Reservation使用简介](https://mp.weixin.qq.com/s?__biz=MzI3NDA4ODY4MA==&mid=2653335852&idx=1&sn=5e08566473a1e2f14b9d1f697c4995cc)
-- [SPDK块设备bdev简介](https://www.cnblogs.com/whl320124/articles/10064186.html)
-- [Writing a Custom Block Device Module](https://spdk.io/doc/bdev_module.html)
-
-> SPDK和DPDK的关系: SPDK 提供了一套环境抽象化库 (位于lib/env目录)，主要用于管理SPDK存储应用所使用的CPU资源、内存和PCIe等设备资源，其中DPDK是SPDK缺省的环境库.
-
-> 使用SPDK application framework的应用程序, 都需要用CPU的亲和性（CPU Affinity）绑定某几个CPU, 对于SPDK的线程和应用线程之间的竞争可使用[SPDK RBD bdev的解决方案即spdk_call_unaffinitized](https://www.sdnlab.com/25330.html).
-
-SPDK提供了一套编程框架 (SPDK Application Framework)，用于指导软件开发人员基于SPDK的用户态NVMe驱动以及用户态块设备层 (User space Bdev) 构造高效的存储应用. 用户有两种选择:
-1. 直接使用SPDK应用编程框架实现应用的逻辑
-2. 使用SPDK编程框架的思想，改造应用的编程逻辑，以更好的适配SPDK的用户态NVMe驱动
-
-总体而言，SPDK的应用框架可以分为以下几部分:
-1. 对CPU core和线程的管理
-1. 线程间的高效通信
-1. I/O的的处理模型以及数据路径(data path)的无锁化机制
 
 ## FAQ
 ### spdk config
