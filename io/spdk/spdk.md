@@ -3,7 +3,7 @@ ref:
 - [理解NVMe的内部实现原理，这一篇就够了](https://zhuanlan.zhihu.com/p/71932654)
 - [NVMe/FC Host Configuration for SUSE Linux Enterprise Server 15 SP1 with ONTAP](https://docs.netapp.com/us-en/ontap-sanhost/nvme_sles15_sp3.html)
 
-**spdk v21.10启用io_uring后iscsi_tgt和nvmf_tgt都存在问题无法使用见FAQ**
+**spdk v21.10启用io_uring后iscsi_tgt和nvmf_tgt都存在问题无法使用见FAQ, 具体原因是liburing版本低, 升到2.1即可**
 
 ## 背景
 越来越多公有云服务提供商采用SPDK技术作为其高性能云存储的核心技术之一.
@@ -122,7 +122,7 @@ cd spdk
 git submodule update --init
 vim scripts/pkgdep.sh # `for id in $ID $ID_LIKE; do`上方添加`ID_LIKE="debian"`和`VERSION_ID="10.8"`用于指定os env # for [deepin 20.3](https://www.deepin.org/zh/2021/03/31/deepin-20-2-beautiful-and-wonderful/)
 scripts/pkgdep.sh -u # 这里启用io_uring, 最简单的方法是使用`-a`(安装全部依赖)
-./configure --with-uring --enable-debug
+./configure --with-uring --with-rdma --enable-debug
 make
 ./test/unit/unittest.sh # 执行单元测试，查看是否安装成功
 ```
@@ -228,6 +228,7 @@ ref:
 
 server:
 ```bash
+# modprobe nvme-tcp # 没有这步就无法创建`/dev/nvme-fabrics`
 # build/bin/nvmf_tgt
 # --- other terminal
 # scripts/rpc.py nvmf_create_transport -t TCP -u 16384 -m 8 -c 8192
@@ -288,7 +289,7 @@ ref:
 # rxe_cfg remove enp2s0 # 移除SoftRoCE设备
 ```
 
-rxe网卡配置也可使用iproute2, 它提供rdma工具，支持`rdma link add`命令, **推荐使用**:
+rxe网卡配置也可使用iproute2, 它提供rdma工具，支持`rdma link add`命令, **推荐使用(需要高版本iproute2否则使用rxe_cfg: 当前发现v4.20.0还不够, 查看iproute2源码至少需要v5.2.0)**:
 ```bash
 # rdma link add rxe0 type rxe netdev enp2s0 # rxe0是期望的RDMA的设备名, 可任意取名. enp2s0为Soft-RoCE设备所绑定的网络设备名
 # rdma link # 查看是否添加成功
@@ -437,8 +438,14 @@ perf options:
 ### [`iscsiadm discover failed with "iscsi_pdu_hdr_handle: *ERROR*: before Full Feature"`](https://github.com/spdk/spdk/issues/2291)
 去除io_uring仅使用`./configure --enable-debug`是正常的.
 
+解决方法: 使用liburing 2.1即可.
+
 ### [`nvme discover failed`](https://github.com/spdk/spdk/issues/2294)
-去除io_uring仅使用`./configure --enable-debug`和`nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t TCP -a 127.0.0.1 -s 4420`是正常的.
+1. 去除io_uring仅使用`./configure --enable-debug`和`nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t TCP -a 127.0.0.1 -s 4420`是正常的.
+1. `./configure --with-uring --with-rdma  --enable-debug` + `nvmf_create_transport -t TCP` + `nvme discover -t tcp` is ok.
+1. `./configure --with-uring --with-rdma  --enable-debug` + `nvmf_create_transport -t RDMA` + `nvme discover -t rdma`(use SoftRoCE) is ok.
+
+解决方法: 使用liburing 2.1即可.
 
 ### `rxe_cfg status`报`Can't exec "ibv_devinfo": No such file or directory at /usr/bin/rxe_cfg line 215.`
 `apt install ibverbs-utils`
