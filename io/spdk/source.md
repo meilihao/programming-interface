@@ -3,11 +3,15 @@
 ## arch
 - app
 
-    - app/iscsi_tgt: iscsi target
-    - app/nvmf_tgt: NVMe-oF target
-    - app/iscsi_top：iscsi top工具, 类似于linux top, 用来监控iscsi
-    - app/trace：iscsi target和nvme-of target trace工具
-    - app/vhost：将virtio控制器呈现给基于qemu的虚拟机，并对IO进行处理
+    - iscsi_tgt: iscsi target
+    - iscsi_top：iscsi top工具, 类似于linux top, 用来监控iscsi
+    - nvmf_tgt: NVMe-oF target
+    - spdk_dd: 用于在文件和SPDK bdevs之间高效地复制数据
+    - spdk_lspci:
+    - spdk_tgt: 类似于标准 top，它通过 SPDK 轻量级线程和轮询器提供对 CPU 内核的使用情况进行实时反馈. from [SPDK动态负载均衡](https://blog.csdn.net/weixin_37097605/article/details/120558970)
+    - spdk_trace：spdk trace工具, 用于查看trace文件内容, 以便进行相关分析
+    - spdk_trace_record: 用于转储share memory下trace文件到其他位置
+    - vhost：将virtio控制器呈现给基于qemu的虚拟机，并对IO进行处理
 - build
 - doc：spdk 下的doc文件
 - dpdk：spdk调用了dpdk的很多基础库
