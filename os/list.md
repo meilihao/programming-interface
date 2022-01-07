@@ -38,3 +38,6 @@
 
 ## 内存
 - [观察进程的内存占用情况](https://www.cnblogs.com/bravery/archive/2012/06/27/2560611.html)
+
+## limit
+- [Red Hat Enterprise Linux technology capabilities and limits](https://access.redhat.com/articles/rhel-limits)
