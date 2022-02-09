@@ -146,7 +146,7 @@ SPDK 中使能io_uring:
 1. 编译SPDK， 打开如下开关：./configure --with-uring. 如果liburing没有安装在系统指定的目录, 需要自己指定. 这样编译出的SPDK可执行文件, 会优先使用SPDK的uring socket实现, 而不是POSIX. 比如启动SPDK NVMe-oF tcp target, 就会采用SPDK uring 的socket实现.
 
 ## 媒体系统
-[Pipewire代替PulseAudio, 并使用WirePlumber管理Pipewire](https://www.oschina.net/news/151623/fedora-may-use-wireplumber).
+- [Pipewire代替PulseAudio, 并使用WirePlumber管理Pipewire](https://www.oschina.net/news/151623/fedora-may-use-wireplumber).
 
 ## FAQ
 ### 驱动趋势
