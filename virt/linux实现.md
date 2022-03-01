@@ -1591,6 +1591,8 @@ KVM动态迁移的具体迁移过程为: 在客户机动态迁移开始后，客
 > NX（Never eXecute）位是CPU中的一种技术，用于在内存区域中对指令的存储和数据的存储进行标志以便区分。由于NX位技术的支持，操作系统可以将特定的内存区域标志 为不可执行，处理器就不会执行该区域中的任何代码。这种技术在理论上可以防止“缓冲 区溢出”（buffer overflow）类型的黑客攻击. 在Intel处理器上被称为“XD Bit”（eXecute Disable），在AMD中被称为EVP（Enhanced Virus Protection），在ARM中被称 为“XN”（eXecute Never）.
 
 ### 迁移实践
+> 尽管“-cpu host”参数尽可能多地暴露宿主机CPU特性给 客户机，可以让客户机用上更多的CPU功能，也能提高客户机的部分性能，但同时，“- cpu host”参数也给客户机的动态迁移增加了障碍。例如，在Intel的SandyBridge平台上， 用“-cpu host”参数让客户机使用了AVX新指令进行运算，此时试图将客户机迁移到没有 AVX支持的Intel Westmere平台上去，就会导致动态迁移的失败.
+
 1. 在源/目的host挂载nfs共享存储, 且挂载目录必须一致
 1. 在源host启动vm, 并执行top, 以便在动态迁移后 检查它是否仍然正常地继续执行
 1. 在目的host执行启动vm命令, 该启动客户机的命令与源宿主机上的启动命令一致，但是需要增加`-incoming`选项
@@ -1652,3 +1654,110 @@ virt-v2v默认会尽可能地由转换过来的虚拟客户机使用半虚拟化
 virt-v2v工具的迁移不是动态迁移，在执行迁移操作之前，必须在源宿主机（Xen、VMware等）上关闭待迁移的客户机. 所以，实际上，可以说virt- v2v工具实现的是一种转化，将Xen、VMware等Hypervisor的客户机转化为KVM客户机, 具体参考<<KVM实战>>的`8.2 迁移到KVM虚拟化环境`
 
 > P2V是“物理机迁移到虚拟化环 境”（Physical to Virtual）的缩写.
+
+## 嵌套虚拟化
+嵌套虚拟化（nested virtualization或recursive virtualization）是指在虚拟化的客户机中 运行一个Hypervisor，从而再虚拟化运行一个客户机.
+
+场景:
+1. IaaS（Infrastructure as a Service）类型的云计算提供商，如果有了嵌套虚拟化功能的支持，就可以为其客户提供让客户可以自己运行所需Hypervisor和客户机的能力。对于有这类需求的客户来说，这样的嵌套虚拟化能力会成为吸引他们购买云计算服务的因素。
+1. 为测试和调试Hypervisor带来了非常大的便利。有了嵌套虚拟化功能的支持，被调试Hypervisor运行在更底层的Hypervisor之上，就算遇到被调试Hypervisor的系统崩溃，也 只需要在底层的Hypervisor上重启被调试系统即可，而不需要真实地与硬件打交道。
+1. 在一些为了起到安全作用而带有Hypervisor的固件（firmware）上，如果有嵌套虚拟化的支持，则在它上面不仅可以运行一些普通的负载，还可以运行一些Hypervisor启动 另外的客户机。
+1. 嵌套虚拟化的支持对虚拟机系统的动态迁移也提供了新的功能，从而可以将一个Hypervisor及其上面运行的客户机作为一个单一的节点进行动态迁移。这对服务器的负载 均衡及灾难恢复等方面也有积极意义。
+1. 嵌套虚拟化的支持对于系统隔离性、安全性方面也提供更多的实施方案。
+
+`KVM嵌套KVM`的基本架构底层是具有Intel VT或AMD-V特性的硬件系统，硬件层之上就是底层的宿主机系统（我们称之为L0，即Level 0），在L0宿主 机中可以运行加载有KVM模块的客户机（称之为L1，即Level 1，第一级），在L1客 户机中通过QEMU/KVM启动一个普通的客户机（称之为L2，即Level 2，第二级）。 如果KVM还可以做多级的嵌套虚拟化，各个级别的操作系统被依次称为：L0、L1、L2、 L3、L4……，其中L0向L1提供硬件虚拟化环境（Intel VT或AMD-V），L1向L2提供硬件虚拟化环境，依此类推。而最高级别的客户机Ln（如图9-1中的L2）可以是一个普通客户 机，不需要下面的Ln-1级向Ln级中的CPU提供硬件虚拟化支持。
+
+KVM对“KVM嵌套KVM”的支持从2010年就开始了，目前已经比较成熟了, 配置步骤如下:
+1. 查看L0 kvm_intel模块是否已加载以及其nested参数是否为`Y`:
+    ```bash
+    # modprobe kvm_intel nested=Y
+    # cat /sys/module/kvm_intel/parameters/nested
+    ```
+1. 启动L1客户机时，在qemu命令中加上相应选项，以便将CPU的硬件虚拟化扩展特性暴露给L1客户机
+
+    `-cpu host`的作用是尽可能地将宿主机L0的CPU特性暴露给L1客户机；“- cpu qemu64，+vmx”表示以qemu64这个CPU模型为基础，然后加上Intel VMX特性（即 CPU的VT-x支持）。当然，以其他CPU模型为基础再加上VMX特性，如“-cpu SandyBridge,+vmx”“-cpu Westmere，+vmx”也是可以的。在AMD平台上，则需要对应的 CPU模型（“qemu64”是通用的），再加上AMD-V特性，如“-cpu qemu64,+svm”
+
+1. 在L1客户机中，查看CPU的虚拟化支持，查看kvm和kvm_intel模块的加载情况 （如果没有加载, 自行加载这两个模块），再启动一个L2客户机
+
+    ```bash
+    # cat /proc/cpuinfo | grep vmx | uniq
+    # lsmod | grep kvm
+    #  qemu-system-x86_64 -enable-kvm -cpu host ...
+    ```
+
+## kvm安全
+SMEP（Supervision Mode Execution Protection，监督模式执行保护）是Intel在2012 年发布的代号为“Ivy Bridge”的新一代CPU上提供的一个安全特性.
+
+检查方法: `cat /proc/cpuinfo | grep "flags" | uniq | grep smep`
+
+SMAP（Supervisor Mode Access Prevention）是对SMEP的更进一步的补充，它将保护 进一步扩展为Supervisor Mode（典型的如Linux内核态）代码不能直接访问（读或写）用 户态的内存页（SMEP是禁止执行权限）.
+
+MPX（Memory Protection Extensions）是对软件（包括内核态的代码和用户态的代码 都支持）指针越界的保护.
+
+### cgroups限制
+### SELinux/sVirt
+### 其他安全策略
+1. 镜像加密
+
+    ```bash
+    # qemu-img create -f qcow2 -o size=8G guest.qcow2
+    # qemu-img convert -o encryption -O qcow2 guest.qcow2 encrypted.qcow2
+    # qemu-img info encrypted.qcow2 # 可见"encrypted：yes"
+    ```
+
+    在使用加密的qcow2格式的镜像文件启动客户机时，客户机会先不启动而暂停，需要 在QEMUmonitor中输入“cont”或“c”命令以便继续执行，然后会要求输入已加密qcow2镜像 文件的密码，只有密码输入正确才可以正常启动客户机.
+
+1. 远程管理的安全
+
+    1. 为了虚拟化管理的安 全性，可以为VNC连接设置密码，并且可以设置VNC连接的TLS、X.509等安全认证方 式。
+    1. 只允许管理工具使用SSH连接或者带有 TLS加密验证的TCP套接字来连接到宿主机的libvirt
+
+## cpu指令的性能优化
+### AVX
+AVX（Advanced Vector Extensions，高级矢量扩展）是Intel和AMD的x86架构指令 集的一个扩展.
+
+向量就是多个标量的组合，通常意味着SIMD（单指令多数据），就是一个指令同时 对多个数据进行处理，达到很大的吞吐量.
+
+查看是否启用:
+```bash
+# cat config-host.bak | grep -i avx CONFIG_AVX2_OPT=y
+```
+### XSAVE
+XSAVE（包括XGETBV、XSETBV、XSAVE、XSAVEC、 XSAVEOPT、XSAVES、XRSTOR、XSAVES等）是在Intel Nehalem以后的处理器中陆续 引入、用于保存和恢复处理器扩展状态的，这些扩展状态包括但不限于上节提到的AVX 特性相关的寄存器。在KVM虚拟化环境中，客户机的动态迁移需要保存处理器状态，然 后在迁移后恢复处理器的执行状态，如果有AVX指令要执行，在保存和恢复时也需要 XSAVE(S)/XRSTOR(S)指令的支持。
+
+检查是否支持以及开启:
+```bash
+# cat /proc/cpuinfo | grep -E "xsave|avx" | uniq
+#  qemu-system-x86_64 -enable-kvm -cpu host ... # `-cpu host`完全暴露宿主 机CPU特性
+```
+
+### AES
+AESNI[1]（Advanced Encryption Standard new instructions，AES新指令）是Intel在2008年3月提出的在x86处理器上的指令集扩展。它包含了7条新指令，其中6条指令是在硬件上 对AES的直接支持，另外一条是对进位乘法的优化，从而在执行AES算法的某些复杂的、计算密集型子步骤时，使程序能更好地利用底层硬件，减少计算所需的CPU周期，提升 AES加解密的性能。
+1. 检查硬件是否支持
+
+    1. CPU configuration下有一个“AESNI Intel”这样的选项，也需要查看并且确认打开AESNI的支持
+    1. BIOS中没有AESNI相关的任何设置之时，就需 要到操作系统中加载“aesni_intel”等模块，来确认硬件是否提供了AESNI的支持
+
+1. kernel是否支持
+
+    RHEL 7.3的内核关于AES的配置如下：
+    ```conf
+    CONFIG_CRYPTO_AES=y
+    CONFIG_CRYPTO_AES_X86_64=y
+    CONFIG_CRYPTO_AES_NI_INTEL=m
+    CONFIG_CRYPTO_CAMELLIA_AESNI_AVX_X86_64=m
+    CONFIG_CRYPTO_CAMELLIA_AESNI_AVX2_X86_64=m
+    CONFIG_CRYPTO_DEV_PADLOCK_AES=m
+    ```
+1. 检查host是否支持: `cat /proc/cpuinfo | grep aes | uniq`
+1. vm支持
+
+ 启动KVM客户机，默认QEMU启动客户机时，没有向客户机提供AESNI的特性， 可以用“-cpu host”或“-cpu qemu64，+aes”选项来暴露AESNI特性给客户机使用。当然，由 于前面提及一些最新的CPU系列是支持AESNI的，所以也可用“-cpu Westmere”“-cpu SandyBridge”这样的参数提供相应的CPU模型，从而提供对AESNI特性的支持
+
+ 验证: 在客户机中可以看到aes标志在/proc/cpuinfo中也是存在的，然后像宿主机中那样 确保“aesni_intel”模块被加载，再执行使用AESNI测试程序，即可得出使用了AESNI的测 试结果。
+
+## 性能测试
+ref: <<KVM实践>>
+
+## KVM代码结构
+ref: <<KVM实践>>的"B.2 代码结构简介"
