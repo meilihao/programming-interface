@@ -147,6 +147,7 @@ SPDK 中使能io_uring:
 
 ## 媒体系统
 - [Pipewire代替PulseAudio, 并使用WirePlumber管理Pipewire](https://www.oschina.net/news/151623/fedora-may-use-wireplumber).
+- [BAT 共同创建新视频流标准 - 超低延迟直播协议信号标准](https://linux.cn/article-14351-1.html)
 
 ## FAQ
 ### 驱动趋势

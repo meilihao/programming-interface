@@ -22,6 +22,10 @@
 
 ## cloud
 - [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)
+- [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
+
+## 限速
+- [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)
 
 # 概念
 ## 工作组 Work Group
