@@ -13,7 +13,9 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 	- pty* : 网络中登录的远程终端设备
 	- ram* : 系统内存
 	- null : 空设备
-	- console : 系统控制终端, kernel输出的信息会到这里
+	- console : 系统控制终端, kernel输出的信息会到这里即它是用于printk信息输出到的设备. 它是一个虚拟的tty, 会映射到真正的tty. 打开/dev/console时, 就会映射到相应的tty上.
+
+		用户可以使用alt+f1~fn切换控制台，看起来感觉存在多个屏幕，这种虚拟控制台对应tty1~n. 但实际上机器只有一个屏幕，也就是我们看到的这个屏幕, 它对应console
 	- shm : 一个tmpfs, 由posix标准规定, 可用于内存共享
 	- ttS* : 代表串行端口. 类似windows下的COM
 	- tty* : linux上的虚拟控制台, 仅接收进程输出的信息, 这是与/dev/console的区别

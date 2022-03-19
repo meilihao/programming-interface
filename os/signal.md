@@ -307,3 +307,17 @@ sigqueue()：只能向一个进程发送信号，不能像进程组发送信号�
 	2. c执行`rpm -e`卸载p所在package, 此时p会terminated(by kill), 导致c也被terminated.
 
 	解决方法: [setsid](https://wangchujiang.com/linux-command/c/setsid.html). setsid命令 子进程从父进程继承了：SessionID、进程组ID和打开的终端。子进程如果要脱离这些，代码中可通过调用setsid来实现。，而命令行或脚本中可以通过使用命令setsid来运行程序实现。setsid帮助一个进程脱离从父进程继承而来的已打开的终端、隶属进程组和隶属的会话.
+
+  以上方法不适合systemd+cgroup的系统, 原因在[这里](https://segmentfault.com/q/1010000041547027):
+  
+  与 systemd 利用cgroup进行层级管理有关系，systemd停止一个服务时，默认的KillMode是基于cgroup来识别的，换句话说systemd中管理的服务，下面fork出来的子进程，即使被你丢入后台，子进程脱离了父进程的关联，它的cgroup层级还是默认被关联在原来的服务下.
+
+  具体可见man systemd.kill中的说明，然后调整一下apiserver的systemd配置, 改下默认的KillMode配置, 改为process试试.
+
+  或参考truenas middlewared.service利用`RestartPreventExitStatus=SIGTERM`和`SendSIGKILL=no`
+
+  > RestartPreventExitStatus表示当符合某些退出状态时不要进行重启.
+
+  **推荐方法**: 通过systemd-run创建临时cgroup来解决: [`systemd-run --unit=my_system_upgrade --scope --slice=my_system_upgrade_slice -E  setsid nohup start-the-upgrade &> /tmp/some-logs.log &`](https://stackoverflow.com/questions/35200232/how-to-launch-a-process-outside-a-systemd-control-group)
+
+  > [transient cgroup with systemd-run](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/resource_management_guide/chap-using_control_groups#sec-Creating_Transient_Cgroups_with_systemd-run)
