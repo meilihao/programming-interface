@@ -1,6 +1,7 @@
 # boot
 ref:
 - [systemd时代的开机启动流程](https://www.junmajinlong.com/linux/systemd/systemd_bootup/)
+- [Linux 引导那些事儿](https://zdyxry.github.io/2019/12/01/Linux-%E5%BC%95%E5%AF%BC%E9%82%A3%E4%BA%9B%E4%BA%8B%E5%84%BF/)
 
 计算机启动流程可以分为几个大阶段:
 1. 内核加载前
