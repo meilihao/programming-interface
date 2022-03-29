@@ -197,6 +197,8 @@ Synchronized I/O file integrity completion 是synchronized I/O data integrity co
 若内容发生变化的内核缓冲区在 30 秒内未经显式方式同步到磁盘上,则一条长期运行的
 内核线程pdflush会确保将其刷新到磁盘上, 规避缓冲区与相关磁盘文件内容长期处于不一致状态(以至于在系统崩溃时发生数据丢失)的问题. 文件/proc/sys/vm/dirty_expire_centisecs 规定了在 pdflush 刷新之前脏缓冲区必须达到的时间(单位: 毫秒). 位于同一目录下的其他文件则控制了 pdflush 操作的其他方面.
 
+**pdflush: 用于将内存中的脏页（被修改过，但还未写入磁盘的文件页）写入磁盘（已经在 3.10 中合并入了 kworker 中)**
+
 ## os刷盘延迟
 参考:
 - [Page Cache机制](http://mysql.taobao.org/monthly/2020/09/01/)
