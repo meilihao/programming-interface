@@ -41,3 +41,14 @@
 
 ## limit
 - [Red Hat Enterprise Linux technology capabilities and limits](https://access.redhat.com/articles/rhel-limits)
+
+## cpu
+- [**Linux 内核的进程负载均衡机制**](https://xie.infoq.cn/article/2b87af0078fe356a0445a201b)
+- [Linux schedule 4、负载均衡](https://blog.csdn.net/pwl999/article/details/78817905)
+
+## memory
+- [替 swap 辩护：常见的误解](https://farseerfc.me/zhs/in-defence-of-swap.html)
+
+## hugepage
+- [**HUGEPAGES原理概念**](https://ustack.io/2019-11-21-Linux%E4%B9%8Bhugepages%E5%8E%9F%E7%90%86%E6%A6%82%E5%BF%B5.html)
+- [为什么 HugePages 可以提升数据库性能](https://draveness.me/whys-the-design-linux-hugepages/)
