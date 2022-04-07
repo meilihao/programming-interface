@@ -230,6 +230,11 @@ weak_alias (__socket, socket) // 如果没有定义socket()函数，那么对soc
 
   另一方面，常见的 bytes、bufio、ringbuffer 等 buffer 库，均存在 growth 需要 copy 原数组数据，以及只能扩容无法缩容，占用大量内存等问题. bytedance netpoll使用了linkbuffer和buffer block pool来解决该问题.
 
+
+epoll 的触发方式会影响 I/O 和 buffer 的设计，大体来说分为两种方式：
+- 采用水平触发(LT)，则需要同步的在事件触发后主动完成 I/O，并向上层代码直接提供 buffer
+- 采用边沿触发(ET)，可选择只管理事件通知(如 go net 设计)，由上层代码完成 I/O 并管理 buffer
+
 ### socket缓冲区已满是否会丢数据
 不会. 缓冲区满后, socket无法再接收数据, 会通知对端停止传输, 即发送端会根据接收端的状态传输数据.
 
