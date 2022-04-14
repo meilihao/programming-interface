@@ -35,7 +35,7 @@ int main()
     编译器把C/C++代码(比如上述的.i文件)翻译成汇编代码, 即把预处理完的文件进行一系列词法分析、语法分析、语义分析及优化后生成相应的汇编代码文件. 这个过程是整个程序构建的核心部分，也是最复杂的部分之一
 
     ```
-    gcc -S hello.i -o hello.s
+    gcc -S hello.i -o hello.s # 包含预处理
     ```
 
     > 目前gcc将预处理和编译合成了一个步骤, c语言由`/usr/lib/gcc/x86_64-linux-gnu/8/cc1`处理, c++由同目录的cc1plus处理.
@@ -43,13 +43,13 @@ int main()
     汇编器将编译器输出的汇编代码翻译成符合一定格式的机器代码，在Linux系统上一般表现为ELF目标文件(OBJ文件即`.o`文件)
 
     ```
-    gcc -c hello.s -o hello.o <=> as hello.s -o hello.o
+    gcc -c hello.s -o hello.o <=> as hello.s -o hello.o # 包含预处理和编译
     ```
 1. 链接
     将汇编器生成的OBJ文件和系统库的OBJ文件、库文件链接起来，最终生成可以在特定平台运行的可执行文件
 
     ```
-    gcc hello.o -o hello
+    gcc hello.o -o hello # 包含预处理, 编译和汇编
     ```
 
     链接器的任务之一是为函数调用找到匹配的函数的可执行代码的位置.

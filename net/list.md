@@ -16,6 +16,7 @@
     - 大型 OTT纷纷开始在其数据中心中采用CLOS架构，利用数量众多，小规模的基本交换矩阵（CrossBar）来构建超大规模网络Fabric.
     - SRv6 Overlay是趋势
 - [SRv6开启网络服务化变革之旅](https://cloud.tencent.com/developer/article/1779041)
+- [从网络接入层到 Service Mesh，蚂蚁金服网络代理的演进之路](https://www.infoq.cn/article/gmyuf1cjizbyvmslpezv)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)

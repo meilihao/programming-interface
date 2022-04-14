@@ -1,4 +1,7 @@
 # 内存
+ref:
+- [替 swap 辩护：常见的误解](https://farseerfc.me/zhs/in-defence-of-swap.html)
+
 Linux像多数现代内核一样,采用了虚拟内存管理技术. 该技术利用了大多数程序的一个典型特征,即访问局部性(locality of reference),以求高效使用 CPU 和 RAM(物理内存)资源. 大多数程序都展现了两种类型的局部性:
 - 空间局部性(Spatial locality)
 
@@ -389,6 +392,7 @@ alloca()分配内存的速度要快于 malloc(),因为编译器将 alloca()作�
 ref:
 - [proc - process information pseudo-filesystem](https://man7.org/linux/man-pages/man5/proc.5.html)
 - [**/PROC/MEMINFO之谜**](http://linuxperf.com/?cat=7)
+- [解析meminfo](https://juejin.cn/post/7017002099254755335)
 
 负责输出/proc/meminfo的源代码是：
 fs/proc/meminfo.c : [`meminfo_proc_show()`](https://elixir.bootlin.com/linux/latest/source/fs/proc/meminfo.c#L32)
@@ -410,6 +414,7 @@ fs/proc/meminfo.c : [`meminfo_proc_show()`](https://elixir.bootlin.com/linux/lat
 
     在kylin v10 arm版上遇到过`MemAvailable<MemFree`
 
+    linux使用伙伴系统分配器管理空闲页的，因此MemFree等于伙伴系统空闲页.
 
 - Buffers: 给文件的缓冲大小
 
