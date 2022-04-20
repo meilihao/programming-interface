@@ -36,9 +36,6 @@
 - [一文汇总Linux 系统动态追踪(高级调试)技术](http://news.eeworld.com.cn/mp/ymc/a85336.jspx)
 - [Linux内核调试方法总结](https://www.cnblogs.com/alantu2018/p/8997149.html)
 
-## 内存
-- [观察进程的内存占用情况](https://www.cnblogs.com/bravery/archive/2012/06/27/2560611.html)
-
 ## limit
 - [Red Hat Enterprise Linux technology capabilities and limits](https://access.redhat.com/articles/rhel-limits)
 
