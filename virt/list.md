@@ -1,5 +1,8 @@
 # list
 
+## base
+- [虚拟化调试和优化指南](https://access.redhat.com/documentation/zh-cn/red_hat_enterprise_linux/7/html/virtualization_tuning_and_optimization_guide)
+
 ## driver
 - [qemu backend block device driver in practice by qingcloud](/misc/pdf/virt/qingcloud_block_device_driver.pdf)
 

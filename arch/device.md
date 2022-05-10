@@ -254,6 +254,58 @@ Domain：即整个SAS交换构架，由SAS device和SAS expander device组成，
 
 SAS协议共有6层，从上到下依次为: 应用层(application layer), 传输层(transport layer),端口层(port layer), 链路层(link layer), phy层(phy layer), 物理层(physical layer).
 
+## ssd
+ssd有page和block概念, page是最基本的组成，大小一般是4KB，，每个block通常包含64个page，容量是256KB，也有128个page的，容量就是512KB，不过目前主流的25nm工艺闪存普遍都是8KB page容量，128个page配置.
+
+多个block再组成plane，而plane就是就是闪存中的一颗核心（die）了，而我们看到的闪存片其实是多颗die封装在一起的，一般是2-8颗，而整个SSD上则会由多片闪存组成.
+
+> 实际上，如果SSD内部是以die颗粒的RAID 0模式组建的，那么block层级之上还有一个band之分，它是RAID 0模式中所有芯片的同一块block区块的总和.
+
+ssd写一次的单位是page, 主要原因是为了防止电子干扰, 保证数据的文档和准确.
+
+ssd write时只能写到空page上, 之前写个的page, 必须先进行一次erase, erase的单位是block, 如果一个page的数据被删除后, 想再写这个page, 需要三步:
+1. 将同一个block的其他page读出
+1. 将block擦除
+1. 将block的数据写下去
+
+上述过程是ssd的写放大.
+
+写放大的解决方案:
+1. 预留空间
+
+    一般ssd都会有保留空间, 消费级ssd是7~10%, 企业级是20%以上, 甚至100%. 保留空间好处是随时能保证有未使用的空间, 减少写放大, ssd主控可在空闲时再对需要删除的block进行清除. 因此写入频繁的时候, 保留空间越多的ssd性能越好.
+1. 使用trim
+
+    trim在os层, os通过TRIM命令来通知ssd某个page的数据不需要了, 可以回收.
+
+ssd读性能好于写, 且容量越大, 性能越好.
+
+ssd监控是基于其SMART信息. windows不能有RAID卡, 因为RAID卡会屏蔽硬盘的SMART信息, 而linux不会.
+
+```bash
+smartctl -a -i /dev/sg0 # 低端板载的LSI MPT RAID卡, 读取第一块盘
+smartctl -a -i /dev/sg1 # 读取第二块盘
+smartctl -a -d megaRAID,0 /dev/sda # LSI MegaRAID卡
+smartctl -a -d megaRAID,1 /dev/sda
+smartctl -a -d sat_cciss,0 /dev/sda
+smartctl -a -d sat_cciss,1 /dev/sda
+```
+
+ssd smart解读:
+- Media_Wearout_indicator : 使用耗费, 100为没有任何耗费, 表示ssd上nand的擦写次数的程度, 初始值是100, 随着擦写次数的增加, 开始线性递减, 递减速度按照擦写次数从0到最大的比例. 一旦该值降为1, 表示不能再降了, 同时表示ssd上面已经有nand的擦写次数到达了最大次数. 此时建议备份数据, 更换ssd.
+- Reallocated_Sector_Ct : 出厂后产生的坏块个数, 初始为100, 如果有坏块, 从1开始增加, 每4个坏块增1
+- Host_Writes_32MiB: 已写入了N个`*32`M, 每写入65536个扇区(512B) raw value加1.
+- Available_Reservd_Space: ssd上剩余的保留空间. 初始值是100, 表示100%; 阈值为10, 递减到10表示保留空间已经不能再减少.
+
+## 块设备cache
+flashcache是一个针对linux系统的块设备缓存工具, 综合了高/低设备的优势, 由device mapper实现, 原理是用高速设备做cache, 把数据先缓存到高速设备上, 到一定阈值, 再写到低速设备上.
+
+DM-cache是一个device-mapper级别的， 用高速设备做低速设备cache的解决方案, 主要是用ssd做hdd的cache, 达到性能和容量的平衡.
+
+lvm cache是在DM-cache上基于lvm做的配置.
+
+写性能: flashcache>DM-cache(从kernel 3.9开始)>lvm cache
+
 # linux实现
 设备配置表, 总线, 驱动是linux设备架构的三大层次:
 1. 设备配置表描述了设备本身物理特性, 包括设备的寄存器信息和内存信息
