@@ -284,7 +284,7 @@ ref:
   veth2D8JJR  yes   veth           1500
 # rxe_cfg add enp2s0 # 添加一张合适的nic
 # xe_cfg status # 检查enp2s0是否出现`RDEV=rxe0`
-# apt install infiniband-diags # for ibstat
+# apt install infiniband-diags # for ibstat. `yum install libibverbs-utils`
 # ibv_devices/ibv_devinfo/ibstat rxe0 # 查看rdma设备,ibv_devinfo支持查看active_mtu
 # rxe_cfg remove enp2s0 # 移除SoftRoCE设备
 ```

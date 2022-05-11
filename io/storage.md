@@ -51,7 +51,9 @@
 
       - PCIe
       - SATA(serial advanced technology attachment)
-      - SAS(serial attached scsi)
+      - SCSI
+      - SAS(serial attached scsi), 新一代scsi技术, 速度更快, cpu占用更低
+      - FC
       - AHCI(advanced host controller interface)
 
 # linux存储服务

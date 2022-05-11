@@ -1,3 +1,6 @@
+# pci设备
+- NTB : `02:00.0 PCI bridge: PLX Technology, Inc. PEX 8717 16-lane, 8-Port PCI Express Gen 3(8.0 GT/s) Switch with DMA (rev ca)`
+
 # device
 root可使用 mknod 命令创建设备文件.
 

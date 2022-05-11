@@ -1296,6 +1296,8 @@ static blk_qc_t do_make_request(struct bio *bio)
 > [blk_alloc_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L585) 可把 make_request_fn 设置为 make_request
 
 #### 电梯算法
+核心: 为i/o请求进行排序以及对邻近的i/o请求进行合并. 排序是为了减少寻道时间, 但ssd没有寻道问题, 因此排序没有意义. noop算法只做合并不排序, 适合ssd.
+
 参考:
 - [如何选择IO调度器](https://blog.csdn.net/keocce/article/details/106016416)
 
