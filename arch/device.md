@@ -1,5 +1,24 @@
 # pci设备
-- NTB : `02:00.0 PCI bridge: PLX Technology, Inc. PEX 8717 16-lane, 8-Port PCI Express Gen 3(8.0 GT/s) Switch with DMA (rev ca)`
+## NTB(Non-Transparent Bridge)
+ref:
+- [Non-Transparent Bridging and PCIe Interface Communication](https://docs.nvidia.com/drive/drive-os-5.2.6.0L/drive-os/index.html#page/DRIVE_OS_Linux_SDK_NGC_Development_Guide/Interfaces/sys_components_non_transparent_bridging.html)
+- [3.2.2.9. PCIe Backplane](https://software-dl.ti.com/jacinto7/esd/processor-sdk-linux-jacinto7/07_00_01_01/exports/docs/linux/Foundational_Components/Kernel/Kernel_Drivers/PCIe/PCIe_Backplane.html)
+- [Linux NTB](https://events.static.linuxfound.org/sites/events/files/slides/Linux%20NTB_0.pdf)
+- [NTRDMA v0.1](https://ostconf.com/system/attachments/files/000/001/112/original/LinuxPiter-NTRDMA-v0.1-slides.pdf)
+- [Non-Transparent Bridging Simplified](https://docs.broadcom.com/doc/12353427)
+
+比如`02:00.0 PCI bridge: PLX Technology, Inc. PEX 8717 16-lane, 8-Port PCI Express Gen 3(8.0 GT/s) Switch with DMA (rev ca)`, 但kernel 5.18没有PEX 8717相关驱动支持, [论坛RFC](https://groups.google.com/g/linux-ntb/c/kO6IAj4dB5k)也没有下文, 因此ntb设备应该选择kernel支持的硬件.
+
+加载ntb驱动:
+```bash
+modprobe ntb
+modprobe switchtec
+modprobe ntb_hw_switchtec # ntb_hw_switchtec依赖switchtec, ntb_hw_intel, ntb_hw_amd等不需要
+modprobe ntb_transport
+modprobe ntb_netdev
+```
+
+当前使用ntb的方式是通过ntb_netdev创建网卡设备(需配置ip)来使用. ntb_netdev将公开虚拟以太网接口, 该接口流量都将通过 PCIe传输.
 
 # device
 root可使用 mknod 命令创建设备文件.

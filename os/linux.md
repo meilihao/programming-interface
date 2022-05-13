@@ -621,6 +621,7 @@ make 选项:
 ```bash
 # make -C /lib/modules/$(uname -r)/build M=$PWD # M=$PWD是为了告诉kernel编译在kernel源码外执行
 # make -C /lib/modules/$(uname -r)/build M=$PWD modules_install # modules_install可用INSTALL_MOD_PATH来指定module的安装目录
+# make -C /lib/modules/$(uname -r)/build M=/usr/src/kernel/linux-5.4.17/drivers/ntb/hw/intel NTB_INTEL=m # NTB_INTEL来自被编译mod目录下的Kconfig
 ```
 
 ## FAQ
@@ -670,6 +671,7 @@ make 选项:
 
     ```bash
     # ./scripts/get_maintainer.pl xxx.patch # 获取patch相关代码的维护人员
+    # ./scripts/get_maintainer.pl -f drivers/ntb # 获取相关路径代码的维护人员
     # git send-email --to xxx1@xxx.com --to xxx2@xxx.com --cc linux-kernel@vger.kernel.org xxx.patch # 发送Patch
     ```
 
