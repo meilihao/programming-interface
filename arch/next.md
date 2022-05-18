@@ -5,6 +5,11 @@
 ### Bare metal（裸机服务器）方案
 参考:
 - [裸金属服务器业务（BMS）的现状调研](http://www.brofive.org/?p=4512)
+- [阿里云弹性裸金属服务器-神龙架构（X-Dragon）揭秘](http://cnzzidc.com/cnzz1372.html)
+- [继AWS Nitro和阿里云神龙，京东造起了“京刚”](https://finance.sina.com.cn/tech/2021-03-09/doc-ikkntiak6464795.shtml)
+- [阿里云张献涛：自主最强DPU神龙的秘诀](https://developer.aliyun.com/article/867094)
+
+一般而言，实现“软件的硬件化处理”，是将这个硬件做成一个网卡，插在卡槽上，硬件层面还有一个层做在Bios之上，操作系统之下，负责硬件资源的切分。云主机的性能扩展不需要占用CPU资源，显著提升性能的可扩展性.
 
 裸金属服务器是对物理主机进行云计算场景下的资源管理与调度, 为用户提供专属的物理服务器, 满足核心应用场景对高性能及稳定性的需求. 它的特点是:
 1. 性能无损
@@ -20,9 +25,17 @@
 
 当前实现:
 - AWS的`Nitro架构`
+  ref：
+  - [AWS Nitro架构简介](https://blog.csdn.net/lindahui2008/article/details/109397778)
+  - [AWS Nitro System介绍](https://aijishu.com/a/1060000000215894)
 
   参考:
   - [裸金属服务器业务（BMS）的现状调研1：AWS Nitro System](http://www.brofive.org/?p=4395)
+
+  Nitro系统主要由三部分组成:
+  1. 以PCIe卡形式呈现的Nitro卡，主要包括支持网络功能的VPC（Virtual Private Cloud）卡，支持存储功能的EBS（Elastic Block Store）、Instance Storage卡和支持系统控制的Nitro Controller卡。
+  1. Nitro安全芯片，该芯片提供Hardware Root of Trust，防止运行于通用服务器上的软件对non-volatile storage进行修改，比如虚拟机的UEFI程序。
+  1. 运行于通用服务器的Nitro Hypervisor，这是个基于kvm的轻量级hypervisor，主要提供CPU和内存的管理功能，不提供设备的模拟（因为所有的设备都是通过透传的方式添加到虚拟机中）。
 
   Nitro系统的主要职责，它将存储、网络、管理和安全能力都offload到专有的硬件之上，免去了与通用计算设备抢占资源的各种麻烦，节省资源的同时提升效率.
 
@@ -51,12 +64,19 @@
 
   ![](/misc/img/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
 
+  阿里云的神龙架构是通过一个PCIe的MoC卡（实际是一个包含CPU、内存、磁盘、智能网卡的系统）把Hypervisor、带外管理功能都卸载到这个卡上。MoC卡对外可以连接EBS存储和VPC网络，通过virtio（一种半虚拟化的设备抽象接口规范）访问IO设备，实现裸金属和虚拟化同样的扩展和管理功能，和现有云环境可以通过私有接口或Open API无缝集成.
+
   `X-Dragon架构`性能未损失原因: 将原先跑在cpu上的Hypervisior offload到了`X-Dragon架构`上.
 
   在阿里云神龙高密裸金属架构中，每个裸金属实例都运行在一个单独设计的计算子板上，该计算子板带有**物理的CPU和内存**模块. BM-Hive为每个计算子板配备了硬件/软件混合 virtio I/O 系统，使客户实例能够直接访问阿里云网络和存储服务. BM-Hive 可在单个物理服务器中托管多达 16 个裸金属实例，显著提高裸金属服务器的实例密度. 此外，BM-Hive 在硬件级别严格隔离每个裸金属实例，以提高安全性和隔离性.
 
   神龙裸金属BM-Hive由于采用了计算子板直接运行实例，避免了任何传统CPU/内存虚拟化的开销. 因为当前虚拟化的基本原理决定了CPU必须要在vCPU环境与物理CPU环境下来回切换（VM-Exit）, 频繁的切换会导致严重的VM性能问题.
 - OpenStack的Ironic项目
+- 京东的京刚
+
+  京刚智能芯片卸载网络转发和存储IO功能，让硬件性能不受损，支持了业界标准的SRIOV虚拟化技术，保证设备虚拟化无开销；此外实现了云原生的Virtio-Net和Virtio-Blk设备模型，兼容性更好；同时芯片级的硬件隔离技术，更加安全可靠。
+
+  而自主研发的智能网卡，则是基于英特尔® C5000X-PL 和英特尔® 至强® D芯片，全面利用英特尔®FPGA的可编程能力，能够大幅提高端口速度，提升网卡的业务灵活性，通过 FPGA 和至强 D 芯片协同来定制并优化网络负载。
 
 ### 指令集
 AVX 512指令集强化的向量和浮点计算
