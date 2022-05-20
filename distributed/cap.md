@@ -340,6 +340,8 @@ BASE(Basic Availability, Soft state, Eventually Consistency)理论是对CAP中�
 
 总结: 以数据为中心的一致性模型需考虑多个client时的系统状态; 以client为中心的一致性模型聚焦于单个client观察到的系统状态.
 
+单调读(monotonic read)一致性模型是一个简单的以client为中心的一致性模型, 其条件为:  如果client读到x的值为v, 
+
 ## 2PC 与 3PC
 参考:
 - [分布式一致性协议学习笔记：2PC 和 3PC](https://www.tuicool.com/articles/eeIZJbe)
