@@ -611,7 +611,21 @@ CPU 这种类的定义是有多层继承关系的. TYPE_X86_CPU 的父类是 TYP
 
 在 qemu_kvm_cpu_thread_fn 中，先是 [kvm_init_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L383) 初始化这个 vcpu.
 
-kvm_init_vcpu -> [kvm_get_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L365)，在kvm_get_vcpu中会调用 kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id)，在内核里面创建一个 vcpu.
+kvm_init_vcpu -> [kvm_get_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L365)，在kvm_get_vcpu中会调用 kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id)，在内核里面创建一个 vcpu, vCPU一般分成两个部分：VMCS+非VMCS(Virtual Machine Control Structure)虚拟机控制结构, VMCS给硬件使用, 非VMCS给软件使用. vm运行的本质是vmm调用vcpu运行.
+
+vcpu基本操作:
+1. vcpu创建
+
+    创建vcpu就是创建vcpu描述符, 由于vcpu描述符是一个struct, 创建后需要初始化.
+2. vcpu运行
+
+    vcpu初始化好后, 就会被调度程序调度执行, 调度程序会根据一定的策略算法来选择vcpu运行.
+3. vcpu的退出
+
+    和进程一样, vcpu作为调度单位不可能永远执行, 总会因为各种原因退出, 比如执行了特权指令, 发生了物理中断, 它们在vt-x中表现为vm-exit. 对vcpu退出的处理是vmm进程cpu虚拟化的核心, 比如模拟各种特权指令.
+4. vcpu的再运行
+
+    vmm在处理完vcpu的退出后, 会负责vcpu投入再运行
 
 在上面创建 KVM_CREATE_VM 的时候，就已经创建了一个 struct file，它的 file_operations 被设置为 kvm_vm_fops，这个内核文件也是可以响应 ioctl 的. 如果视角切换到内核 KVM，在 kvm_vm_ioctl 函数中，有对于 KVM_CREATE_VCPU 的处理，调用的是 [kvm_vm_ioctl_create_vcpu](https://elixir.bootlin.com/linux/v5.8-rc4/source/virt/kvm/kvm_main.c#L3022).
 
@@ -633,9 +647,12 @@ enable_ept 是和内存虚拟化相关的，EPT 全称 Extended Page Table，顾
 虚拟机也是一个进程，也需要切换，而且切换更加的复杂，可能是两个虚拟机之间切换，也可能是虚拟机切换给内核，虚拟机因为里面还有另一个操作系统，要保存的信息比普通的进程多得多. 那就需要有一个结构来保存虚拟机运行的上下文，VMCS 就是是 Intel 实现 CPU 虚拟化，记录 vCPU 状态的一个关键数据结构.
 
 VMCS 数据结构主要包含以下信息:
+- vCPU标识信息：标识vCPU属性
 - Guest-state area，即 vCPU 的状态信息，包括 vCPU 的基本运行环境，例如寄存器等
 - Host-state area，是物理 CPU 的状态信息, 物理 CPU 和 vCPU 之间也会来回切换，所以，VMCS 中既要记录 vCPU 的状态，也要记录物理 CPU 的状态
 - VM-execution control fields，对 vCPU 的运行行为进行控制. 例如，发生中断怎么办，是否使用 EPT（Extended Page Table）功能等.
+
+每个VMCS对应一个vCPU，CPU每发生VM-Exit和VM-Entry时会自动查询和更新VMCS。VMM也可以通过指令来配置VMCS而影响vCP.
 
 接下来，对于 VMCS，有两个重要的操作.
 
@@ -853,7 +870,7 @@ kvm_region_add 调用的是 [kvm_set_phys_mem](https://elixir.bootlin.com/qemu/v
 ref:
 - [**内存虚拟化之基本原理**](https://www.codenong.com/cs106434119/)
 
-第二种方式，就是硬件的方式，Intel 的 EPT（Extent Page Table，扩展页表）技术. EPT页表存放在VMM内核空间，VMM维护.
+第二种方式，就是硬件的方式，Intel 的 EPT（Extent Page Table，扩展页表）技术. EPT页表存放在VMM内核空间，由VMM维护, 其转换过程由硬件完成, 因此比影子页表更高效.
 
 EPT转换过程: 通过客户机CR3寄存器将GVA转成GPA, 然后通过查询EPT来实现GPA转成HPA. EPT的控制权在VMM中, 只有当CPU工作在非根模式时才参与内存地址的转换.
 
@@ -925,6 +942,13 @@ virtio 的架构可以分为四层:
 1. 其次，在宿主机的 qemu 里面，实现 virtio 后端的逻辑，主要就是操作硬件的设备. 例如在宿主机的 qemu 进程中，当收到客户机的写入请求的时候，调用文件系统的 write 函数，写入宿主机的 VFS 文件系统，最终写到物理硬盘设备上的 qcow2 文件. 再如向内核协议栈发送一个网络包完成虚拟机对于网络的操作.
 
 1. 在 virtio 的前端和后端之间，有一个通信层，里面包含 virtio 层和 virtio-ring 层. virtio 这一层实现的是虚拟队列接口，算是前后端通信的桥梁. 而 virtio-ring 则是该桥梁的具体实现, 它实现了两个环形缓冲区，分别用于保存前端驱动程序和后端处理程序执行的信息.
+
+    virtio 和 virtio-ring 可以看做是一层，virtio-ring 实现了 virtio 的具体通信机制和数据流程. 即virtio 层属于控制层，负责前后端之间的通知机制（kick，notify）和控制流程，而 virtio-vring 则负责具体数据流转发。
+
+    vring 主要通过两个环形缓冲区来完成数据流的转发
+    virtio 是 guest 与 host 之间通信的润滑剂，提供了一套通用框架和标准接口或协议来完成两者之间的交互过程，极大地解决了各种驱动程序和不同虚拟化解决方案之间的适配问题。
+    virtio 抽象了一套 vring 接口来完成 guest 和 host 之间的数据收发过程，结构新颖，接口清晰。
+
 
 ![virtio 的架构](/misc/img/virt/2e9ef612f7b80ec9fcd91e200f4946f3.png)
 ![](/misc/img/virt/1f0c3043a11d6ea1a802f7d0f3b0b34b.png)
@@ -1460,6 +1484,10 @@ VT-x引入了一种新的处理器操作叫做 VMX(Virtual Machine Extension). V
 它提供了两种处理器的工作环境VMX root operation和VMX non-root operation. 由叫VMCS(virtual-machine
 control data structure) 的数据结构实现两种环境之间的切换. VMM运行在VMX root operation, vm运行在VMX non-root operation, 这两种操作模式都支持ring 0~3.
 
+> 根模式：VMM所处的模式。所有指令都可运行，行为与正常IA32一样。兼容所有原有软件。
+
+> 非根模式：客户机所处模式。所有敏感指令都会被重定义，使得他们不经虚拟化就直接运行或者通过陷入再模拟的方式处理。
+
 进入VMX非根操作模式被称为`VM Entry`; 从非根操作模式退出, 被称为`VM Exit`.
 
 VMX的根操作模式与非VMX模式下最初的处理器执行模式基本一样, 只是它现在支持了新的VMX相关的指令集以及一些对相关控制寄存器的操作. VMX的非根操作模式是
@@ -1479,12 +1507,24 @@ VMCS在当前生效, 而其他VMCS就自然成为不是当前生效的. 一个�
 
 > 查看kvm exit status: kvm_stat
 
+### AMD CPU虚拟化技术AMD SVM
+类似于Intel VT-x. 但是，好像在做对，刚好反过来，VMM运行在非根模式，客户机运行在根模式
+VMCS变成VMCB，其实功能一样
+SVM增加八个新指令操作码，VMM可通过指令来配置VMCB映像CPU
+    - VMRUN-从VMCB载入处理器状态
+    - VMSAVE-处理器状态保存到VMCB
+
 ## EPT
+ref:
+- [intel EPT 机制详解](https://www.cnblogs.com/ck1020/p/6043054.html)
+
 EPT（Extended Page Tables， 扩展页表）, 属于Intel的第二代硬件虚拟化技术， 它是针对内存管理单元（MMU） 的虚拟化扩展. EPT降低了内存虚拟化的难度（与影子页表相比）, 也提升了内存虚拟化的性能.
 
 > amd类似技术是NPT(Nested Page Tables).
 
 > 查询是否支持: grep -E "ept" /proc/cpuinfo. 是否开启: `cat /sys/module/kvm_intel/parameters/ept`. 开启方法: `modprobe kvm_intel ept=1`
+
+> ept在init_kvm_mmu()里的init_kvm_tdp_mmu()完成初始化.
 
 CR3（控制寄存器3） 将客户机程序所见的客户机虚拟地址（GVA） 转化为客户机物理地址（GPA） ， 然后再通过EPT将客户机物理地址（GPA） 转化为宿主机物理地址（ HPA）. 这两次地址转换都是由CPU硬件来自动完成的, 其转换效率非常高.
 
@@ -1502,6 +1542,8 @@ Intel在内存虚拟化效率方面还引入了VPID（Virtual-processor identifi
 的VPID执行控制域的值, 其值是非0的. VPID的值在3种情况下为0， 第1种是在非虚拟化环境中执行时; 第2种是在根模式下执行时;  第3种情况是在非根模式下执行但`enable VPID`控制位被置0时.
 
 > 查询是否支持: grep -E "vpid" /proc/cpuinfo. 是否开启: `cat /sys/module/kvm_intel/parameters/vpid`. 开启方法: `modprobe kvm_intel vpid=1`
+
+### AMD 内存虚拟化技术NPT(Nested Page Table)嵌套页表
 
 ## io虚拟化
 ref:
@@ -1548,6 +1590,8 @@ ref:
     缺点:
         1. 需要硬件设备的特性支持
         2. 很难支持动态迁移
+
+在虚拟机环境下，客户机使用的是GPA，客户机驱动也得使用GPA。但是设备在进行DMA操作的时候使用的是MPA(Memory Physical Address,内存物理地址)，于是IO虚拟化的关键问题就是如何在操作DMA时将GPA转换成MPA.
 
 ## 迁移(migration)
 在虚拟化环境中的迁移，又分为静态迁移（static migration）和动态迁移（live migra- tion），也有部分人称之为冷迁移（cold migration）和热迁移（hot migration），或者离线 迁移（offline migration）和在线迁移（online migration）. 静态迁移和动态迁移最大的区 别就是，静态迁移有一段明显时间客户机中的服务不可用，而动态迁移则没有明显的服务暂停时间.

@@ -49,3 +49,19 @@ InfiniBand 与 Ethernet 之间的区别:
 - InfiniBand 采用 Cut-Through 转发模式，减少转发时延，基于 Credit 流控机制，保证无丢包. RoCE 性能与 IB 网络相当，DCB 特性保证无丢包，需要网络支持 DCB 特性，但时延比 IB 交换机时延稍高一些.
 
 - Ethernet 模式可能存在丢包，而导致数据重传的延时
+
+## 进程间通信
+ref:
+- [系列解读SMC-R：透明无感提升云上TCP应用网络性能（一）](https://mp.weixin.qq.com/s?__biz=MzU1NDA4NjU2MA==&mid=2247560482&idx=2&sn=b8b1ad107402e04315b9d246ee360305)
+- [系列解读SMC-R：融合TCP与RDMA的SMC-R通信（二）](https://mp.weixin.qq.com/s/IG-jDgRTVJmlwGLJPMWrLA)
+
+基于 RDMA 的流程：
+1. 发送方写到本机预先分配好的一块内存区域；
+1. 通过 RDMA 将该内存写入到对端维护的内存区域的相同位置
+1. 通过 RDMA 通知接收方，并更新新写入内存的偏移量
+1. 接收方按照新更新的偏移量读取数据
+1. 接收方通过 RDMA 更新读取内存的偏移量
+
+![](/misc/img/net/rdma/104551xi0i2li304i26ih3.png)
+
+基于 RDMA 的共享内存模型，SMC-R 应运而生，SMC-R 缩写即为 [Shared Memory Communcation over RDMA](https://linux.cn/article-14612-1.html).
