@@ -51,6 +51,8 @@
 
       - PCIe
       - SATA(serial advanced technology attachment)
+
+        sata盘使用AHCI传输模式. AHCI需要主板,磁盘和os都支持才行.
       - SCSI
       - SAS(serial attached scsi), 新一代scsi技术, 速度更快, cpu占用更低
       - FC
