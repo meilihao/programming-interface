@@ -10,7 +10,7 @@ uefi: 所用的uuid是`/`分区的uuid
 
 > 可用`blkid+lsblk`联合查询到
 
-RHEL 8 和 Centos 8 中的 GRUB2 将 blscfg 文件和 /boot/loader 中的条目用作启动配置，**不再使用以前的 grub.cfg 格式**。建议使用 grubby 工具来管理 blscfg 文件和检索 /boot/loader/entries/ 中的信息.
+RHEL 8 和 Centos 8 中的 GRUB2 将 blscfg 文件和 /boot/loader 中的条目用作启动配置，**不再使用以前的 grub.cfg 格式**。建议使用 grubby 工具来管理 blscfg 文件和检索 /boot/loader/entries/ 中的信息(entry conf文件名的前缀来源于`/etc/machine-id`).
 
 ### centos8禁用blscfg
 ```bash
@@ -56,6 +56,16 @@ id="ec2fa869f66b627b3c98f33dfa6bc44d-4.18.0-305.3.1.el8_4.x86_64"
 # grubby --default-kernel
 ```
 
+也可使用 grub2-set-default `<index id>` 来指定系统启动项, 本质是修改了 /boot/grub2/grubenv中的saved_entry字段, 将saved_entry字段值加上`.conf`即为entry conf的文件名.
+
 `grep -n "kernelopts" -r /boot`发现`/boot/loader/entries/xxx.conf`里的kernelopts来源于`/boot/grub2/grubenv`
 ### grub2切换到blsc
 `sudo grub2-switch-to-blscfg`
+
+### blsc entry说明
+- title：启动菜单标题 可以随意自定义
+- version 版本信息 菜单项的顺序由这个确定
+- linux 内核文件
+- initrd 临时根文件系统
+- options 内核参数
+- id 系统的唯一标识 可以用来唯一标识启动项
