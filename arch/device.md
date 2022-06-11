@@ -1,4 +1,12 @@
 # pci设备
+## pci桥接
+ref:
+- [基于PCIe总线的多路复用DMA高速传输系统的设计](http://www.eeskill.com/article/id/43067)
+
+PCIe桥连接方式有2种：透明桥(Transparent Bridge)和非透明桥(Non-Transparent Bridge).
+
+总系统中存在两个独立的处理器，此时使用透明桥方式不利于整个系统的配置与管理，可能出现PCIe总线地址的映射冲突，此外不能使用PCIe透明桥连接两个PCIe Agent设备，如x86处理器。采用非透明桥可有效的解决这些问题，提高PCIe传输系统的可移植性。非透明桥不是PCIe总线定义的标准桥片，但是这类桥片在连接两个处理器系统中得到了广泛的应用.
+
 ## NTB(Non-Transparent Bridge)
 ref:
 - [Non-Transparent Bridging and PCIe Interface Communication](https://docs.nvidia.com/drive/drive-os-5.2.6.0L/drive-os/index.html#page/DRIVE_OS_Linux_SDK_NGC_Development_Guide/Interfaces/sys_components_non_transparent_bridging.html)
@@ -6,6 +14,8 @@ ref:
 - [Linux NTB](https://events.static.linuxfound.org/sites/events/files/slides/Linux%20NTB_0.pdf)
 - [NTRDMA v0.1](https://ostconf.com/system/attachments/files/000/001/112/original/LinuxPiter-NTRDMA-v0.1-slides.pdf)
 - [Non-Transparent Bridging Simplified](https://docs.broadcom.com/doc/12353427)
+- [多功能PCIE交换机之四：非透明桥NTB](https://developer.aliyun.com/article/506858)
+- [PEX87XX非透明桥(NTB)翻译-1](https://zhuanlan.zhihu.com/p/463029355)
 
 比如`02:00.0 PCI bridge: PLX Technology, Inc. PEX 8717 16-lane, 8-Port PCI Express Gen 3(8.0 GT/s) Switch with DMA (rev ca)`, 但kernel 5.18没有PEX 8717相关驱动支持, [论坛RFC](https://groups.google.com/g/linux-ntb/c/kO6IAj4dB5k)也没有下文, 因此ntb设备应该选择kernel支持的硬件.
 
