@@ -3,6 +3,9 @@
 
 驱动程序从`/lib/firmware`处请求固件. 这是硬件所需的特殊文件，不是二进制文件. 然后driver执行将固件加载到设备中所需的操作, 固件会对设备内部的硬件进行编程.
 
+## uefi
+- [百敖BIOS培训系列一：UEFI启动流程总览](https://www.bilibili.com/video/BV1Nr4y1w7dP/)
+
 ## FAQ
 ### 如何查找设备芯片型号
 可到`/usr/share/hwdata/pci.ids`获取芯片型号， 根据pci.ids开头的说明， 对应的device字段即为芯片型号.

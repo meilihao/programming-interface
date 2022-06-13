@@ -1,4 +1,59 @@
 # pci设备
+ref:
+- [pcie基础概念](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzU4MTczMDg1Nw==&action=getalbum&album_id=1337043626001661952&scene=173&from_msgid=2247483660&from_itemidx=1&count=3&nolastread=1#wechat_redirect)
+- [PCIE Configuration Space – Class Code即pci code and id assignment specification](https://blog.ladsai.com/pci-configuration-space-class-code.html)
+- [pcie Configuration Space访问方法](https://blog.csdn.net/weixin_45279063/article/details/116988334)
+
+PCIe tree就是PCIe specification定义的了PCIe系统的拓扑结构, 定义了这个拓扑，所有的设备内部的PCIe设备都可以抽象对应到一颗倒立的“树”上来.
+
+![](/misc/img/arch/device/pci/640-0.jpeg)
+
+> spec里面这个拓扑图的RC和CPU是两个独立的部分，事实上，我们常用的处理器目前大部分都是把CPU和RC集成到了一起.
+
+> PCI-SIG = PCI Special Interest  Group，是PCI/PCIe的行业组织，负责制定PCIe规范和标准.
+
+树的根即是RC(Root Complex), 也叫做根节点或者根联合体, 是pcie tree的开始. 有几颗树（PCIe域）取决于有几个RC.
+
+> 一般情况下RC间不能通讯, 如果RC支持P2P, 或者利用高级的NT、Fabric技术则是可以的.
+
+从根节点开始向下生长出树干和树枝（PCIe链路），某些树枝还扩展生长出旁路的分支，这些可以扩展生长的地方，对应拓扑中的Switch. 最末端的叶/果实，对应拓扑中的EP（End Point）.
+
+用`lscpi -t`即可看到pcie tree, 不过它是横向的, 这便于展示.
+![](/misc/img/arch/device/pci/KGyuWH98IvV8sXdntaffyycDvl0PDSVtjupHg8DqKd3ZXKiaibJzAiauCdnK0siaArv4eXITNBLnSlTDpKUQobhk5Q.jpeg)
+
+### 其他
+- pci vs pcie
+
+    PCIe是基于PCI的基础上演进而来的, 从软件角度看，基于PCI的驱动和软件几乎可以无缝移植到PCIe系统上来而不需要做任何改变.
+
+    而从硬件角度看，差异就非常大了:
+    - 从pci的并行传输改成了pcie的串行
+    - PCI是共享型总线，多个设备共享一条总线，这种情况下必然存在总线总裁. PCIe则是点对点连接，一个设备直接连接到另一个设备，不存在总线竞争和仲裁.
+    - PCI总线上是单向传输，任意时刻只有一个方向的传输，PCIe则是任意时刻都可以双向传输.
+    - PCI有很多的边带控制信号，如`FRAME#, IRDY#, TRDY, STOP#`等. PCIe总线上传输的都是基于包（packet），控制和其他处理都嵌入在包里.
+
+        PCIe链路是没有边带信号的，当然也没有单独的时钟线. PCIe的时钟是编码嵌入在link里的。接收端依靠同样的逻辑解析出时钟和数据.
+- 为什么要并改串
+
+    随着总线频率的提高，并行传输在高速传输的时候，并行的连线直接干扰异常严重。而串行总线使用差分信号传输（differential transmission），有更强的抗干扰能力，从而可以将传输频率大幅提升。另外，串行总线布线简单，节约PCB面积，并可以多条lane灵活组合扩展性更强。
+
+- 为什么要120/130编码
+
+    PCIe 3.0之前采用8b/10b编码，简单讲就是每10个bit中只有8个bit是有效数据，有效数据只占80%，严重浪费了带宽。而128b/130b编码中98%以上都是有效数据，提高了链路利用率.
+- pcie switch
+    
+    从逻辑上看, Swith可以看作是多个PCI-PCI bridge的组合, 内部有虚拟PCI总线. Switch内部远比单纯的virtual bus复杂，一般会有内部的buffer和调度转发逻辑.
+
+    ![](/misc/img/arch/device/pci/bridge.jpeg)
+- [PCIe 6.0](https://zhuanlan.zhihu.com/p/500585186)
+
+    从技术上来说，PCIe 6.0是PCIe问世近20年来，变化最大的一次, 主要有三大变化：数据传输速率从32GT/s翻倍至64GT/s；编码方式从NRZ 信令模式转向PAM4信令模式；从传输可变大小TLP到固定大小FLIT.
+- pcie速率
+
+    ![](/misc/img/arch/device/pci/v2-e9aa7a8d4d30a913b915bc6ff14a69d0_720w.jpg)
+
+    PCIe Spec里面的GT/s是giga transfers persecond的缩写. Gbps和GT/s的差异是: GT/s描述的是链路上传输的原始数据，Gbps描述的是链路上传输的有效数据. 原始数据和有效数据的差异是编码里的有效数据占比: 比如PCIe 3.0采用的128b/130b编码, 原始数据是130b，其中有效数据是128b.
+
 ## pci桥接
 ref:
 - [基于PCIe总线的多路复用DMA高速传输系统的设计](http://www.eeskill.com/article/id/43067)
@@ -6,6 +61,177 @@ ref:
 PCIe桥连接方式有2种：透明桥(Transparent Bridge)和非透明桥(Non-Transparent Bridge).
 
 总系统中存在两个独立的处理器，此时使用透明桥方式不利于整个系统的配置与管理，可能出现PCIe总线地址的映射冲突，此外不能使用PCIe透明桥连接两个PCIe Agent设备，如x86处理器。采用非透明桥可有效的解决这些问题，提高PCIe传输系统的可移植性。非透明桥不是PCIe总线定义的标准桥片，但是这类桥片在连接两个处理器系统中得到了广泛的应用.
+
+> 透明是指这个桥对于经过它的报文或者数据，不做任何的处理和表更，直接往下游或者上游传递.
+
+## 上行(Upstream)和下行(Downstream)
+在一个PCIe系统中, 传输方向的定义是以RC为准的: 面往RC方向称之为上行, 反之称之为下行.
+
+由于PCIe是点对点连接的，每个连接的地方，我们称之为Port。对于Root Complex而言，它仅有一个下行端口。对于PCI-Express switch，它有一个上行端口（upstream port）和多个下行端口（downstream ports）。而PCIe设备（EP）仅有一个上行端口.
+
+一般而言，上行端口是和一个下行端口连接在一起。注意，是一般而言，某些特殊的情况下，两个下行端口也是可以连接在一起的，称之为crosslink.
+
+Switch不一定只能有一个上行口, 支持Virtual switch功能的情况下，可以有多个上行口. 通常Switch的端口划分是按一定规则可以灵活配置的.
+
+## Lane和Link
+![](/misc/img/arch/device/pci/lane-link.jpeg)
+
+Lane，是指一组差分信号的组合，包括发送和接收。一个发送方向的差分信号包括TX+和TX-两条线，接收亦然. 所以一条lane有四条物理连线。发送和接收是同时进行的，故为全双工.
+
+Link，是指两个PCIe部件的链接，通常是由端口和lane组成。（通常有多条lane）比如**有一个X2的链路，意思是指这条链路是两条lane组成，一共8条物理连线**. 链路上传送的是编码之后的数据.比如Gen1/Gen2所采用的8b/10b编码，Gen3之后改成了128b/130b编码。
+
+多条lane组成的link，有效的扩展了link的带宽。Lane的初始化和多条lane的组合优化，是在link的初始化训练过程（Link Training）中实现的. Link的速率在初始化以后确定，所有lane的信号速率一样.
+
+> Link初始化以及link建立过程（或者称之为链路训练，Link Training）是在设备上电或者链路重新建立链接时发生的.
+
+>  Link的初始化和协商，确定lane宽度以及速率，是不需要操作系统或者软件参与的，纯粹是芯片的硬件行为.
+
+> 协议规定了只能是x1, x2, x4, x8, x12, x16, x32, 因此不是任意条lane都可组成一个link.
+
+> lane0和lane1可以交换顺序交叉连接, 协议上这种特性叫Lane Reversal, 不过需要注意的是，这个是可选特性，不是每个设备都支持的.
+
+> 两个不同速率的device在协商阶段，首先按照**最低的Gen1**速率协商，均采用同样的8/10b编码。协商完成后，按照协商后的速率建立链接.
+
+在PCIe的链路初始化和协商的过程中（Link Training），其中一个重要的步骤就是确定双方的Link链路需要几条Lane。给Lane做了编号，称之为Lane Number，从0开始。默认设备A的Lane需要和设备B的Lane对应序号连接.
+
+为了降低PCB布线工程师的布线难度，PCIe spec定义了Lane Reversal和Polarity Inversion，即Lane反转和极性倒置（或称之为极性反转）. PCIe spec规定了Polarity Inversion是PCIe设备必须要实现的，而Lane Reversal则是可选支持特性. 另外，对于Lane Reversal，很容易看出，只需要链路一端的设备支持就可以实现了.
+
+对于连续的多个字节，在链路上的发送是这样的:
+- 链路是x1的话，即仅有一条Lane0，多个字节按照顺序依次编码后在Lane0发送即可
+- 链路有多条Lane, 假设链路是x4的，即有四条Lane. 连续的字节按照如下的规则发送：Byte0从Lane0发送，Byte1从Lane1发送，Byte2从Lane2发送，Byte3从Lane4发送，以此类推
+
+## pci数据路由
+[PCIe的设备有三种资源（ID、Memory、IO）](https://mp.weixin.qq.com/s?__biz=MzU4MTczMDg1Nw==&mid=2247483766&idx=1&sn=3107750e77c1d93740e867b064d2f6c8), 具有了资源，PCIe设备才具有了被访问、被使用的基本能力:
+- ID Resource
+
+    ID资源: 即设备在系统中的定位和身份证. 用总线号（Bus）、设备号(Device)和功能号(Function)三个变量定义
+
+    ![](/misc/img/arch/device/pci/function_device.jpeg)
+
+    对于一个PCIe设备，如果它只具有一个功能，称之为Single FunctionDevice；如果它有多个功能，则称之为Multi Function Device. 例如, 有这么一个AMD的显卡，位于01号总线，00号设备，它具有两个功能，功能0是显示用的Radeon HD 6750，功能1是音频用的Radeon HD 5700.
+
+     ID是由总线号、设备号和功能号共同组成的。因为有多功能设备，所以ID实际是一个功能的名字和地址. 在Linux系统中，表示ID的方式是[Bus:Device.Function]，如上的显示用的6750的ID号是01:00.0。音频用的5700的ID号是01:00.1
+
+    PCIe EP的设备号（Device Number）都是0，PCIe Switch则不大一样. 在PCIe Switch内部，实际是由多个PCIe-To-PCIe的桥组成，对于每一个桥的设备号可能是0、1、2...
+    ![](/misc/img/arch/device/pci/switch.jpeg)
+
+    这些桥的Function可能也有多个，上图仅示意了Function0.
+
+    关于ID号, PCIe Spec定义了如下规则:
+    - 总线号由8bit表示，因此，最大总线号为256
+    - 设备号由5bit表示，因此，最大设备号为32
+    - 功能号由3bit表示，因此，最大功能号为8
+
+- Memory Resource
+
+    内存资源: 即设备具备哪些可以提供给外部或内部使用的内存.
+
+    每个外设都是通过读写其寄存器来控制使用，寄存器也称为I/O端口. 外设上也同样拥有自己的存储空间，称为I/O内存. 在X86的系统中，对于内存访问和IO访问是独立编址的，而其他架构的CPU系统，如RISC指令系统的ARM、PowerPC等，采用统一编址.
+
+    在x86系统中，I/O空间大小为64K，要求单个PCIe设备的I/O空间大小最大为256B；事实上，这个I/O空间的存在，只是在PCI规范上继承，为了兼容传统的一些设备, 在实际工作中几乎不会用到。在驱动程序中，访问I/O空间需要特殊的操作指令，如in、out.
+
+    相对I/O，Memory就要大的多了. 最大大小取决于系统的地址空间，在32位系统中，就可以到4GB. Memroy空间通常用于数据传输. 大部分的PCIe设备也有一部分Memory空间用于寄存器的访问.
+
+    显卡PCIe设备通常有一个内存资源, 比如大小是256M，这就是常说的某显卡有xxx M显存的由来.
+
+- IO Resource
+
+    IO资源: 即设备具有哪些可以使用的IO空间
+
+**对于一个PCIe系统中的每一个PCIe设备, 如上的三种资源分配都是唯一的, 不会有两个设备具备相同的资源**. 在系统启动时，BIOS会给各个PCIe设备分配如上三种资源，这个过程就是常说的枚举（Enumeration）. 注意，在进入Linux系统后，内核会重新扫描总线并check资源.
+
+整个枚举过程分为两个阶段，首先扫描设备, 其次再对每个设备进行资源分配.
+
+一切从根开始，也就是扫描会从RootComplex开始，并且按照深度优先的方式遍历完所有的设备. 在扫描过程中，如果扫描到EP，则返回, 如果是桥，则继续往桥后扫描，总线号增加. 扫描完成后，就得到了整个PCIe大树的整体形状，也就是所说的整个PCIe拓扑. 资源的分配也是从RC开始，同样按照深度优先方式遍历，为每个设备分配必要的资源.
+
+![](/misc/img/arch/device/pci/pcie_enum.jpeg)
+
+Spec规定, 每个PCIe设备都有6个寄存器来向系统声明它需要什么样的资源以及大小. 这6个寄存器称之为BAR（Base  AddressRegister, 4B）, 从BAR0到BAR5. 当向这些寄存器写全1，并再读取这些寄存器的值. 第一个的非0的bit位即是此设备需要的资源大小. 比如写0xFFFF_FFFF到BAR0, 回读的值为0xFFFF_0000，低16bit为零，意味着整个BAR的大小需要2^16 = 64K bytes. 确认PCIe设备资源大小后，BIOS就把系统分配给这个设备的地址写入到这个BAR里面, 驱动程序只需要读取这个BAR寄存器，获取地址后，就可以操作对应的额数据了.
+
+> 比如`lspci -s 1:0.0 -v -xxx`输出的`10`地址开始的6个寄存器就是bar寄存器.
+
+lspci查看它的id资源:
+![](/misc/img/arch/device/pci/640.jpeg)
+上图这个设备的ID资源是：总线号3，设备号0，功能号0.
+
+lspci查看它的memory和IO资源:
+![](/misc/img/arch/device/pci/640-2.jpeg)
+上图它的IO资源位于d00处, 大小256. 它的Memroy资源有两个，一个是位于f7a00000大小为4K, 一个是位于f0000000大小为16K.
+
+路由是指一个数据包（也叫报文）从源端经过各种路径，最终到达目的端的过程.
+
+PCIe系统里面从RC到EP, PCIe Spec定义了三种路由方法，分别是
+- Routed by Device ID : 基于ID的ID路由
+
+    它是依靠目标设备的ID来作为目标地址的. 即用Bus Number、Device Number和Function Number进行路由寻址。基于ID的路由方式主要用于配置读写请求，以及完成报文.
+
+    带有目标ID（BDF）的报文首先到达目标总线上，当EP收到这样的报文时，它会对比报文里面的BDF是否和自己的相同，如果相同则接收并处理，否则就拒绝接收.
+
+    ![](/misc/img/arch/device/pci/route_id.jpeg)
+
+    当Switch收到时，首先对比报文里面的的BDF是否和自己的相同，如果匹配，则接收并处理。其次，会检查这个报文的Bus Number是否落在自己之下的总线范围内, 依据是Secondary Bus Number和Subordinate Bus Number, 如果在，则转发到对应的下游端口；否则则拒绝接收.
+
+    ![](/misc/img/arch/device/pci/route_id_switch.jpeg)
+- Routed by memory or IO Address : 基于地址的地址路由
+
+    报文头里面包含着目的IO或者目的Memory的地址. 报文在总线上路由，就是寻找系统里的某个PCIe设备，而这个设备的资源范围包含这个地址. 以Memory为例来看看这个过程:
+
+    ![](/misc/img/arch/device/pci/route_addr.jpeg)
+
+    当报文到达Switch时，情况稍微复杂一点。当下行的报文到达Switch某个port时，这个报文的目的地址必须是在这个port的资源窗口内，Switch才会把这个报文向下一级转发.
+
+    ![](/misc/img/arch/device/pci/route_addr_switch.jpeg)
+
+    当上行的报文到达port时，情况相反，报文的目的地址必须是在这个port的资源窗口之外Switch才会把这个报文向上一级转发.
+
+    ![](/misc/img/arch/device/pci/route_addr_switch_up.jpeg) 
+
+    > PCIe Spec定义了三类窗口：Memory Base and Limit、Prefetchable Memory Base and Limit、IO Base and Limit.
+- Implicit Routing : 隐式路由
+
+    原因:
+    1. 是因为PCI总线有一些边带信号来传送信息和控制，在PCIe中采用消息（Message）机制来实现。PCIe Spec规定消息的路由方式为隐式路由
+    2. 是在系统中，有一些报文是由EP发给RC的或者RC发出的广播报文，这些广播报文可以传递到系统中每一个设备，这时候就不需要按照ID和地址路由来区分设备了
+
+    EP收到隐式路由的报文，如果是RC发出的广播报文（通常是RC发出的）或者本地报文（Local - Terminate at Receiver，通常是INTx消息），EP接收此报文。
+    Switch的处理则分上下行。如果上行端口收到RC的广播报文，则讲此报文发给所有下行端口。如果下行口收到发向RC的消息报文，则将此报文直接转发到上行端口，送给RC；如果收到本地消息报文，则接收此报文，不再向上或向下传播.
+
+    隐式路由的消息有:
+    - INTx Interrupt Signaling        
+
+          中断信号。PCI里面有INTx的信号
+
+    - Power Management           
+
+           电源管理用
+
+    - Error Signaling                        
+
+          错误相关的信号
+
+    - Locked Transaction Support          
+
+          支持Lock事务
+
+    - Slot Power Limit Support       
+
+          功率限制
+
+    - Vendor-Defined Messages            
+
+          厂商自定义
+
+    - LTR Messages                          
+
+          Latency Tolerance Reporting
+
+    - OBFF Messages                       
+
+          Optimized Buffer Flush/Fill
+    - etc
+
+以[Address Routing](https://mp.weixin.qq.com/s?__biz=MzU4MTczMDg1Nw==&mid=2247483803&idx=1&sn=8b2bc3370d7aef6519fa8dd0976f3838)为例.
+
 
 ## NTB(Non-Transparent Bridge)
 ref:
@@ -16,8 +242,81 @@ ref:
 - [Non-Transparent Bridging Simplified](https://docs.broadcom.com/doc/12353427)
 - [多功能PCIE交换机之四：非透明桥NTB](https://developer.aliyun.com/article/506858)
 - [PEX87XX非透明桥(NTB)翻译-1](https://zhuanlan.zhihu.com/p/463029355)
+- [NTB调试常见问题指南](https://blog.51cto.com/xiamachao/1794555)
+- [NTB的地址映射和地址转换](https://blog.csdn.net/linjiasen/article/details/110563838)
+- [linux NTB 的测试工具](https://blog.csdn.net/linjiasen/article/details/104532342)
 
-比如`02:00.0 PCI bridge: PLX Technology, Inc. PEX 8717 16-lane, 8-Port PCI Express Gen 3(8.0 GT/s) Switch with DMA (rev ca)`, 但kernel 5.18没有PEX 8717相关驱动支持, [论坛RFC](https://groups.google.com/g/linux-ntb/c/kO6IAj4dB5k)也没有下文, 因此ntb设备应该选择kernel支持的硬件.
+### 原理
+
+两个系统的间接通信有: 利用串口、USB通信，利用网卡通信、利用FC通信等, 直接通信有NTB(PCIe Non-Transparent Bridging).
+
+两个系统不能通过透明交换机连接的原因: PCIe数据路由是基于地址的，两个系统可能资源分配冲突，这意味着两个设备具有相同的资源分配，因此具有该地址的数据包无法正确路由. 解决方案是当数据包通过结构从一个系统传输到另一个系统时进行地址转换，这是通过非透明桥（NT）完成的.
+
+透明桥路由:
+1. ①某个访问地址1500h的数据报文到达上行口P-P桥，P-P桥一看，这个地址在我的窗口范围内，向下行端口转发
+1. ②下图中高亮的下行端口P-P透明桥，一看，这个地址在我的桥下窗口范围内，继续向下转发
+1. ③穿过透明P-P桥的数据报文，地址仍然为1500h
+![透明桥路由](/misc/img/arch/device/pci/tb.jpeg) 
+
+非透明桥的路由:
+1. ①某个访问地址Δ + 1500h的数据报文到达上行口P-P桥，P-P桥一看，这个地址在我的窗口范围内，向下行端口转发
+1. ②下图中高亮的下行端口P-P透明桥，一看，这个地址在我的桥下窗口范围内，继续向下转发
+1. ③穿过非透明P-P桥的数据报文，地址进行了翻译！从Δ +1500h变成1500h
+1. ④⑤是数据报文在系统B里的路由
+![非透明桥的路由](/misc/img/arch/device/pci/ntb.jpeg) 
+
+> Δ + 1500h所在的资源范围是非透明桥NT的BAR资源，向系统申请的.
+
+透明桥是进来什么地址，出去就是什么地址，对于桥上下两侧是“透明”的。非透明桥是有翻译功能的，可以把一个地址翻译成另一个地址（当然，也会有ID翻译功能）. 所谓非透明的部分意义也是在于此.
+
+NT桥的内部，其实是两个Endpoint设备。NT桥将一个透明端口分成两个非透明端口（端点设备/功能）。透明桥的配置空间为Type1，非透明桥的配置空间则为Type0。同时，NT桥中的两个NT EP都有各自的Type0配置空间.
+
+既然是EP，就知道每个EP都有6个BAR空间。BAR 0 到BAR 5。所谓BAR（Base Address Register）就是每个EP设备的一个寄存器，这个寄存器会向系统申请一段一定大小的空间地址，系统所有访问这个空间地址的报文，都会被路由到这个EP来处理。
+
+![非透明桥的内部](/misc/img/arch/device/pci/ntd_inner.png)
+
+通常，BAR0是用作映射到EP设备的配置空间，访问BAR0可以映射访问所有的寄存器。而NT的BAR2 到 BAR5通常都是用于NT桥接地址转换用的. 以BAR 2为例, NT EP向系统申请了个两端空间，一个是BAR0，所有访问BAR0地址范围的报文都将落入到EP的内存映射寄存器里面去。另一个就是BAR2，这个BAR2的地址空间，我们称为NT窗口。所有访问BAR2地址范围的报文都将进入NT，然后被地址转换
+
+![非透明桥的内部2](/misc/img/arch/device/pci/ntd_inner2.png)
+
+ 进入NT Window的报文，会根据我们自己设置的NT桥转换基址（Translated Base Addres）做运算，运算之后的地址刚好要等于我们想访问的B系统里面的目标地址（Target Adress）。这样，即使加上一定的偏移（Offset），也能顺利转化为B系统里对应偏移的地址
+
+![非透明桥的内部3](/misc/img/arch/device/pci/ntd_inner3.png)
+
+NT地址转换的基本原理就是这样。需要注意的是，如果只是写请求，那么只需要地址翻译、转换就可以了。但如果是Non-Post的事务，这个时候需要的是ID 路由（ID Routing）, 此时需要进行id转换.
+
+从PCIe域以及地址归属来看，NT桥两边的两个EP设备，其实是分别归属于两个系统的（蓝色属于系统A，绿色属于系统B）。至于两个NT EP中间的NT Bridge，那是厂商芯片自己内部的实现, 对双方系统来说都是不可见的.
+![非透明桥的概览](/misc/img/arch/device/pci/ntd_system.png)
+
+ntb的3种典型场景:
+1. 单NT模式
+
+    正常情况下，Host1访问、管理下面的设备EP。Host2不参与，处于Standby状态。当Host1出现异常时，Host2接管系统，Host2重新配置Switch，把原来的NT口配置成Upstream Port，并且重新分配、枚举PCIe设备资源。然后Host2接管下面EP设备的访问、管理.
+
+    ![](/misc/img/arch/device/pci/ntd_use1.png)
+
+1. 双NT模式
+
+    Host1、2访问、管理自己下面的设备EP。Host1和Host2之间通过NTB互联。两个Host的CPU之间可以通过NT桥互相通信，因此，两个Host都可以访问到对端的所有资源
+
+    ![](/misc/img/arch/device/pci/ntd_use2.png)
+
+1. 多NT交换模式
+
+    多个Host通过NT，与一个中央交换机（Switch）互联。透过NT桥，每个主机都能够互相两两访问。值得注意的是，中央交换机是需要一个外部的管理CPU来初始化、配置以及做异常处理的。这个管理CPU不一定非要使用PCIe和Switch连接，也可以使用带外通道，如I2C等做配置管理即可.
+
+    ![](/misc/img/arch/device/pci/ntd_use3.png)
+
+
+linux NTB driver软件栈: hardware目录是各个厂商具体的实现方式，NTB抽象出一个概念：ntb_dev，所有的hardware厂商要注册对应的OPS到ntb_dev->ops，这样可以提供统一的API，上层driver是看不到底层硬件具体操作.
+![](/misc/img/arch/device/pci/20200227111435491.png)
+
+### 实践
+比如`07:00.0 Network controller: PLX Technology, Inc. PEX 8732 32-lane, 8-Port PCI Express Gen 3 (8.0 GT/s) Switch (rev ca)`, 但kernel 5.18没有PEX 8732相关驱动支持, [论坛RFC](https://groups.google.com/g/linux-ntb/c/kO6IAj4dB5k)也没有下文, 因此ntb设备应该选择kernel支持的硬件.
+
+**kernel 5.19里没有plx ntb驱动, plx官方可提供相关SDK包含Driver但是适配的是2.26, 要求pci class=0x088000, 实际07:00.0的pci class=0x028000, 幸运的是[truenas维护的linux kernel已整合plx ntb驱动](https://github.com/truenas/linux/blob/SCALE-v5.10-stable/drivers/ntb/hw/plx/ntb_hw_plx.c)**.
+
+> bios可能需要设置plx enable.
 
 加载ntb驱动:
 ```bash
