@@ -260,9 +260,13 @@ rtnetlink(NETLINK_ROUTE)消息并非限制于网络路由选择子系统消息, 
 - [netlink遇到ENOBUFS错误](https://xixitalk.github.io/blog/2016/08/18/netlink-ENOBUFS/)
 - [no buffer space available](https://www.ibm.com/support/pages/no-buffer-space-available)
 
-buf大小是`1<<20 * 32`
+recv buf大小是`1<<20 * 32`
 
-系统sk_rcvbuf=sysctl_rmem_default(from `sysctl -a|grep net.core.rmem_default`)=212992=208k, 默认sysctl_rmem_default=sysctl_rmem_max, 因为buf大于k_rcvbuf导致.
+原因:
+1. 系统sk_rcvbuf=sysctl_rmem_default(from `sysctl -a|grep net.core.rmem_default`)=212992=208k, 默认sysctl_rmem_default=sysctl_rmem_max, 因为buf大于k_rcvbuf导致. 
+1. 可能是发送方发送过快, 消费端来不及接收导致(这条待确定).
+
+根本原因是: `recv buf>=SO_RCVBUF`
 
 解决方法(分两步):
 1. 调大sysctl_rmem上限: `sysctl -w net.core.rmem_max=67108864`, 即64M
@@ -276,7 +280,7 @@ import (
 
     ...
 )
-if err:=unix.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1<<20*40);err!=nil{
+if err:=unix.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1<<20*40);err!=nil{ // 默认值由 rmem_default sysctl 设置，最大允许值由 rmem_max sysctl 设置
     return err
 }
 ```

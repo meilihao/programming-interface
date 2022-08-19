@@ -11,6 +11,15 @@ Paxos 协议有一个很大的设计假设, 它要求支持多个投票, 也就�
 
 	如果采用 Paxos 协议, 当一台机器新上线的时候很快就能提供服务了, 因为不需要等前面的数据确认它就能提供服务, 但是如果使用的是 raft 协议, 需要等前面的所有日志确认以后才能提供服务???(不是应是新节点补全数据后才提供访问吗?).
 
+raft将问题分解为:
+- leader election : leader选举
+- log replication: 日志复制
+- membership changes : 成员关系变化
+
+raft算法基本操作只需要2种rpc:
+- RequestVote : 在选举过程种通过旧的leader触发
+- AppendEntries : leader触发, 用于向其他节点复制log和发送心跳
+
 ## 角色
 常见raft是Leader-Follower模式, 每个节点维持了一个状态机, 有3中状态:
 - leader

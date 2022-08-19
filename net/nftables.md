@@ -1,6 +1,7 @@
 # nftables 基于[nftables HOWTO](https://wiki.nftables.org/wiki-nftables/index.php/Main_Page)
-
-> [Nftables HOWTO 中文翻译](https://farkasity.gitbooks.io/nftables-howto-zh/content/)
+ref:
+- [Nftables HOWTO 中文翻译](https://farkasity.gitbooks.io/nftables-howto-zh/content/)
+- [nftwatch 观察防火墙的流量统计](https://linux.cn/article-14858-1.html)
 
 [**!!!随着 eBPF 技术的快速发展，bpfilter 有望取代 nftables**](https://lwn.net/Articles/747551/)
 

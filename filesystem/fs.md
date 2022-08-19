@@ -295,6 +295,7 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 	- task : 为进程中的每个线程均包含一个子目录(始自 Linux 2.6)
 	- oom_adj : OOM Killer分值, range is [-16, 15]和-17. -17表示禁止被OOM机制处理. 其他具体值是用2^N来体现的, 因此n是正数时容易被OOM Killer选定.
 	- oom_score_adj : 用于替换oom_adj, range is [-1000, 1000], -1000即禁止被OOM机制处理
+	- limits : limits
 - acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用
 - asound : alsa声卡驱动接口
 - buddyinfo : buddy内存分配信息
@@ -359,6 +360,8 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 	- abi : 文件与应用程序的二进制信息
 	- dev : 特定设备的信息
 	- fs : 特定的文件系统
+
+		- file-max: 登入用户可打开的最大文件数
 	- kernel : 可控制一系列的内核参数
 			- printk : 调整内核printk的打印级别
 
