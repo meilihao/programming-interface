@@ -11,6 +11,9 @@
 - [阿里如何实现高性能分布式强一致的独立 Paxos 基础库？](https://mp.weixin.qq.com/s?__biz=MjM5MDE0Mjc4MA==&mid=2650997287&idx=1&sn=4b3ef76bb90c2e28e259802866dc934e)
 - [PolarDB-X 一致性共识协议 (X-Paxos)](https://developer.aliyun.com/article/781308)
 
+## etcd
+- [etcd技术架构以及其内部的实现机制](https://zhuanlan.zhihu.com/p/566090538)
+
 ## 实践
 - [老司机带你用 Go 语言实现 Raft 分布式一致性协议](https://happyer.github.io/2017/02/06/2017-02-06-raft/)
 - [Go实现Raft : 共4篇](https://mp.weixin.qq.com/s?__biz=Mzg5NDYxNTYyMw==&mid=2247487619&idx=1&sn=af6ad71ff4fb3663b437e30f8deb07e4&source=41#wechat_redirect)
