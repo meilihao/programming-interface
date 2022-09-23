@@ -17,6 +17,7 @@
     - SRv6 Overlay是趋势
 - [SRv6开启网络服务化变革之旅](https://cloud.tencent.com/developer/article/1779041)
 - [从网络接入层到 Service Mesh，蚂蚁金服网络代理的演进之路](https://www.infoq.cn/article/gmyuf1cjizbyvmslpezv)
+- [Linux新技术基石 | eBPF and XDP](https://mp.weixin.qq.com/s?__biz=MzI3NzA5MzUxNA==&mid=2664613441&idx=1&sn=7badd5ed4c01706789f7547e7e2e4582)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)
