@@ -32,6 +32,9 @@
 - [三言两语聊Kernel：从Linux到FreeBSD](http://laoar.github.io/blogs/325/)
 - [OS书籍推荐](https://www.junmajinlong.com/os/index/)
 
+### 手写os
+- [手写操作系统](https://www.eet-china.com/mp/a163987.html) from [luban-ziya](https://gitee.com/luban-ziya/projects)
+
 ## debug
 - [一文汇总Linux 系统动态追踪(高级调试)技术](http://news.eeworld.com.cn/mp/ymc/a85336.jspx)
 - [Linux内核调试方法总结](https://www.cnblogs.com/alantu2018/p/8997149.html)
