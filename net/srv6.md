@@ -2,6 +2,8 @@
 参考:
 - [SRv6浅谈](https://cloud.tencent.com/developer/article/1420074)
 - [kernel support srv6 status](https://www.segment-routing.net/open-software/linux/)
+- [SRv6配置](https://www.h3c.com/cn/d_202112/1503067_30005_0.htm)
+- [Linux SRv6实战（第四篇）-“以应用为中心”的Overlay & Underlay整合方案](https://www.sdnlab.com/23420.html)
 
 
 ## [从MPLS到SR，再到SRv6](https://mp.weixin.qq.com/s?__biz=MzIwMTMzMDU5Nw==&mid=2456798735&idx=1&sn=d2d9050d20b22bb64e2080e5a6ab257c)

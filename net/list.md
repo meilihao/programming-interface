@@ -18,6 +18,39 @@
 - [SRv6开启网络服务化变革之旅](https://cloud.tencent.com/developer/article/1779041)
 - [从网络接入层到 Service Mesh，蚂蚁金服网络代理的演进之路](https://www.infoq.cn/article/gmyuf1cjizbyvmslpezv)
 - [Linux新技术基石 | eBPF and XDP](https://mp.weixin.qq.com/s?__biz=MzI3NzA5MzUxNA==&mid=2664613441&idx=1&sn=7badd5ed4c01706789f7547e7e2e4582)
+- [云网一体化数据中心网络关键技术](http://www.infocomm-journal.com/dxkx/article/2020/1000-0801/1000-0801-36-4-00125.shtml)
+
+    Facebook F4到F16架构的演进，再一次验证了IP-CLOS网络在超大规模组网中的优势，在可扩展性、可靠性以及节省成本上都表现突出.
+
+    BGP是一种距离矢量路由协议，在路由控制、网络收敛时的网络稳定性更好。在中小型数据中心组网时，使用BGP和ISIS、OSPF协议性能相差不大。但是在超大规模数据中心组网中，BGP 的应用性能会更加优异.
+
+    考虑到未来云网一体化下业务端到端需求，基于以太网的RoCE（RDMA over converged ethernet）技术已经逐步替代无限带宽（infiniband， IB）等专用技术，成为主流技术。目前最新的RoCEv2版本使用IP/UDP替代IB网络层，提供IP路由及ECMP能力，成为高性能数据中心网络主要部署协议.
+
+    VxLAN 是目前云数据中心典型的网络虚拟化技术。本质上是一种大二层技术，通过IP网络进行二层隧道流量的传输。同时VxLAN和SDN联合部署已经成为智能化云数据中心的必要组件，VxLAN作为数据平面解耦租户网络和物理网络，SDN将租户的控制能力集成到云管平台与计算、存储资源联合调度，极大地提升了数据中心内业务承载的灵活性。
+
+    基于IPv6的分段路由（segment routing over IPv6，SRv6）是目前承载网关注度和讨论度极高的研究热点技术，是基于源路由理念而设计的在网络上转发IPv6数据分组的一种协议，具备可编程、易部署、易维护、协议简化的特点。它通过集中控制面可实现按需路径规划与调度，同时SRv6 可以完全复用现有 IPv6 数据平面，满足网络灵活演进要求。
+
+    **采用SRv6/EVPN可有效统一“云内网络、云间网络、用户到云网络”承载协议，提供“固移融合、云网融合、虚实网元共存”的云网一体化网络的业务综合承载方案**。SRv6 既符合国家的IPv6 战略，又符合未来技术演进方向，标准化后有可能取代现有 VxLAN 等技术，成为承载层的统一隧道协议，应用领域从骨干网、城域网向数据中心网络逐步扩展。EVPN基础标准已经完备，应用领域已经从数据中心走向广域网。SRv6/EVPN能提供云网一体化环境下的L2/L3业务高效承载.
+
+    [单可用区的物理组网](/misc/img/net/srv6/img_92.jpg)
+    整个组网设计遵照超大规模组网原则和技术，按照业务功能分Pod区规划，各区域可独立扩展:
+    - 核心层：设置一对核心交换机设备（Super-Spine），提供流量高速转发，与各Pod区的 Spine 交换机交叉互联。核心交换机采用去堆叠配置，可通过设备替换或者横向增加设备的方式升级到更高带宽和更大接入规模，支持业务进一步扩展
+    - 计算 Pod：承载大规模计算集群来提供租户虚拟机资源，单Pod内采用基于Spine-Leaf的典型IP-CLOS结构，Spine和Leaf节点设备均采用“去堆叠+eBGP”的组网方式，保障单Pod模块的高可扩展性。
+    - 高性能计算 Pod/存储 Pod：为了增强数据中心网络承载AI、高性能计算、分布式存储等业务能力，基于eBGP的IP-CLOS组网，在高性能计算Pod、存储Pod中部署RoCEv2的无损网络技术，保障单Pod内RDMA流量的超低时延特性。经实测验证，无损网络部署可提升分布式存储IOPS 20%，单卷性能达到35万IOPS，平均时延降低 12%，并且严格保障了读取数据汇聚时“多打一”流量的零分组丢失传输。
+    - 管理区：放置内部管理组件，不对外提供服务，为安全可靠区。主要承载云管理平台、SDN控制器、OpenStack、级联节点等。在Spine设备旁挂内网管理防火墙设备，保证管理网安全。
+    - 扩展区：用于和多个可用区之间的互联。可用区之间利用低延迟光纤传输网络互联，要求时延小于1 ms，保障多活业务的可靠性。
+    - 网络服务区：承载云内网络的服务，包括vRouter等。所有租户的业务流量直接走到这个分区，在分区内匹配相关业务对应处理。
+    - 云网服务区：主要用于对外接入云网融合业务的区域，包括 Internet 网关、VPN 网关、专线网关、DCI网关等。其中，Internet网关承载Internet流量访问，VPN网关用于IPSec-VPN接入。同时，分别设立云专线接入网关、DCI 接入网关用于入云专线访问VPC、云间跨region VPC互联的连接，满足云网融合业务的各类连接需求
+
+    [云内网络业务承载方案](/misc/img/net/srv6/img_93.jpg):
+    数据中心云内网络业务承载方案如上图所示。业务承载依赖大二层网络，目前通用的做法是采用基于MP-BGP的EVPN承载的VxLAN。硬件VTEP节点包括Internet网关、VPN网关、专线接入网关、DCI接入网关的VTEP TOR、网络服务区TOR等。各VTEP节点通过网络设备间的eBGP发布并学习EVPN VxLAN所需的loopback IP。VTEP使用BGP多实例功能组建overlay网络，管理服务区汇聚作为EVPN BGP RR，与所有VTEP节点建立iBGP邻居。VTEP节点创建二层BD域，不同的VTEP 节点属于相同 VNI 的 BD 域，自动创建VxLAN隧道，实现业务流量转发。
+
+    以入云专线承载为例，客户使用云专线产品接入云内VPC网络时，流量从专线接入网关进入，通过VTEP TOR走VxLAN到网络服务区TOR，进入vRouter。vRouter封装成VxLAN后，将报文路由到 Pod 内，通过多段 VxLAN 拼接和计算节点的虚拟交换机建立连接，VxLAN报文在虚拟交换机上解除封装进入VPC。
+
+    VxLAN/EVPN 技术是目前大规模云数据中心网络通用且高效的业务承载方案，能够实现云内业务快速发送和自动化配置。后续随着 SRv6技术标准的成熟，SRv6/EVPN的统一承载方案会逐渐向数据中心内网络演进。目前，Linux已经支持大部分SRv6功能，Linux SRv6提供一种整合overlay和underlay的承载方案，保证underlay网络和主机叠加网络（host overlay）SLA的一致性。在数据中心中引入SRv6承载，还需进行大量的研究和实践。
+
+    ps: 当前在云数据中心互联场景中，IP 骨干网采用 MPLS/SR-MPLS 技术，数据中心网络通常使用 VxLAN 技术，骨干网与数据网络之间通过网关设备实现 VxLAN 和 MPLS 相互映射.
+- [G-SRv6技术详细介绍与应用场景解析.pdf](/misc/img/net/srv6/G-SRv6技术详细介绍与应用场景解析.pdf)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)
@@ -25,6 +58,7 @@
 
 ## cloud
 - [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)
+- [VXLAN 基础教程：在 Linux 上配置 VXLAN 网络](https://juejin.cn/post/6844904133430870029)
 - [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
 - [云原生网络数据面加速方案浅析](https://bbs.huaweicloud.com/forum/thread-95490-1-1.html)
 
@@ -34,6 +68,12 @@
 
 ## 限速
 - [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)
+
+## 测试
+- [vxlan网络性能测试](https://plantegg.github.io/2018/08/21/vxlan%E7%BD%91%E7%BB%9C%E6%80%A7%E8%83%BD%E6%B5%8B%E8%AF%95/)
+
+## 资源
+- [www.IPv6Plus.net/resources](https://github.com/IPv6Plus/IPv6Plus.github.io)
 
 # 概念
 ## 工作组 Work Group
