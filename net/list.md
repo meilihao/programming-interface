@@ -55,6 +55,41 @@
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)
 - [如何用Go实现一个异步网络库？](https://zhuanlan.zhihu.com/p/544038899)
+- [一文理解 OpenStack 网络](https://my.oschina.net/u/4526289/blog/5544689)
+
+    在每个VM大门口, 增加一个Bridge网桥, 任何VM的流量，都会经过这个Bridge. 这样通过在Bridge上面, 增加iptables规则, 就可以达到给VM设置**安全组**的目的了.
+
+    网络节点需要使用ns隔离不同租户.
+
+    [metadata服务，就是允许每个VM去访问OpenStack平台获取自己的metadata](http://niusmallnan.com/_build/html/_templates/openstack/metadata_server.html).
+
+    ```bash
+    $ curl http://169.254.169.254 # 在OpenStack上，将OpenStack的地址固定为169.254.169.254
+    $ curl http://169.254.169.254/openstack/latest/user_data # 可做VM自动化, 类似于cloud-init
+    #!/bin/bash
+    echo 'Extra user data here'
+    ```
+
+    网络节点上有一个proxy进程监听者9697端口，会将“访问openstack的请求”，转给了本地 unix domain socket 的监听者（即agent）, 由该agent与控制节点通信.
+
+    网络节点的常用命令:
+    ```bash
+    # ip netns # 查询ns
+    qdhcp-a7e512cf-1ca0-4ec7-be75-46a8998cf9ca
+    qrouter-4cdb0354-7732-4d8f-a3d0-9fbc4b93a62d
+    # ip netns exec qrouter-4cdb0354-7732-4d8f-a3d0-9fbc4b93a62d ip address # 查询该ns下的网卡
+    # ip netns exec qrouter-4cdb0354-7732-4d8f-a3d0-9fbc4b93a62d iptables -t nat -S # 查看该ns下的iptables规则
+    ```
+
+    为了降低网络节点的负载，同时提高可扩展性(避免网络节点异常), OpenStack在Juno版本引入了DVR(Distributed Virtual Routing)特性, DVR部署在计算节点上. 计算节点上的VM使用floatingIP访问Internet, 不必经过网络节点, 直接从计算节点的DVR就可以访问. 这样网络节点只需要处理占到整体流量一部分的 SNAT （无 floating IP 的 vm 跟外面的通信）流量，大大降低了负载和整个系统对网络节点的依赖, 即实现了分布式路由.
+
+- [**跟唐老师学云网络**](https://bbs.huaweicloud.com/blogs/109721)
+- [跟唐老师学习云网络 - 什么是VLAN和VXLAN](https://bbs.huaweicloud.com/blogs/111665)
+
+    一般情况, 一个交换机端口，都是设置为只允许一种VLAN报文通过(access模式). 但是有时候, 需要设置一个端口，允许N种VLAN报文，都可以通过, 即trunk模式, 这样可避免两个switch间需要给每个lan连线.
+
+    > vlan的vid是12b, 也就是最大4095.
+- [Nova中VIF(虚拟网卡)的实现](http://niusmallnan.com/_build/html/_templates/openstack/nova_vif.html)
 
 ## cloud
 - [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)

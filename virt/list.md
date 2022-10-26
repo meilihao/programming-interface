@@ -38,3 +38,6 @@
 
 ## next
 - [浅谈Linux设备虚拟化技术的演进之路](https://www.modb.pro/db/110904)
+
+## 迁移
+- [Nova实现虚拟机块迁移](http://niusmallnan.com/_build/html/_templates/openstack/block_migration.html)
