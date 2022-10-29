@@ -78,6 +78,8 @@ spdk整体分为三层:
         spdk nvmf概念:
         - subsystem：spdk创建的nvme controller, 相当于nvme controller，拥有了subsystem就可以被nvme host识别到并挂载了, 就算它名下没有namespace也可以.
 
+        SPDK NVMe-oF Target的主程序位于spdk/app/nvmf_tgt。因为NVMe-oF和iSCSI一样都有相应的subsystem（代码位于spdk/lib/event/subsystems/nvmf），只有在配置文件或RPC接口中调用了相应的函数，才会触发相应的初始化工作。这部分代码最重要的函数是nvmf_tgt_advance_state，主要通过状态机的形式来初始化和运行整个NVMe-oF Target系统。另外一部分代码位于spdk/lib/nvmf，主要是处理来自远端的NVMe-oF请求，包括transport层的抽象，以及实际基于RDMA transport的实现。如果读者希望学习SPDK NVMe-oF Target的细节，可以从spdk/lib/event/subsystems/nvmf目录的nvmf_tgt.c中的spdk_nvmf_subsystem_init函数入手.
+
     - vhost-scsi target
 
         KVM/QEMU的功能利用了SPDK NVMe驱动，使得访客虚拟机访问存储设备时延迟更低，使得I/O密集型工作负载的整体CPU负载减低,支持不同的设备类型供虚拟机访问，比如SCSI, Block, NVMe块设备.

@@ -64,7 +64,23 @@
 
   ![](/misc/img/arch/e7f5c50902b2d79d6c13c8e92e96ad40c757b02e.png)
 
-  阿里云的神龙架构是通过一个PCIe的MoC卡（实际是一个包含CPU、内存、磁盘、智能网卡的系统）把Hypervisor、带外管理功能都卸载到这个卡上。MoC卡对外可以连接EBS存储和VPC网络，通过virtio（一种半虚拟化的设备抽象接口规范）访问IO设备，实现裸金属和虚拟化同样的扩展和管理功能，和现有云环境可以通过私有接口或Open API无缝集成.
+  阿里云的神龙架构是通过一个PCIe的MoC卡（实际是一个包含CPU、内存、磁盘、智能网卡的系统）**把Hypervisor、带外管理功能都卸载到这个卡上**。MoC卡对外可以连接EBS存储和VPC网络，通过virtio（一种半虚拟化的设备抽象接口规范）访问IO设备，实现裸金属和虚拟化同样的扩展和管理功能，和现有云环境可以通过私有接口或Open API无缝集成.
+
+  [神龙Moc卡网上有文章说是智能网卡](https://blog.csdn.net/junbaozi/article/details/123834314), 这个更形象, 毕竟它只是弹性裸金属服务器上的一个pcie设备.
+
+  ![X-Dragon MOC卡架构详解](https://yqfile.alicdn.com/25c7936befd17a4230afacb6bae45164fcc35ef2.png)解读:
+  1. 上面是弹性裸金属的一个实例，包含CPU、内存、moc卡等资源，并且这些资源都是物理的
+  1. 中间的VirtlO-NIC，从名字推断，应该就是基于KVM的I/O虚拟化通用框架Virtio实现的定制化网卡驱动，用于配合网卡的DPDK特性来大幅加速网络转发性能
+  1. VirtlO-Blk，应该就是基于KVM的I/O虚拟化通用框架Virtio实现的定制化存储驱动，用于结合SPDK特性提升对块设备的访问性能. moc卡充当virtio后端.
+  1. 因VirtlO-NIC、VirtlO-Blk其实均是KVM通用I/O框架的实现，与云主机KVM技术同宗同源，所以神龙裸金属便能与云上的所有镜像、云上的所有系统、虚拟机和物理机之间完全兼容；
+  1. 除了上述功能，其他外部设备，例如键盘、鼠标、显示器等，基本可以判断也是基于KVM的I/O虚拟化框架来虚拟实现。这样就可以实现和KVM虚拟机一样的对外接口，使得运营的操作系统不需要做任何的修改，在虚拟机上拿过来在X-Dragon MOC卡上直接用。
+  1. 最下面的整个X-Dragon Hypervisor层，基本也可以判断，应该也是基于KVM来实现的，完完全全运行在这张Moc卡上；
+  由此，Moc可以无缝支持阿里云的云盘、VPC网络、存储/网络设备热插拔、32块弹性物理网卡，同时对X86、ARM、Power等CPU兼容。
+
+  > 感觉moc卡有点像xen中的物理dom0.
+
+  > 推测moc卡应该和[腾讯智能网卡(最新版代号银杉,上一版代号水杉)一样采用FPGA模拟virtio设备](https://blog.csdn.net/junbaozi/article/details/123834314). github上类似的有[
+virtio-fpga](https://github.com/RSPwFPGAs/virtio-fpga)
 
   `X-Dragon架构`性能未损失原因: 将原先跑在cpu上的Hypervisior offload到了`X-Dragon架构`上.
 

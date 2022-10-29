@@ -104,6 +104,26 @@ qemu启用ballooning: `-balloon virtio[,addr=addr]`, 也可使用较新的`-devi
 ### virtio_blk
 guest通过`grep -i virtio_blk /boot/config-3.10.0-514.el7.x86_64`得到`CONFIG_VIRTIO_BLK=m`说明已支持virtio_blk
 
+### vhost-scsi
+- [vhost加速方案演进](https://blog.csdn.net/junbaozi/article/details/124001718)
+
+目前主要有3种virtio-scsi后端的解决方案:
+1. QEMU virtio-scsi
+
+    是virtio-scsi最早的实现
+1. Kernel vhost-scsi
+
+    这个方案是QEMU virtio-scsi的后续演进，基于LIO在内核空间实现为虚拟机服务的SCSI设备。实际上vhost-kernel方案并没有完全模拟一个PCI设备，QEMU仍然负责对该PCI设备的模拟，只是把来自virtqueue的数据处理逻辑拿到内核空间了.
+
+    相比QEMU virtio-scsi方案在具体的SCSI命令处理时减少了数据的内存复制过程，从而提高了性能.
+1. SPDK vhost-user-scsi
+
+    虽然Kernel vhost-scsi方案在数据处理时已经没有数据的复制过程，但是当Guest有新的请求时，仍然需要QEMU通过系统调用通知内核工作线程，这里存在两方面的开销：Guest内核需要更新PCI配置空间，QEMU需要捕获Guest的VMM自陷，然后通知Kernel vhost-scsi工作线程。
+
+    SPDK vhost-user-scsi方案消除了这两方面的影响，后端的I/O处理线程在轮询所有的virtqueue，因此不需要Guest在添加新的请求到virtqueue后更新PCI的配置空间。SPDK vhost-user-scsi的后端I/O处理模块轮询机制加上零拷贝技术基本解决了前面提到的阻碍QEMU virtio-scsi性能提升的两个关键点.
+
+    QEMU Guest和SPDK vhost target是两个独立的进程，vhost-user方案一个核心的实现就是队列在Guest和SPDK vhost target之间是共享的.
+
 ### vhost-net
 virtio在宿主机中的后端处理程序（backend） 一般是由用户空间的QEMU提供的. 而vhost-net作为一个内核级别的后端处理程序， 将virtio-net的后端处理任务放到内核空间中执行, 从而提高效率. 即vhost是为了减少网络数据交换过程中的多次上下文切换， 让guest
 与host kernel直接通信， 从而提高网络性能.

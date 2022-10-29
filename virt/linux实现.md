@@ -1,6 +1,7 @@
 # virt
-参考:
- -[QEMU开源实战(四)](https://juejin.im/post/6844904113197547533)
+ref:
+- [QEMU开源实战(四)](https://juejin.im/post/6844904113197547533)
+- [主流虚拟化技术之KVM](https://blog.csdn.net/junbaozi/article/details/123468459)
 
 KVM 在内核里面需要有一个模块，来设置当前 CPU 是 Guest OS 在用，还是 Host OS 在用.
 
@@ -22,6 +23,12 @@ qemu 和 kvm 整合之后，CPU 的性能问题解决了. 另外 Qemu 还会模�
 
 至此，整个关系如下图所示.
 ![](/misc/img/virt/f748fd6b6b84fa90a1044a92443c3522.png)
+
+KVM是基于硬件辅助虚拟化技术(如Intel VT-x)的全虚拟化解决方案:
+- VMM(即KVM内核)运行于根模式下的Ring0
+- 宿主机上的用户态进程运行于根模式下的Ring3
+- 虚拟机中的Kernel运行于非根模式下的Ring0
+- 虚拟机中的用户态进程运行于非根模式下的Ring3
 
 ## 创建vm
 1. 先要给虚拟机起一个名字，在 KVM 里面就是`-name ubuntutest`.
@@ -611,7 +618,7 @@ CPU 这种类的定义是有多层继承关系的. TYPE_X86_CPU 的父类是 TYP
 
 在 qemu_kvm_cpu_thread_fn 中，先是 [kvm_init_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L383) 初始化这个 vcpu.
 
-kvm_init_vcpu -> [kvm_get_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L365)，在kvm_get_vcpu中会调用 kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id)，在内核里面创建一个 vcpu, vCPU一般分成两个部分：VMCS+非VMCS(Virtual Machine Control Structure)虚拟机控制结构, VMCS给硬件使用, 非VMCS给软件使用. vm运行的本质是vmm调用vcpu运行.
+kvm_init_vcpu -> [kvm_get_vcpu](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L365)，在kvm_get_vcpu中会调用 kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id)，在内核里面创建一个 vcpu, vCPU一般分成两个部分：VMCS+非VMCS(Virtual Machine Control Structure)虚拟机控制结构, VMCS给硬件使用(主要是虚拟寄存器), 非VMCS给软件使用(如VCPU标识、状态信息等). vm运行的本质是vmm调用vcpu运行.
 
 vcpu基本操作:
 1. vcpu创建
@@ -691,6 +698,20 @@ kernel加载宿主机寄存器，进入宿主机模式运行，并且会记录�
 至此，CPU 虚拟化就解析完了, 可以看到，CPU 的虚拟化是用户态的 qemu 和内核态的 KVM 共同配合完成的, 它们二者通过 ioctl 进行通信.
 
 ![](/misc/img/virt/c43639f7024848aa3e828bcfc10ca467.png)
+
+### 中断虚拟化
+在物理平台上，中断架构和外部中断处理流程:
+1. IO设备通过中断控制器(IO APIC或PIC)向CPU发送中断请求
+1. IO APIC将中断转发至目标CPU和Local APIC
+1. 目标APIC对该中断进行处理
+
+每个VCPU对应一个虚拟Local APIC，用于接收中断，同时还模拟了虚拟IO APIC(或虚拟PIC)用于接收外设(虚拟设备)发出的中断请求并进行转发。虚拟Local APIC、虚拟IO APIC、虚拟PIC等都是VMM中的软件实体(对应于相应的数据结构).
+
+在虚拟化环境中，VMM为Guest OS虚拟了一个与物理中断架构类似的虚拟中断架构, 主要处理流程如下：
+1. 当虚拟设备需要发送中断时，虚拟设备会调用虚拟IO APIC的接口发送中断
+1. 而虚拟IO APIC根据中断请求，选出适合的虚拟Local APIC，并调用其接口发送中断请求
+1. 虚拟Local APIC进一步利用CPU硬件虚拟化功能(Intel VT-x或AMD SVM)的事件注入机制，将中断注入到相应的VCPU
+1. 当相应VCPU得到调度时，即处理相应的中断
 
 ## vm的内存管理
 有了虚拟机，内存就变成了四类：
@@ -864,6 +885,8 @@ kvm_region_add 调用的是 [kvm_set_phys_mem](https://elixir.bootlin.com/qemu/v
 
 为了实现客户机虚拟地址空间到宿主机物理地址空间的直接映射. 客户机中每个进程都有自己的虚拟地址空间，所以 KVM 需要为客户机中的每个进程页表都要维护一套相应的影子页表. 在客户机访问内存时，使用的不是客户机的原来的页表，而是这个页表对应的影子页表，从而实现了从客户机虚拟地址到宿主机物理地址的直接转换. 而且，在 TLB 和 CPU 缓存上缓存的是来自影子页表中客户机虚拟地址和宿主机物理地址之间的映射，也因此提高了缓存的效率.
 
+> TLB是一种内存管理单元用于改进虚拟地址到物理地址转换后结果的缓存机制. 因为TLB中缓存的是GVA到GPA的转换关系，所以每一次虚拟主机切换都需要清空TLB，不然主机之间就会发生数据读取错误（因为各主机间都是GVA到GPA映射）, 而这种问题会导致虚拟机性能变得十分低下.
+
 内存的访问和更新通常是非常频繁的， 要维护影子页表中对应关系会非常复杂, 开销也较大. 同时影子页表的引入也意味着 KVM 需要为每个客户机进程的页表都要维护一套相应的影子页表，内存占用比较大，而且客户机页表和和影子页表也需要进行实时同步.
 
 ### 2. 扩展页表
@@ -871,6 +894,8 @@ ref:
 - [**内存虚拟化之基本原理**](https://www.codenong.com/cs106434119/)
 
 第二种方式，就是硬件的方式，Intel 的 EPT（Extent Page Table，扩展页表）技术. EPT页表存放在VMM内核空间，由VMM维护, 其转换过程由硬件完成, 因此比影子页表更高效.
+
+同时，CPU厂商还提供了TLB硬件虚拟化技术，以前的TLB只是标记GVA到GPA的映射关系，只有两个字段，现在扩充为了三个字段，增加了一个主机字段，并且由GVA到GPA的映射关系变成了GVA到HPA的对应关系，明确说明这是哪个虚拟机的GVA到HPA的映射结果.
 
 EPT转换过程: 通过客户机CR3寄存器将GVA转成GPA, 然后通过查询EPT来实现GPA转成HPA. EPT的控制权在VMM中, 只有当CPU工作在非根模式时才参与内存地址的转换.
 
@@ -1549,6 +1574,8 @@ Intel在内存虚拟化效率方面还引入了VPID（Virtual-processor identifi
 ref:
 - [四种主要网络 IO 虚拟化模型](https://xie.infoq.cn/article/489f746948c1ff8c0662c329f)
 
+IO虚拟化就是提供这些设备的虚拟化支持，其思想就是VMM截获客户操作系统对设备的访问请求，然后通过软件的方式来模拟真实设备的访问效果.
+
 方法:
 1. 设备模拟(软件实现)
 
@@ -1556,27 +1583,29 @@ ref:
 
     优点: 兼容性好, 不需要额外驱动
     缺点: 
-       1. 性能较差
+       1. 性能较差: io路径长, VMExit较多
        2. 模拟设备的功能特性支持不够多
 1. virtio(软件实现)
 
     在VMM和guest间定义一种全新的适应虚拟化环境的交互接口.
 
-    优点: 性能有所提升
+    优点: 性能有所提升: 减少VMExit次数
     缺点: 
        1. 兼容性差一点: 依赖guest安装特定驱动
        2. io压力大时, 后端驱动占用cpu较高
-1. 设备直接分配(硬件实现)
+1. 设备直接分配(pass-through, 即io透传, 硬件实现)
 
     将一个物理设备直接分配给guest, 此时io请求的链路很少或基本不需要VMM参与, 因此性能最佳.
 
-    优点: 性能非常好
+    优点: 性能非常好: 无需vmm处理
     缺点:
         1. 需要硬件设备的特性支持
         2. 一个设备只能分配给一个guest
         3. 很难支持动态迁移
 
     intel的实现是VT-d(Virtualization Technology For Directed I/O）特性, 一般在系统BIOS中可以看到相关的参数设置. Intel VT-d为虚拟机监控器提供了几个重要的能力： I/O设备分配、 DMA重定向、 中断重定向、 中断投递等.
+
+    I/O透传还需要主板支持: 在传统的X86服务器架构上，所有的IO设备通常有一个共享或集中式的DMA（直接内存访问），DMA是一种加速IO设备访问的方式。由于是集中式的，所以在VMM上管理多块网卡时其实使用的还是同一个DMA，如果让第一个Guest OS直接使用了第一块网卡，第二个Guest OS直接使用第二块网卡，但使用的DMA还是同一个，DMA就无法区分哪个Guest OS使用的是哪块网卡。而像Intel的VT-d就是用来处理这些映射问题的，以及处理各主机中断.
 
 1. 设备共享分配(硬件实现)
 
@@ -1590,6 +1619,10 @@ ref:
     缺点:
         1. 需要硬件设备的特性支持
         2. 很难支持动态迁移
+1. DPDK/SPDK:
+
+    优点: 用户态io, 无需内核参与
+    缺点: 对系统进行改造
 
 在虚拟机环境下，客户机使用的是GPA，客户机驱动也得使用GPA。但是设备在进行DMA操作的时候使用的是MPA(Memory Physical Address,内存物理地址)，于是IO虚拟化的关键问题就是如何在操作DMA时将GPA转换成MPA.
 

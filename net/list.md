@@ -93,6 +93,8 @@
 
 ## cloud
 - [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)
+
+    vxlan已成为目前网络虚拟化overlay的事实标准.
 - [VXLAN 基础教程：在 Linux 上配置 VXLAN 网络](https://juejin.cn/post/6844904133430870029)
 - [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
 - [云原生网络数据面加速方案浅析](https://bbs.huaweicloud.com/forum/thread-95490-1-1.html)
@@ -100,6 +102,9 @@
     用户态CNI可以基于DPDK、AF_XDP两种技术实现，两种技术各有优劣，互补关系，所以需要考虑同时支持DPDK、AF_XDP两种技术.
 
     裸机上针对VM间通信加速，DPDK基本处于垄断地位，留给AF_XDP的空间很小，针对这种场景的性能改进工作，想象空间很小. 如果从硬件可获得角度看，可以改用AF_XDP代替DPDK，性能上略有差距，但可以弥补硬件不可获得的缺陷.
+
+## Protocol
+- [【重识云原生】第四章云网络4.3.2节——VLAN技术](https://blog.csdn.net/junbaozi/article/details/124956412)
 
 ## 限速
 - [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)

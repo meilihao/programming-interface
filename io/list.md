@@ -30,6 +30,8 @@
 - [利用SPDK配合QLogic HBA创建FC target系统](https://qlogicbj.github.io/2020/09/08/qfc-spdk-target-v2/)
 
     但互联网上找不到QFC 4.5.3a
+- [SPDK iSCSI Target加速方案设计](https://blog.csdn.net/junbaozi/article/details/124001718)
+- [SPDK NVMe-oF Target](https://blog.csdn.net/junbaozi/article/details/124001718)
 - [H3C 全闪（NVMe）存储使用SPDK 加速前后端I/O](https://www.intel.cn/content/dam/www/public/cn/zh/documents/case-studies/h3c-nvme-storage-expedite-front-back-io-cn.pdf)
 - [基于SPDK的高效NVMe-oF target](https://www.sdnlab.com/21082.html)
 
@@ -100,6 +102,7 @@
 
     - [华为OceanStor 6800 V5高端混合闪存存储系统技术白皮书](https://e.huawei.com/cn/material/datacenter/storage/cb4e8571742743498c1012a8190e64c3)
     - [Huawei OceanStor 18500 and 18800 V5 Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://actfornet.com/ueditor/php/upload/file/20190104/1546532119794412.pdf)
+- [【重识云原生】第三章云存储3.3节——Ceph统一存储方案](https://blog.csdn.net/junbaozi/article/details/124003270)
 
 ## 多活
 - [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)
