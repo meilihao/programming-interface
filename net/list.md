@@ -102,9 +102,56 @@
     用户态CNI可以基于DPDK、AF_XDP两种技术实现，两种技术各有优劣，互补关系，所以需要考虑同时支持DPDK、AF_XDP两种技术.
 
     裸机上针对VM间通信加速，DPDK基本处于垄断地位，留给AF_XDP的空间很小，针对这种场景的性能改进工作，想象空间很小. 如果从硬件可获得角度看，可以改用AF_XDP代替DPDK，性能上略有差距，但可以弥补硬件不可获得的缺陷.
+- [VXLAN](https://support.huawei.com/enterprise/zh/doc/EDOC1100023543?section=j016)
+- [**IP报文在阿里云上的神奇之旅系列一：同地域内云上通信**](https://developer.aliyun.com/article/1054404)
 
 ## Protocol
 - [【重识云原生】第四章云网络4.3.2节——VLAN技术](https://blog.csdn.net/junbaozi/article/details/124956412)
+
+## SDN
+- [【重识云原生】第四章云网络4.8.1节——SDN总述](https://cloud.tencent.com/developer/article/2046685)
+- [【重识云原生】第四章云网络4.8.2.1节——OpenFlow概述](https://cloud.tencent.com/developer/article/2046686)
+- [【重识云原生】第四章云网络4.8.2.2节——OpenFlow协议详解](https://cloud.tencent.com/developer/article/2046688)
+- [【重识云原生】第四章云网络4.8.2.3节——OpenFlow运行机制](https://cloud.tencent.com/developer/article/2046692)
+- [【重识云原生】第四章云网络4.8.3.1节——Open vSwitch简介](https://cloud.tencent.com/developer/article/2046695)
+
+    vSwitch的早期代表是Linuxbridge，它在设计之初就是为了提供基本的网络连接，因此它只是模拟了ToR交换机的行为，并将自己接入到现有的物理网络中。这样实现的优点是，现有物理网络的理论和协议可以直接套用，不需要重复设计。缺点就是，作为物理网络的延伸，使得虚拟workload的网络与物理网络紧耦合，影响了虚拟化本身带来的诸如灵活，快速上线的优势。
+
+    随着网络虚拟化（network virtualization）技术的出现，为连接虚拟workload的网络提供了另一种可能。物理网络仍然由物理网络设备管理，虚拟workload的网络，单独由vSwitch管理，并且在现有物理网络（underlay）基础之上，再定义一个独立的overlay网络（例如VxLAN）。这个overlay网络不受物理网络设备控制，完全由vSwitch控制.
+- [【重识云原生】第四章云网络4.8.3.2节——Open vSwitch工作原理详解](https://cloud.tencent.com/developer/article/2046698)
+- [【重识云原生】第四章云网络4.8.4节——OpenStack与SDN的集成](https://cloud.tencent.com/developer/article/2046701)
+- [【重识云原生】第四章云网络4.8.5节——OpenDayLight](https://cloud.tencent.com/developer/article/2046704)
+
+     ODL项目成立于2013年4月，是由Linux基金会管理管理的开源SDN项目。项目的目的是提供一个开放的，全功能的，厂商中立的SDN解决方案.
+- [【重识云原生】第四章云网络4.8.6节——Dragonflow](https://blog.csdn.net/junbaozi/article/details/125530931)
+
+    Dragonflow目的是提供全功能的SDN解决方案.
+## offload
+- [【重识云原生】第四章云网络4.9.1节——网络卸载加速技术综述](https://cloud.tencent.com/developer/article/2046707)
+
+    OpenStack Pike版本中引入了对switchdev的支持，实现了Open vSwitch硬件卸载offloading功能.
+
+    目前业界主流智能网卡有四种实现方案：SoC、NP、FPGA、ASIC。
+
+    1. SoC方案在终端市场应用较成熟，硬件需要根据客户需求定制，部署周期较长，但是计算效率高，适合成熟算法及应用，功耗较低。
+    1. NP方案生态封闭，主流厂商已不再发布路标，不支持重编程，难以解耦，成本高于FPGA，但是功耗较低。
+    1. FPGA方案生态开放，在数据中心场景中得到广泛应用，可以重复编程实现特定应用，适合演进中的算法及应用，适用于网络转发等并行计算场景，该方案处理时延低，支持虚拟化，功耗适中。
+    1. ASIC方案，其硬件根据用户需求定制，开发成本昂贵，生产周期长，不具备灵活性，但是计算效率高，功耗较低，适合大规模成熟算法及应用。
+
+
+    智能网卡网络加速的技术实现:
+    1. 腾讯智能网卡采用FPGA+SoC架构，网络加速技术实现方面自研vDPA，支持VIRTIO-net卸载，能够实现虚拟化性能零损耗，数据面直通，软硬结合跟踪脏页的功能。
+- [【重识云原生】第四章云网络4.9.3.1节——DPDK技术综述](https://cloud.tencent.com/developer/article/2099341)
+- [【重识云原生】第四章云网络4.9.3.2节——DPDK原理详解](https://cloud.tencent.com/developer/article/2099589)
+- [【重识云原生】第四章云网络4.9.4.1节——智能网卡SmartNIC方案综述](https://cloud.tencent.com/developer/article/2099708)
+- [【重识云原生】第四章云网络4.9.4.2节——智能网卡实现](https://cloud.tencent.com/developer/article/2099530)
+
+    Smart NIC 的实现方式见[2021中国DPU行业发展白皮书](https://www.zhihu.com/search?q=%E8%B5%9B%E8%BF%AA%E9%A1%BE%E9%97%AE&search_source=Entity&hybrid_search_source=Entity&hybrid_search_extra=%7B%22sourceType%22%3A%22answer%22%2C%22sourceId%22%3A2279317557%7D)
+- [【重识云原生】第四章云网络4.9.4.3节——智能网卡使用场景-网络加速实现](https://cloud.tencent.com/developer/article/2101721)
+- [【重识云原生】第四章云网络4.9.5.1节下一代智能网卡——DPU综述](https://cloud.tencent.com/developer/article/2101722)
+
+    ![DPU竞争格局, 各家实现 from 赛迪顾问](https://ask.qcloudimg.com/http-save/yehe-9519988/1084dd572b6eaef39f914ac1b18c55d3.png?imageView2/2/w/1620)
+- [【重识云原生】第四章云网络4.9.6节——linux switchdev技术](https://cloud.tencent.com/developer/article/2108936)
 
 ## 限速
 - [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)

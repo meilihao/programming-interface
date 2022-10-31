@@ -2,6 +2,26 @@
 参考:
 - [VIRTIO & VHOST](https://zhuanlan.zhihu.com/p/38370357)
 - [virtIO之VHOST工作原理简析](https://www.cnblogs.com/ck1020/p/7204769.html)
+- [**【重识云原生】第四章云网络4.7.2节——virtio网络半虚拟化简介**](https://www.jianshu.com/p/0775347d86d4)
+- [【重识云原生】第四章云网络4.7.3节——Vhost-net方案](https://cloud.tencent.com/developer/article/2030947)
+- [【重识云原生】第四章云网络4.7.4节vhost-user方案——virtio的DPDK卸载方案](https://cloud.tencent.com/developer/article/2030949)
+- [【重识云原生】第四章云网络4.7.5节vDPA方案——virtio的半硬件虚拟化实现](https://cloud.tencent.com/developer/article/2035805)
+
+    为了解决高性能SRIOV网络的热迁移问题, 提出了vDPA.
+
+    vDPA(vhost Data Path Acceleration)即是让virtio数据平面不需主机干预的解决方案。该框架由Redhat提出，实现了virtio数据平面的硬件卸载。控制平面仍然采用原来的控制平面协议，当控制信息被传递到硬件中，硬件完成数据平面的配置之后，数据通信过程由硬件设备（智能网卡）完成，虚拟机与网卡之间直通。中断信息也由网卡直接发送至虚拟机不需要主机的干预。这种方式，控制面比较复杂，硬件难以实现.
+
+    Redhat提出的硬件vDPA架构，目前在DPDK和内核程序中均有实现，基本是未来的标准架构。Qemu支持两种方式的vDPA，一种是vhost-user，配合DPDK中的vDPA运行，DPDK再调用厂商用户态vDPA驱动；另一种方式是vhost-vdpa，通过ioctl调用到内核通用vDPA模块，通用vDPA模块再调用厂商硬件专有的vDPA驱动。
+
+    1) 软件vDPA: 软件vDPA也叫VF relay，由于需要软件把VF上接收的数据通过virtio转发给虚拟机（VM），如Mellanox在OVS-DPDK实现了这个relay，OVS流表由硬件卸载加速，性能上与SR-IOV VF直通（passthrough）方式比略有降低，不过实现了虚拟机（VM）的热迁移特性。
+
+    2) 硬件vDPA: 硬件vDPA实际上是借助virtio硬件加速，以实现更高性能的通信。由于控制面复杂，所以用硬件难以实现。厂商自己开发驱动，对接到用户空间DPDK的vDPA和内核vDPA架构上，可以实现硬件vDPA。目前Mellanox mlx5和Intel IFC对应的vDPA适配程序都已经合入到DPDK和kernel社区源码.
+
+    ![](https://ask.qcloudimg.com/http-save/yehe-9519988/57ca602b94b2d57e1e427e6ce4300ac1.png?imageView2/2/w/1620)
+
+    在硬件vDPA场景下，通过OVS转发的流量首包依然由主机上的OVS转发平面处理，对应数据流的后续报文由硬件网卡直接转发。
+
+    后来在Bluefield-2上，由于集成了ARM核，所以NVIDIA在与UCloud的合作中，将OVS的控制面也完全卸载到网卡到ARM核上，这样主机上就可以将OVS完全卸载到网卡上。
 - [*Virtio和Vhost介绍*](https://forum.huawei.com/enterprise/zh/thread-465473.html)
 - [Virtio网络的演化之路](https://cloud.tencent.com/developer/article/1540284)
 - [详解vhost-user协议及其在OVS DPDK、QEMU和virtio-net驱动中的实现](http://www.jeepxie.net/article/378987.html)
@@ -9,6 +29,7 @@
 - [UCloud云盘是全链路的改造: client端用了VHOST，网络端用RDMA，后端提交用SPDK - UCan下午茶武汉站，为你全面挖宝分布式存储](http://www.ciotimes.com/index.php?m=content&c=index&a=app_show&catid=67&id=163237)
 - [基于SPDK的UDisk全栈优化](/misc/pdf/io/02_Presentation_06_Full_Stack_Optimization_for_Udisk_with_SPDK_UCloud_Yutian.pdf)
 - [从linux设备驱动模型看virtio初始化](http://blog.chinaunix.net/uid-28541347-id-5820032.html)
+- [【重识云原生】第四章云网络4.7.6节——virtio-blk存储虚拟化方案](https://cloud.tencent.com/developer/article/2032186)
 
 vhost是一种 virtio 高性能的后端驱动实现. 原有virtio后端驱动的i/o要进过vmm(qemu)和host kernel, 但它进一步缩短了i/o路径, 不再经过vmm.
 

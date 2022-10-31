@@ -1,4 +1,6 @@
 # container
+Docker或者其他的虚拟化容器都是基于LXC 的技术，在基础的lxc 上包了一层代码，让LXC 更简单、更友好，更加好推广.
+
 容器实现封闭的环境主要要靠两种技术:
 1. namespace（命名空间, 资源隔离）
 
@@ -7,6 +9,8 @@
 1. cgroup（资源限制）
 
     明明整台机器有很多的 CPU、内存，但是一个应用只能用其中的一部分
+
+> lxc还使用了chroot: 创建一个虚拟的根目录文件系统，实质还是调用底层的文件系统，不过是建立一个虚拟的、可以跟其他容器的虚拟文件系统相互隔离、但共享底层的文件系统
 
 > 无论是容器，还是虚拟机，都依赖于内核中的技术，虚拟机依赖的是 KVM，容器依赖的是 namespace 和 cgroup 对进程进行隔离. 容器更加轻量.
 
@@ -41,6 +45,7 @@ Docker 本身提供了限制cpu和内存的使用.
 ## [namespace](https://man7.org/linux/man-pages/man7/namespaces.7.html)
 参考:
 - [Separation Anxiety: A Tutorial for Isolating Your System with Linux Namespaces](https://www.toptal.com/linux/separation-anxiety-isolating-your-system-with-linux-namespaces)
+- [【重识云原生】第六章容器6.1.5节——Docker核心技术Namespace](https://cloud.tencent.com/developer/article/2126063)
 
 对应到容器技术，为了隔离不同类型的资源，Linux 内核里面实现了以下几种不同类型的 namespace
 - UTS，对应的宏为 CLONE_NEWUTS，表示不同的 namespace 可以配置不同的 hostname
@@ -412,7 +417,9 @@ drwxr-xr-x  3 root root 0 7月  15 14:27 user.slice/
 	```
 
 ## cgroup v1/2
-![](/misc/img/container/20200714222559.png) from [cgroupv2-fosdem.pdf](https://chrisdown.name/talks/cgroupv2/cgroupv2-fosdem.pdf)
+ref:
+- [【重识云原生】第六章容器6.1.7.2节——cgroups原理剖析](https://blog.csdn.net/junbaozi/article/details/126680898)
+- ![](/misc/img/container/20200714222559.png) from [cgroupv2-fosdem.pdf](https://chrisdown.name/talks/cgroupv2/cgroupv2-fosdem.pdf)
 
 ## cgroup v2
 CGroup V2 在 Linux Kernel 4.5中被引入，并且考虑到其它已有程序的依赖，V2 会和 V1 并存几年. 针对于 CGroup V1 中 Subsystem, Herarchy, CGroup 的关系混乱，CGroup V2 中，引入 unified hierarchy 的概念，即只有一个 Hierarchy, 即将所有的controller挂载到unified hierarchy，仍然通过 mount 来挂载 CGroup V2:
