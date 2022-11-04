@@ -3,6 +3,14 @@ ref:
 - [**重识云原生**](https://blog.csdn.net/junbaozi/article/details/123101731)
 - [【重识云原生】第2.5节——商用云主机方案](https://www.jianshu.com/p/3d89e59c982b)
 
+## 基础设施布局
+- [阿里云基础设施能力概览](https://infrastructure.aliyun.com/)
+
+	- [基础设施科技创新巡礼](https://infrastructure.aliyun.com/innovations)
+	- [浪潮助力ODCC和阿里联合推出的“方升架构”落地](https://zhuanlan.zhihu.com/p/367143199)
+
+		开放数据中心委员会ODCC和阿里联合宣布推出第四代数据中心服务器硬件规范 -- “方升架构”
+
 ## 裸金属
 ### 华为HCS裸金属
 ref:

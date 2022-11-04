@@ -1,5 +1,8 @@
 # books
 
+## arch
+- [计算机体系结构基础 - LoongArch](https://foxsen.github.io/archbase/index.html)
+
 ## bpf
 ### Linux Observability with BPF/Linux内核观测技术BPF
 - [BPF视角下的Linux可观察性](https://github.com/learnre/Linux-Observability-with-BPF)

@@ -28,3 +28,11 @@
 
 	代码在[learning.gooop/gooop](https://gitee.com/ioly/learning.gooop/tree/master/gooop/etcd/raft)
 -[**如何实现一个 Paxos**](https://www.tuicool.com/articles/QRbiQzv)
+
+## 实现
+- [oceanbase/src/logservice/palf/election](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE/src/logservice/palf/election)
+
+	- [开源数据库OceanBase代码导读](https://www.zhihu.com/column/c_1386628099518402560)
+	- [OceanBase 数据库源码解读之模块结构](https://developer.aliyun.com/article/785281)
+	- [Oceanbase PaxosStore 源码阅读](https://zhuanlan.zhihu.com/p/395197545)
+	- [oceanbase源码阅读（1）程序启动](https://wangcy6.github.io/post/plan/oceanbase_day1/)

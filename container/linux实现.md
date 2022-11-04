@@ -51,6 +51,8 @@ Docker 本身提供了限制cpu和内存的使用.
 - UTS，对应的宏为 CLONE_NEWUTS，表示不同的 namespace 可以配置不同的 hostname
 - User，对应的宏为 CLONE_NEWUSER，表示不同的 namespace 可以配置不同的用户和组
 - Mount，对应的宏为 CLONE_NEWNS，表示不同的 namespace 的文件系统挂载点是隔离的
+
+	Mount会为隔离空间创建独立的mount节点树, 而chroot只改变了当前上下文的根mount节点位置, 从而影响文件系统查找文件和目录的结果.
 - PID，对应的宏为 CLONE_NEWPID，表示不同的 namespace 有完全独立的 pid，也即一个 namespace 的进程和另一个 namespace 的进程，pid 可以是一样的，但是代表不同的进程
 - Network，对应的宏为 CLONE_NEWNET，表示不同的 namespace 有独立的网络协议栈
 - IPC, 对应的宏为 CLONE_NEWIPC
@@ -348,6 +350,8 @@ register_pernet_device 函数注册了一个 loopback_net_ops，在这里面，�
 - [docker cgroup 技术之memory（首篇）](https://www.cnblogs.com/charlieroro/p/10180827.html)
 
 cgroup 全称是 control group，顾名思义，它是用来做“控制”的, 即控制资源的使用. 当前最新版本是cgroup v2(`grep cgroup /proc/filesystems`时会看到cgroup2).
+
+> cgrouptools: `apt install cgroup-tools/dnf install libcgroup-tools`
 
 首先，cgroup 定义了下面的[一系列子系统(subsystem也称为resource controller)](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/cgroup_subsys.h)，每个子系统用于控制某一类资源:
 - cpuset，可以为 cgroup 中的进程分配单独的 CPU 节点或者NUMA节点, 取代了一起的cpu affinity功能
