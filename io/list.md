@@ -9,6 +9,7 @@
 
     零拷贝技术的几个实现手段包括：mmap+write、sendfile、sendfile+DMA 收集、splice 等.
 - [下一代数据存储技术研究报告(2021年)-210715.pdf](https://pdf.dfcfw.com/pdf/H3_AP202107151503981150_1.pdf)
+- [<<阿里云存储产品及应用白皮书>>]
 
 ## io_uring
 - [Linux 异步 I/O 框架 io_uring：基本原理、程序示例与性能压测](https://arthurchiao.art/blog/intro-to-io-uring-zh/)
