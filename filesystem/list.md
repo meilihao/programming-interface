@@ -21,6 +21,7 @@
 - [Linux网络文件系统的实现与调试](https://www.cnblogs.com/wahaha02/p/9559345.html)
 - [NFS文件系统协议及解析概要](https://zhuanlan.zhihu.com/p/58095846)
 - [NFS文件锁一致性设计原理解析](https://developer.aliyun.com/article/771329)
+- [Datenlord | 重新思考Rust Async - 如何实现高性能IO](https://juejin.cn/post/7036993784210685965)
 
 ## fs
 - [第4章 ext文件系统机制原理剖析](https://www.cnblogs.com/f-ck-need-u/p/7016077.html)
