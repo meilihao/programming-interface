@@ -337,6 +337,7 @@ root可使用 mknod 命令创建设备文件.
 常见的硬件设备及其文件名称:
 - IDE 设备 /dev/hd[a-d]
 - SCSI/SATA/U 盘 /dev/sd[a-p]
+- virtio设备: /dev/vd[a-z]
 - 软驱 /dev/fd[0-1]
 - 打印机 /dev/lp[0-15]
 - 光驱 /dev/cdrom

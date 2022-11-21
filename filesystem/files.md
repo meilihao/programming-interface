@@ -38,12 +38,13 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 	- systemd : systemd的配置目录
 	- systemd/system/*.wants : 所有服务的启动脚步
 	- X11 : x-window的配置文件
-- /home : 存放每个用户的主目录
+- /home : 存放每个用户的主目录, 但不包括root
 - /lib* : /usr/lib*的软连接, 存放so和内核模块
-- lost+found : 保存丢失的文件, 不恰当的关机操作和磁盘错误均会导致文件丢失, 这些会丢失的文件会临时放在这里. 系统重启后, 引导运行fsck时就会发现这些文件. 每个ext4分区均有lost+found.
+- lost+found : 保存丢失的文件, 不恰当的关机操作和磁盘错误均会导致文件丢失, 这些会丢失的文件片段会临时放在这里. 系统重启后, 引导运行fsck时就会发现这些文件. 每个ext4分区均有lost+found.
 - /media : 移动设备挂载点, 比如u盘, 光盘等
 - /mnt : 其他文件系统的**临时**挂载点
-- /opt : 附加应用软件包安装位置
+- /opt : 第三方应用软件包安装位置
+- /proc : 虚拟文件系统, 存放kernel config和status
 - /root: root的主目录
 - /run : 外部设备的自动挂载点
 - /tmp : 存放临时文件
@@ -71,6 +72,13 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 - /var : 不可自动销毁的缓存文件、日志记录
 
 	- log : 存放各种应用的日志文件, **需定期清理**
+
+		- boot.log : 系统开机自检事件及引导过程等信息
+		- lastlog : 用户登录成功时间、终端名称及 IP 地址等信息
+		- btmp : 记录登录失败的时间、终端名称及 IP 地址等信息
+		- messages : 系统及各个服务的运行和报错信息
+		- secure : 系统安全相关的信息
+		- wtmp : 系统启动与关机等相关信息
 	- lib : 存放系统正常运行时需要改变的库文件
 	- spool : 是mail, new, 打印机队列和其他队列输入, 输出的缓冲目录
 	- tmp : 允许比/tmp存放更大的文件
