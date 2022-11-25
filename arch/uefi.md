@@ -31,7 +31,7 @@ UEFI能迅速取代BIOS，得益于UEFI相对BIOS的几大优势:
 ## 趋势
 systemd-boot是为现代硬件设计的，Fedora也正在计划迁移到Systemd-boot放弃grub2. 以及英特尔计划在 2020 年结束终止支持 Legacy BIOS.
 
-20年之后的现在，UEFI已经变得越来越传统，曾经的屠龙骑士变成了恶龙，业界呼唤新的方案，Intel也不失时机的提出了[ModernFW, **实验性的**](https://github.com/intel/ModernFW). ModernFW基于TianoCore, 是一种从TianoCore派生的轻量级实现, 是一种为云服务器平台之类的机器构建最低可行平台固件的实验方法.
+20年之后的现在，UEFI已经变得越来越传统，曾经的屠龙骑士变成了恶龙，业界呼唤新的方案，Intel也不失时机的提出了[ModernFW, **实验性的(已废弃)**](https://github.com/intel/ModernFW). ModernFW基于TianoCore, 是一种从TianoCore派生的轻量级实现, 是一种为云服务器平台之类的机器构建最低可行平台固件的实验方法.
 
 ## 组成
 UEFI提供给操作系统的接口分为两部分:
