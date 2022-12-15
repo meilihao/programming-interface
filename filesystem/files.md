@@ -23,6 +23,8 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 
 	- crontab : 系统定时任务的配置
 	- fstab : 开机启动时自动挂载的分区列表
+
+		initramfs 包含 /etc/fstab, 因此编辑fstab后最好更新initramfs. 见过centos7删除fstab里的一个分区, 未更新重启后导致系统找不到该分区而进入`emergency.target`
 	- group : 保存用户组的信息
 	- hosts : hostname配置
 	- ld.so.conf : 记录搜索so目录的文件
