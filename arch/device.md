@@ -3,6 +3,7 @@ ref:
 - [pcie基础概念](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzU4MTczMDg1Nw==&action=getalbum&album_id=1337043626001661952&scene=173&from_msgid=2247483660&from_itemidx=1&count=3&nolastread=1#wechat_redirect)
 - [PCIE Configuration Space – Class Code即pci code and id assignment specification](https://blog.ladsai.com/pci-configuration-space-class-code.html)
 - [pcie Configuration Space访问方法](https://blog.csdn.net/weixin_45279063/article/details/116988334)
+- [浅谈PCI Express体系结构(一 ~ 三)](https://cloud.tencent.com/developer/article/1848375)
 
 PCIe tree就是PCIe specification定义的了PCIe系统的拓扑结构, 定义了这个拓扑，所有的设备内部的PCIe设备都可以抽象对应到一颗倒立的“树”上来.
 
@@ -245,6 +246,9 @@ ref:
 - [NTB调试常见问题指南](https://blog.51cto.com/xiamachao/1794555)
 - [NTB的地址映射和地址转换](https://blog.csdn.net/linjiasen/article/details/110563838)
 - [linux NTB 的测试工具](https://blog.csdn.net/linjiasen/article/details/104532342)
+- [Switchtec NTB Demo](https://asciinema.org/a/125573)
+
+非透明桥技术是随着多处理器技术发展的.
 
 ### 原理
 

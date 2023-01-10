@@ -253,7 +253,7 @@ ref:
 
 ```bash
 # iscsiadm --mode discovery --type sendtargets -p <IP of tape machine>
-# iscsiadm --mode node [--targetname "iqn.2011-04.com.nia:mhvtl:mhvtl:stgt:1"] -p <IP of tape machine> --login
+# iscsiadm --mode node [--targetname "iqn.2011-04.com.nia:mhvtl:mhvtl:stgt:1"] -p <IP of tape machine> --login # 在/dev/tape/by-id生成软连接可能有延迟
 # udevadm info /dev/sg11 # sg11是sch0. 如果是iscsi导出的vtl, 那么ID_PATH包含target iqn; 会根据ID_SERIAL和ID_SCSI_SERIAL在`/dev/tape/by-id`下创建软连接, 但ID_SCSI_SERIAL可能没有比如mhvtl
 # udevadm info /dev/st0 # 会根据ID_SERIAL和ID_SCSI_SERIAL在`/dev/tape/by-id`下创建软连接
 # sg_inq -p 0x80 /dev/sg11 # 可获取`Unit serial number`, 但与`udevadm info`获取的ID_SERIAL有差异. 比如mhvtl: Unit serial number=XYZZY_A; ID_SERIAL=SSTK_L700_XYZZY_A

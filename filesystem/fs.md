@@ -221,6 +221,17 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 
 `/sys`目录:
 - block : 系统中当前所有的块设备所在，按照功能来说放置在 /sys/class 之下会更合适，但只是由于历史遗留因素而一直存在于/sys/block, 但从 2.6.22 开始就已标记为过时，只有在打开了 CONFIG_SYSFS_DEPRECATED配置下编译才会有这个目录的存在，并且**在 2.6.26 内核中已正式移到 /sys/class/block**, 旧的接口 /sys/block为了向后兼容保留存在，但其中的内容已经变为指向它们在 /sys/devices/ 中真实设备的符号链接文件
+
+	- sda : scsi盘
+
+		- device: 设备信息
+
+			- state: 设备状态. `running`即在线
+
+				`echo offline > /sys/block/sda/device/state`可将磁盘offline
+			- delete: 用于从SCSI子系统删除磁盘
+
+				`echo 1 > /sys/block/device-name/device/delete`
 - bus : 总线: pci-e, scsi, usb等, 是内核设备按总线类型分层放置的目录结构，devices 中的所有设备都是连接于某种总线之下，在这里的每一种具体总线之下可以找到每一个具体设备的符号链接，它也是构成 Linux 统一设备模型的一部分
 
 	- scsi : scsi总线
@@ -237,6 +248,7 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 		- host<H> : 光纤口
 
 			- port_id : HBA端口的 24位交换机端口ID
+			- port_name : 存储端口的64位port name
 			- issues_lip : 重置HBA端口，重新尝试发现存储端口
 			- symbolic_name : 保持光纤卡型号, 固件版本, 使用的qla2xxx驱动版本
 	- fc_remote_ports : 主机到存储端口链路信息（包含未给主机分配存储的链路信息）
@@ -250,7 +262,7 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 				故障链路不再处理任何新的IO。默认dev_loss_tmo值视具体HBA卡而定，Qlogic默认是35秒，Emulex默认是30秒。HBA卡自带驱动可以覆盖这个 参数值。dev_loss_tmo最大值600秒，如果dev_loss_tmo值小于0或者大于600，HBA自带超时值生效。
 			- fast_io_fail_tmo : IO故障等待时间. 链路波动情况，IO尝试多长时间
 			- port_state: 链路状态
-	- fc_transport : 已分配存储信息
+	- fc_transport : 已分配的target信息, 在fc client端显示.
 
 		- targetH:B:T : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
 

@@ -50,13 +50,20 @@
     1. 根据协议
 
       - PCIe
+      - NVME
+
+        传输速度: 32Gbbps
       - SATA(serial advanced technology attachment)
+
+        传输速度: 6Gbbps
 
         sata盘使用AHCI传输模式. AHCI需要主板,磁盘和os都支持才行.
 
         只有一个端口, 通过SATA转接卡上的端口选择芯片模拟出两个端口, 但实际上在某刻只有一个端口是活动的.
       - SCSI
       - SAS(serial attached scsi), 新一代scsi技术, 速度更快, cpu占用更低
+
+        传输速度: 12Gbbps
 
         有两个端口
       - FC
