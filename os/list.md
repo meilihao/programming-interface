@@ -52,3 +52,12 @@
 ## hugepage
 - [**HUGEPAGES原理概念**](https://ustack.io/2019-11-21-Linux%E4%B9%8Bhugepages%E5%8E%9F%E7%90%86%E6%A6%82%E5%BF%B5.html)
 - [为什么 HugePages 可以提升数据库性能](https://draveness.me/whys-the-design-linux-hugepages/)
+
+## news
+- [全场景创新，这些厉害的 openEuler 技术创新，你值得拥有](https://linux.cn/article-15435-1.html)
+
+	1. 可编程内核：系统调度的极限追求
+	1. 在线/离线业务混部：资源利用率和系统性能的极限平衡追求
+	1. 软硬实时混部：多层次确定性时延需求满足
+	1. 异构互联：泛架构算力存储统一调度
+	1. sysMaster： 安全可靠机制可靠的服务管理系统

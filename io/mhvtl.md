@@ -205,6 +205,7 @@ CAPACITY=500
 # mtx -f /dev/sg13 transfer <src_slot> <dest_slot> # 导出/导入磁带. 飞康vtl模拟ADIC-Scalar 100-00004导出时磁带直接进入其虚拟仓库, 而不会出现在邮件槽, 将该磁带重新导入时, 它直接出现在正常槽位而非邮件槽; 而mhvtl的STK L700会出现在邮件槽.
 # mtx -f /dev/sg13 inquiry # 获取产商信息
 # mtx -f /dev/sg13 load 1 0 # 将StorageElement 1位置上的磁带设备放置到Data Transfer Element 3的磁带机中. L80是如果驱动器为空就可用放入磁带; L700是驱动器必须是逐个顺序使用, 否则报错. load模拟的是真实操作因此是存在延迟的, 即load后查看其status时file_number可能还是-1. 但`General status bits`有变化: `DR_OPEN`->`ONLINE`->`BOT ONLINE`.
+# dd if=/dev/nst0 bs=65000 count=1 | od -a | head # 查看磁带头. bareos标记时会在开头写入63KB左右的数据
 # mt -f /dev/st0 status # 有磁带: file_number=0;没有磁带: file_number=-1. file_number表示磁带上的文件序号,从0开始. mt传送命令到磁带驱动器. [Density code](https://github.com/markh794/mhvtl/blob/master/usr/vtltape.h#L171)
 # tar -cvf /dev/nst0 /etc/hosts # 测试向磁带中归档数据. st0为/dev/sg13磁带库中的第一个磁带机, 可通过`lsscsi -g`获取
 # tar -tvf /dev/nst0
