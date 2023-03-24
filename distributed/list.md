@@ -30,9 +30,24 @@
 -[**如何实现一个 Paxos**](https://www.tuicool.com/articles/QRbiQzv)
 
 ## 实现
-- [oceanbase/src/logservice/palf/election](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE/src/logservice/palf/election)
+- [oceanbase/src/logservice/palf/election](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE_BP3/src/logservice/palf/election)
 
 	- [开源数据库OceanBase代码导读](https://www.zhihu.com/column/c_1386628099518402560)
 	- [OceanBase 数据库源码解读之模块结构](https://developer.aliyun.com/article/785281)
 	- [Oceanbase PaxosStore 源码阅读](https://zhuanlan.zhihu.com/p/395197545)
 	- [oceanbase源码阅读（1）程序启动](https://wangcy6.github.io/post/plan/oceanbase_day1/)
+
+## Distributed Consensus Framework
+ref:
+- [OceanBase的一致性协议为什么选择 Paxos 而不是 Raft?](modb.pro/db/27698)
+- [Have we reached consensus on consensus?](https://tanxinyu.work/have-we-reached-consensus-on-consensus/)
+	- [**Have we reached consensus on consensus? pptx**](https://vevotse3pn.feishu.cn/file/boxcnBKfW8q9E61Bfi314R0hOfe)
+
+		[本地](/misc/pdf/dc/Have we reached consensus on consensus 公开版.pptx)
+
+
+- [opengauss : Distributed Consensus Framework](https://gitee.com/opengauss/DCF)
+
+	- [DCF](https://docs.opengauss.org/zh/docs/3.1.1/docs/CharacteristicDescription/DCF.html)
+- [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
+- [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE_BP3/src/logservice/palf)
