@@ -10,3 +10,5 @@
 
 ## 产品
 - [Milk-V Pioneer](https://news.mydrivers.com/1/903/903763.htm)
+
+	[SOPHON SG2042是基于平头哥的玄铁IP](https://www.eefocus.com/article/1439667.html)

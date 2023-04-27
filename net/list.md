@@ -54,6 +54,8 @@
 
     ps: 当前在云数据中心互联场景中，IP 骨干网采用 MPLS/SR-MPLS 技术，数据中心网络通常使用 VxLAN 技术，骨干网与数据网络之间通过网关设备实现 VxLAN 和 MPLS 相互映射.
 - [G-SRv6技术详细介绍与应用场景解析.pdf](/misc/img/net/srv6/G-SRv6技术详细介绍与应用场景解析.pdf)
+- [使用AF_XDP Socket更高效的网络传输](https://colobu.com/2023/04/17/use-af-xdp-socket/)
+- [每秒1百万的包传输，几乎不耗CPU的那种](https://colobu.com/2023/04/02/support-1m-pps-with-zero-cpu-usage/)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)

@@ -13,6 +13,7 @@
 - [<<阿里云存储产品及应用白皮书>>]
 
 ## io_uring
+- [新一代异步 IO 框架 io_uring ｜ 得物技术](https://my.oschina.net/u/5783135/blog/8657262)
 - [Linux 异步 I/O 框架 io_uring：基本原理、程序示例与性能压测](https://arthurchiao.art/blog/intro-to-io-uring-zh/)
 - [Alibaba Cloud Linux 2 LTS 率先提供支持 io_uring](https://kernel.taobao.org/2020/06/io_uring-in-Alibaba-Cloud-Linux-2-LTS/)
 - [下一代异步 IO io_uring 技术解密](https://kernel.taobao.org/2020/08/Introduction_to_IO_uring/)

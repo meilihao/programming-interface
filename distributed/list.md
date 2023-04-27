@@ -2,6 +2,7 @@
 ## base
 - [分布式系统设计中的通用方法](https://zhuanlan.zhihu.com/p/498068994)
 - [深入浅出paxos](https://rebootcat.com/2020/12/05/paxos/)
+- [分布式系统设计模式](https://colobu.com/2022/06/26/distributed-system-design-patterns/)
 
 ## 进阶
 - [深度解析：分布式存储系统实现快照隔离的常见时钟方案](https://www.tuicool.com/articles/eEJB7rI)
