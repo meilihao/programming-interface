@@ -215,12 +215,15 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 ## 特殊文件系统
 
 ### /sys
+ref:
+- [sysfs、udev 和 它们背后的 Linux 统一设备模型](https://www.binss.me/blog/sysfs-udev-and-Linux-Unified-Device-Model/)
+
 `/sys`是一种在内存中的虚拟文件系统sysfs的mount point, 提供了有关系统上可用设备, 设备的配置及其状态的信息. sysfs的指定原则之一是`/sys`里的每个文件都只表示下层设备的一个属性.
 
 可通过`udevadm`查询设备信息, 触发事件, 控制vdevd守护进程, 以及监视udev和内核的事件, 比如查看ssd信息`udevadm info -a -n nvme0n1`.
 
 `/sys`目录:
-- block : 系统中当前所有的块设备所在，按照功能来说放置在 /sys/class 之下会更合适，但只是由于历史遗留因素而一直存在于/sys/block, 但从 2.6.22 开始就已标记为过时，只有在打开了 CONFIG_SYSFS_DEPRECATED配置下编译才会有这个目录的存在，并且**在 2.6.26 内核中已正式移到 /sys/class/block**, 旧的接口 /sys/block为了向后兼容保留存在，但其中的内容已经变为指向它们在 /sys/devices/ 中真实设备的符号链接文件
+- block : 系统中当前所有的块设备所在，按照功能来说放置在 /sys/class 之下会更合适，但只是由于**历史遗留**因素而一直存在于/sys/block, 但从 2.6.22 开始就已标记为过时，只有在打开了 CONFIG_SYSFS_DEPRECATED配置下编译才会有这个目录的存在，并且**在 2.6.26 内核中已正式移到 /sys/class/block**, 旧的接口 /sys/block为了向后兼容保留存在，但其中的内容已经变为指向它们在 /sys/devices/ 中真实设备的符号链接文件
 
 	- sda : scsi盘
 
@@ -232,13 +235,16 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 			- delete: 用于从SCSI子系统删除磁盘
 
 				`echo 1 > /sys/block/device-name/device/delete`
-- bus : 总线: pci-e, scsi, usb等, 是内核设备按总线类型分层放置的目录结构，devices 中的所有设备都是连接于某种总线之下，在这里的每一种具体总线之下可以找到每一个具体设备的符号链接，它也是构成 Linux 统一设备模型的一部分
+- bus : 内核设备按总线类型(pci-e, scsi, usb等)分类放置的目录结构，devices 中的所有设备都是连接于某种总线之下，在这里的每一种具体总线之下可以找到每一个具体设备指向`/sys/devices/`的符号链接，它也是构成 Linux 统一设备模型的一部分
 
 	- scsi : scsi总线
 
 		- drivers : scsi总线上的驱动程序
 		- devices : scsi设备, 名称是SCSI设备在Linux系统中的逻辑地址映射
-- class : 按照设备功能分类的设备模型(比如声卡, 显卡, 输入设备, 网卡)组织的一颗树
+
+	> 对应 kernel 中的 struct bus_type
+	> 某个总线目录之下的 drivers 目录包含了该总线所需的所有驱动的符号链接
+- class : 按照设备功能分类的设备模型(比如声卡, 显卡, 输入设备, 网卡)组织的一颗树, 里面也是指向`/sys/devices/`下对应设备的符号链接
 
 	> /sys/class目录下有三个主要文件夹跟 fibre channel相关的文件夹fc_transport、fc_remote_ports，fc_hosts.
 
@@ -269,15 +275,25 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 			- port_id : 存储端口的 24位交换机端口ID
 			- node_name : 存储端口的64位node name
 			- port_name : 存储端口的64位port name
+	- graphics: 图形设备
 
-- dev : 区分块设备和字符设备的设备信息. 它维护一个按字符设备和块设备的主次号码 (major:minor)链接到真实的设备(/sys/devices下)的符号链接文件，是在内核 2.6.26 首次引入
-- devices : 正确表示所有找到的设备, 是内核对系统中所有设备的分层次表达模型，也是 /sys 文件系统管理设备的最重要的目录结构
+	> 对应 kernel 中的 struct class
+
+- dev : 设备驱动程序分类(块设备和字符设备)的设备信息. 它维护一个按字符设备和块设备的主次号码 (major:minor)链接到真实的设备(/sys/devices下)的符号链接文件，是在内核 2.6.26 首次引入
+	> 对应 kernel 中的 struct device_driver
+- devices : 包含所有被发现的注册在各种总线上的各种物理设备, 是内核对系统中所有设备的分层次表达模型，也是 /sys 文件系统管理设备的最重要的目录结构
+
+	所有的物理设备都按其在总线上的拓扑结构来显示, 除了 platform devices 和 system devices:
+	- platform devices 一般是挂在芯片内部高速或者低速总线上的各种控制器和外设, 能被 CPU 直接寻址
+	- system devices 不是外设, 是芯片内部的核心结构, 比如 CPU，timer 等, 一般没有相关的driver, 但是会有一些体系结构相关的代码来配置它们.
+
+	> 对应 kernel 中的 struct device
 - firmware : 特定于平台的子系统的接口, 如ACPI. 是系统加载固件机制对用户空间的接口，关于固件有专用于固件加载的一套API
 - fs : 内核知道的一些但不是全部文件系统的目录, 是用于描述系统中所有文件系统，包括文件系统本身和按文件系统分类存放的已挂载点，但目前只有 fuse,gfs2 等少数文件系统支持sysfs 接口，一些传统的虚拟文件系统(VFS)层次控制参数仍然在 sysctl (/proc/sys/fs) 接口中
-- hypervisor
+- hypervisor: 如果开启了 Xen, 这个目录下会提供相关属性文件
 - kernel : 内核所有可调整参数的位置及内核的内部信息, 比如高速缓存和虚拟内存状态
 - module : kernel所有模块的信息，不论这些模块是以内联(inlined)方式编译到内核映像文件(vmlinuz)中还是编译为外部模块(ko文件)，都可能会出现在 /sys/module 中
-- power : 系统电源状态的几种详细信息
+- power : 电源选项, 可用于控制整个机器的电源状态, 如写入控制命令进行关机、重启等
 
 ## /proc
 `/proc`文件系统是一种虚拟文件系统, 所有信息是**内存的映射**, 以文件系统目录和文件形式,提供一个指向内核数据结构的接口, 可系统运行中修改kernel参数, 内核产生的所有状态信息和统计信息均在里面.
