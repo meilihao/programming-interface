@@ -12,3 +12,6 @@
 - [Milk-V Pioneer](https://news.mydrivers.com/1/903/903763.htm)
 
 	[SOPHON SG2042是基于平头哥的玄铁IP](https://www.eefocus.com/article/1439667.html)
+- [openEuler RISC-V 成功适配 LicheePi 4A 开发板，推动 RISC-V 生态发展](https://www.openeuler.org/zh/blog/20230506-riscv/20230506-riscv.html)
+
+	LicheePi 4A 是首款性能对标树莓派 4 的 RISC-V 开发板，基于阿里巴巴平头哥 TH1520 芯片，搭载 4 核 2.0GHz C910 内核、4TOPS NPU 和 50GFLOPS GPU，为开发者提供强大的性能，满足各种应用场景需求.

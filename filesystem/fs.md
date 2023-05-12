@@ -241,6 +241,10 @@ ref:
 
 		- drivers : scsi总线上的驱动程序
 		- devices : scsi设备, 名称是SCSI设备在Linux系统中的逻辑地址映射
+	- usb
+		- devices
+			- <device>
+				- serial: usb序列号, 编码在usb EEPROM中
 
 	> 对应 kernel 中的 struct bus_type
 	> 某个总线目录之下的 drivers 目录包含了该总线所需的所有驱动的符号链接
@@ -276,6 +280,9 @@ ref:
 			- node_name : 存储端口的64位node name
 			- port_name : 存储端口的64位port name
 	- graphics: 图形设备
+	- dmi
+		- id
+			- product_uuid : 主板uuid, 来自bios dmi, 仅适用于x86
 
 	> 对应 kernel 中的 struct class
 
@@ -380,6 +387,7 @@ ref:
 - partitions : 记录了系统中每个磁盘分区的主辅设备编号、大小和名称
 - scsi : scsi子系统信息, 比如连接的设备或驱动程序版本
 - self : 访问procfs的进程信息
+	- sessionid: 标识特定 Linux 登录会话的 ID, 最好将其与 /proc/sys/kernel/random/boot_id 结合使用. 部分发行版不支持总是返回`-1`
 - slabinfo : 内核缓存信息
 - stat : 系统的各种状态信息
 - swaps : 交换空间使用情况
@@ -414,6 +422,8 @@ ref:
 				DEFAULT_CONSOLE_LOGLEVEL,  # 默认终端级别
 			};
 			```
+			- random : 随机数相关
+				- boot_id : boot id, see `hostnamectl`
 	- net : 网络和套接字的设置
 	- vm : 内存管理设置, 包括buffer和cache管理
 
