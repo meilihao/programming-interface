@@ -12,3 +12,8 @@
 	SLOB （simple list of blocks）分配器是 Linux 内核中三个可用的内存分配器之一. 另外两个是 SLAB (slab allocator) 和 SLUB（the unqueued slab allocator）.
 
 	Vlastimil 在邮件中提到的是放弃 SLOB 和 SLAB 两个内存分配器，只留下 SLUB. 到目前为止，其他上游开发人员都赞成弃用和移除 SLOB，而移除 SLAB 可能需要更多时间.
+- page大小
+
+	[在 OS X 和早期的iOS里，页大小均为4K, macos也一直沿用4k; 但之后基于A7和A8的iOS里，采用虚拟内存每页16K，物理内存每页4K；基于A9或更新CPU的iOS里，页大小均为16K.](https://www.jianshu.com/p/961d819096a7)
+
+	在x86通常为 4k（4096）, 在 ARM64 中通常为 16K.

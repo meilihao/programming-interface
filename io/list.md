@@ -11,6 +11,9 @@
     零拷贝技术的几个实现手段包括：mmap+write、sendfile、sendfile+DMA 收集、splice 等.
 - [下一代数据存储技术研究报告(2021年)-210715.pdf](https://pdf.dfcfw.com/pdf/H3_AP202107151503981150_1.pdf)
 - [<<阿里云存储产品及应用白皮书>>]
+- [Advanced Format](https://wiki.archlinux.org/title/Advanced_Format)
+
+    - [教你把 NVMe SSD 切换到4Kn模式](https://www.zhihu.com/tardis/zm/art/355590811)
 
 ## io_uring
 - [新一代异步 IO 框架 io_uring ｜ 得物技术](https://my.oschina.net/u/5783135/blog/8657262)
