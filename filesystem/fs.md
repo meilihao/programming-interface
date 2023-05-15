@@ -331,6 +331,8 @@ ref:
 	- oom_adj : OOM Killer分值, range is [-16, 15]和-17. -17表示禁止被OOM机制处理. 其他具体值是用2^N来体现的, 因此n是正数时容易被OOM Killer选定.
 	- oom_score_adj : 用于替换oom_adj, range is [-1000, 1000], -1000即禁止被OOM机制处理
 	- limits : limits
+	- ioports : I/O地址空间
+	- iomem: 物理地址的分配情况
 - acpi : 大多数现代桌面和笔记本支持的高级配置和电源接口. acpi主要是pc技术, 服务器上通常被禁用
 - asound : alsa声卡驱动接口
 - buddyinfo : buddy内存分配信息
