@@ -5,6 +5,9 @@
 
 ![基本指令集类型](https://suda-morris.github.io/blog/assets/img/riscv_instruction_type.6459e601.png)
 
+## 指令集
+RISC-V只支持小端格式(little-endian).
+
 ## 寄存器
 ![](/misc/img/arch/Kazam_screenshot_00000.png)
 
