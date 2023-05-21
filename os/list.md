@@ -61,3 +61,4 @@
 	1. 软硬实时混部：多层次确定性时延需求满足
 	1. 异构互联：泛架构算力存储统一调度
 	1. sysMaster： 安全可靠机制可靠的服务管理系统
+- [fork () 成为负担，需要淘汰](https://www.oschina.net/news/105857/a-fork-in-the-road)
