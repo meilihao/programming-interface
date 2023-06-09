@@ -8,6 +8,17 @@
 ## 指令集
 RISC-V只支持小端格式(little-endian).
 
+## 虚拟内存
+ref:
+- [玄铁C910用户手册.pdf](https://github.com/T-head-Semi/openc910/blob/main/doc/%E7%8E%84%E9%93%81C910%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.pdf)
+- [玄铁C910微架构学习](https://zhuanlan.zhihu.com/p/456409077)
+- [RISCV MMU 概述](https://blog.csdn.net/pwl999/article/details/123613069)
+- [Xuantie_C906_R1S0_User_Manual.pdf](https://dl.linux-sunxi.org/D1/)
+- [Add Sv57 page table support by Qinglin Pan](https://lore.kernel.org/linux-riscv/20220127024844.2413385-1-panqinglin2020@iscas.ac.cn/#r)
+- [Linux on RISC-V](https://kernel-recipes.org/en/2022/wp-content/uploads/2022/06/fustini_riscv_kr2022-compresse.pdf)
+
+riscv64支持Sv39/Sv48/Sv57/Sv64 这几种模式. 因为 C906 设计的应用场景不需要那么多的内存资源, 目前 C906 只支持 Sv39 模式, 对应 3level mmu 映射.
+
 ## 寄存器
 ![](/misc/img/arch/Kazam_screenshot_00000.png)
 

@@ -38,6 +38,7 @@
 ## todo
 - [Linux 内核揭秘](https://github.com/MintCN/linux-insides-zh)
 - [Why’s THE Design](https://juejin.cn/user/2418581313961677/posts)
+- [Why’s THE Design](https://draveness.me/whys-the-design/)
 
 ## tool
 ### 内核预处理
