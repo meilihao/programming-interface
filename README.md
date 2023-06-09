@@ -36,7 +36,8 @@
 - `<<深入理解程序设计使用Linux汇编语言>>的Chapter13`
 
 ## todo
-- [ ] [Linux 内核揭秘](https://github.com/MintCN/linux-insides-zh)
+- [Linux 内核揭秘](https://github.com/MintCN/linux-insides-zh)
+- [Why’s THE Design](https://juejin.cn/user/2418581313961677/posts)
 
 ## tool
 ### 内核预处理
