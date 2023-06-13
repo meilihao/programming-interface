@@ -53,6 +53,9 @@
 - [**HUGEPAGES原理概念**](https://ustack.io/2019-11-21-Linux%E4%B9%8Bhugepages%E5%8E%9F%E7%90%86%E6%A6%82%E5%BF%B5.html)
 - [为什么 HugePages 可以提升数据库性能](https://draveness.me/whys-the-design-linux-hugepages/)
 
+## iso
+- [使用grub2制作U盘引导iso](http://xstarcd.github.io/wiki/Linux/boot-multiple-iso-from-usb-via-grub2-using-linux.html)
+
 ## news
 - [全场景创新，这些厉害的 openEuler 技术创新，你值得拥有](https://linux.cn/article-15435-1.html)
 
