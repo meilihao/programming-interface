@@ -10,7 +10,7 @@ ref:
 ## x86
 ```bash
 # git clone --depth 1 git://github.com/mit-pdos/xv6-public.git
-# make # gcc 7.5.0执行成功; gcc 12.1.0报`-Werror=array-bounds`, 见FAQ
+# make # gcc 7.5.0执行成功; gcc 12.1.0报`-Werror=array-bounds`, `-Werror=infinite-recursion`, 见FAQ
 # make qemu # 带qemu gui; make qemu-nox, 不带qemu gui. 不知道为什么`-smp 2`没生效, console log只提示了cpu0
 ```
 
@@ -67,5 +67,5 @@ ref:
 
 解决方法: 编辑`Makefile`, 在`CFLAGS`后追加` -Wno-error=infinite-recursion `即可.
 
-#### git获取boringssl失败
+#### 构建riscv-gnu-toolchain时, git获取boringssl失败
 `vim qemu/roms/edk2/CryptoPkg/Library/OpensslLib/openssl/.gitmodules` 将repo换成boringssl github mirror: `https://github.com/google/boringssl.git`在执行`git submodule sync --recursive`即可重新`git submodule update`

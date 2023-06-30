@@ -10,6 +10,12 @@
 ## 指令集
 RISC-V只支持小端格式(little-endian).
 
+## boot
+- [An Introduction to RISC-V Boot Flow](https://riscv.org/wp-content/uploads/2019/12/Summit_bootflow.pdf)
+- [RISC-V CPU加电执行流程](https://www.cnblogs.com/mkh2000/p/15811708.html)
+- [QEMU 启动方式分析（1）：QEMU 及 RISC-V 启动流程简介](https://gitee.com/YJMSTR/riscv-linux/blob/master/articles/20220816-introduction-to-qemu-and-riscv-upstream-boot-flow.md)
+- [EDK2 RISC-V Platform Project](https://github.com/tianocore/edk2-platforms/blob/master/Platform/RISC-V/PlatformPkg/Readme.md)
+
 ## 虚拟内存
 ref:
 - [玄铁C910用户手册.pdf](https://github.com/T-head-Semi/openc910/blob/main/doc/%E7%8E%84%E9%93%81C910%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.pdf)
