@@ -59,6 +59,10 @@
 
     部分测试配置(没有测试步骤)
 
+## ntb
+- [SmartIO: Zero-overhead Device Sharing through PCIe Networking](/misc/pdf/io/ntb_SmartIO.pdf)
+- [Flexible device compositions and dynamic resource sharing in PCIe interconnected clusters using Device Lending](/misc/pdf/io/Flexible_device_compositions_and_dynamic_resource_.pdf)
+
 ## 性能
 - [【冬瓜哥手绘】它保你上线性能也吊炸天！](https://mp.weixin.qq.com/s?__biz=MzAwNzU3NzQ0MA==&mid=2652088576&idx=1&sn=af2557735037e254b2f1a5b6ad93e541)
 - [IO协议栈前沿技术研究动态](https://www.eda365.com/article-109723-1.html)

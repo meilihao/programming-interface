@@ -37,6 +37,9 @@ SR简单总结就是"一减一集中":
 至少在目前来说，**SRv6提供了可预见的网络业务变革的最终形态**.
 
 ## SRv6
+ref:
+- [分段路由(Segment Routing): 大规模SDN部署必备技术](/misc/pdf/net/segment_routing_ppt.pdf)
+- [Linux SRv6 实战：VPN、流量工程和服务链](https://www.cisco.com/c/dam/global/zh_cn/solutions/service-provider/5g/pdf/linux_srv6_chapter1.pdf)
 
 SRv6是一种网络转发技术, 是源路由技术的一种，其中SR是Segment Routing的缩写，v6顾名思义是指IPv6.
 

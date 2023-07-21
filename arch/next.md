@@ -66,6 +66,8 @@
 
   阿里云的神龙架构是通过一个PCIe的MoC卡（实际是一个包含CPU、内存、磁盘、智能网卡的系统）**把Hypervisor、带外管理功能都卸载到这个卡上**。MoC卡对外可以连接EBS存储和VPC网络，通过virtio（一种半虚拟化的设备抽象接口规范）访问IO设备，实现裸金属和虚拟化同样的扩展和管理功能，和现有云环境可以通过私有接口或Open API无缝集成.
 
+  > 推测神龙类似LicheeCluster 4A.
+
   [神龙Moc卡网上有文章说是智能网卡](https://blog.csdn.net/junbaozi/article/details/123834314), 这个更形象, 毕竟它只是弹性裸金属服务器上的一个pcie设备.
 
   ![X-Dragon MOC卡架构详解](https://yqfile.alicdn.com/25c7936befd17a4230afacb6bae45164fcc35ef2.png)解读:
