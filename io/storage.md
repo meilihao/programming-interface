@@ -57,7 +57,7 @@
 
         传输速度: 6Gbbps
 
-        sata盘使用AHCI传输模式. AHCI需要主板,磁盘和os都支持才行.
+        sata盘使用AHCI(Advanced Host Controller Interface)传输模式. AHCI需要主板,磁盘和os都支持才行.
 
         只有一个端口, 通过SATA转接卡上的端口选择芯片模拟出两个端口, 但实际上在某刻只有一个端口是活动的.
       - SCSI
@@ -68,6 +68,8 @@
         有两个端口
       - FC
       - AHCI(advanced host controller interface)
+
+        AHCI 为单队列模式. 对于 HDD 这种慢速设备来说，主要瓶颈在存储设备，而非 AHCI协议; 但对应SSD, AHCI 的单队列模式成为限制 SSD 并发性的瓶颈, 而催生了NVMe协议.
 
 # linux存储服务
 ## 1. linux本地文件系统
@@ -254,7 +256,14 @@ AHCI设计之初是面向机械硬盘, 针对的是高延迟的机械盘的优�
 1. 减少软件开销, 即SPDK
 1. 计算和存储分离, 这带来了带宽和延迟上的挑战, 从而催生了NVMe-of.
 
+  2010 年后，随着闪存介质的普及， SCSI 协议框架对性能的限制也越来越突显出来。 NVMe 和 NVMe Over Fabric（NVMe-oF） 技术的出现打破了这些限制，面向高性能介质设计的多队列模型更能发挥闪存介质的性能.
+
+  华为 NoF+存储网络是 NVMe-oF 技术一个典型应用.
+
 ## SES(SCSI Enclosure Services)
+ref:
+- [SCSI Enclosure Services](/misc/pdf/io/SCSI_SES.pdf)
+
 SES是SCSI协议中用于查询设备状态(温度/风扇/电源/指示灯)的一项服务. 这里的设备可以是移动硬盘盒/磁盘阵列柜/硬盘托架等.SES可以让主机端透过SCSI命令去控制外接SCSI设备的电源/风扇以及其他与数据传输无关的东西.要使用这项技术,外置设备和主机上的SCSI/ATA控制芯片都需要支持SES技术才OK. 事实上,目前大多数外置移动硬盘和所有磁盘阵列柜都支持SES规范.
 
 ## 磁盘柜(disk enclosure)
