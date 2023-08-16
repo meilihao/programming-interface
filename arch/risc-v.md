@@ -38,6 +38,8 @@ riscv64支持Sv39/Sv48/Sv57/Sv64 这几种模式. 因为 C906 设计的应用场
 - [openEuler RISC-V 成功适配 LicheePi 4A 开发板，推动 RISC-V 生态发展](https://www.openeuler.org/zh/blog/20230506-riscv/20230506-riscv.html)
 
 	LicheePi 4A 是首款性能对标树莓派 4 的 RISC-V 开发板，基于阿里巴巴平头哥 TH1520 芯片，搭载 4 核 2.0GHz C910 内核、4TOPS NPU 和 50GFLOPS GPU，为开发者提供强大的性能，满足各种应用场景需求.
+
+	LicheePi 4A 是矽速科技设计的一款采用 TH1520 芯片为主控核心的 Linux 开发板，是截止目前（2023Q2）为止最强的 RISC-V SBC.
 - [sipeed licheepi4a](https://sipeed.com/licheepi4a/)
 
 	- [LicheePi 4A 是基于 Lichee Module 4A 核心板的 高性能 RISC-V Linux 开发板，以 TH1520 为主控核心](https://wiki.sipeed.com/hardware/zh/lichee/th1520/lpi4a/1_intro.html)

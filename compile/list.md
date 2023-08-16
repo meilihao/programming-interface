@@ -7,3 +7,7 @@
 
 ## next
 - [Mold 是现有 Unix 链接器的快速替代品，它比 LLVM lld 链接器快几倍](https://www.oschina.net/news/176581/mold-1-0-1-released)
+
+## lang
+- [哪种编程语言又快又省电？有人对比了27种语言](https://cloud.tencent.com/developer/article/2252180)
+- [各大编程语言性能测试结果的可视化图表](https://www.oschina.net/news/201120/programming-language-benchmarks)
