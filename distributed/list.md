@@ -37,6 +37,11 @@
 	- [OceanBase 数据库源码解读之模块结构](https://developer.aliyun.com/article/785281)
 	- [Oceanbase PaxosStore 源码阅读](https://zhuanlan.zhihu.com/p/395197545)
 	- [oceanbase源码阅读（1）程序启动](https://wangcy6.github.io/post/plan/oceanbase_day1/)
+	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
+- [PolarDB-X]()
+
+	- [PolarDB-X 三副本存储引擎](https://zhuanlan.zhihu.com/p/535496764)
+	- [第七节：X-Paxos 三副本与高可用](https://edu.aliyun.com/course/316505/lesson/15168)
 
 ## Distributed Consensus Framework
 ref:
