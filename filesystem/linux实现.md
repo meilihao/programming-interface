@@ -8,41 +8,42 @@
 VFS 定义了一组所有文件系统都支持的数据结构和标准接口，这样程序员不需要了解文件系统的工作原理，只需要了解 VFS 提供的统一接口即可.
 
 Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽象了四种对象类型：
-1. 超级块对象([super_block](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1416))：代表一个文件系统,用于存储该文件系统的有关信息.
+1. 超级块对象(super_block)：代表一个文件系统,用于存储该文件系统的有关信息.
 
 	fs中所有的inode都会链接到super_block的链表头.
 
 	```c
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1154
 	struct super_block {
-		struct list_head	s_list;		/* Keep this first */
-		dev_t			s_dev;		/* search index; _not_ kdev_t */
-		unsigned char		s_blocksize_bits;
-		unsigned long		s_blocksize; // 块大小
-		loff_t			s_maxbytes;	/* Max file size */ // 最大文件的大小
-		struct file_system_type	*s_type; // 指向file_system_type的指针
-		const struct super_operations	*s_op; // 提供了操作super_block的函数
-		const struct dquot_operations	*dq_op;
+		struct list_head	s_list;		/* Keep this first */ //超级块链表
+		dev_t			s_dev;		/* search index; _not_ kdev_t */ // 设备标识
+		unsigned char		s_blocksize_bits; //以bit为单位的块大小
+		unsigned long		s_blocksize; //以B为单位的块大小
+		loff_t			s_maxbytes;	/* Max file size */ //一个文件最大字节树
+		struct file_system_type	*s_type; //文件系统类型
+		const struct super_operations	*s_op; //操作超级块的函数集合
+		const struct dquot_operations	*dq_op; //磁盘限额函数集合
 		const struct quotactl_ops	*s_qcop;
-		const struct export_operations *s_export_op; // 支持s_export_op接口的文件系统都是存储设备文件系统，如ext3/4、ubifs等. 其他文件系统如rootfs、ramfs、sysfs等是不支持的
-		unsigned long		s_flags;
+		const struct export_operations *s_export_op; // 支持s_export_op接口的文件系统都是存储设备文件系统，如ext3/4、ubifs等.
+		unsigned long		s_flags; // 挂载标志
 		unsigned long		s_iflags;	/* internal SB_I_* flags */
-		unsigned long		s_magic; // 魔术数字, 每个fs都有有一个该数字
-		struct dentry		*s_root; // 指向fs root dentry的指针
-		struct rw_semaphore	s_umount;
-		int			s_count;
-		atomic_t		s_active;
+		unsigned long		s_magic; // fs magic number
+		struct dentry		*s_root; // 挂载目录, 指向fs root dentry的指针
+		struct rw_semaphore	s_umount; // 卸载信号量
+		int			s_count; // 引用计数
+		atomic_t		s_active; // 活动计数
 	#ifdef CONFIG_SECURITY
 		void                    *s_security;
 	#endif
 		const struct xattr_handler **s_xattr;
 	#ifdef CONFIG_FS_ENCRYPTION
 		const struct fscrypt_operations	*s_cop;
-		struct key		*s_master_keys; /* master crypto keys in use */
+		struct fscrypt_keyring	*s_master_keys; /* master crypto keys in use */
 	#endif
 	#ifdef CONFIG_FS_VERITY
 		const struct fsverity_operations *s_vop;
 	#endif
-	#ifdef CONFIG_UNICODE
+	#if IS_ENABLED(CONFIG_UNICODE)
 		struct unicode_map *s_encoding;
 		__u16 s_encoding_flags;
 	#endif
@@ -62,23 +63,22 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * s_fsnotify_marks together for cache efficiency. They are frequently
 		 * accessed and rarely modified.
 		 */
-		void			*s_fs_info;	/* Filesystem private info */
+		void			*s_fs_info;	/* Filesystem private info */ //fs info
 
 		/* Granularity of c/m/atime in ns (cannot be worse than a second) */
 		u32			s_time_gran;
 		/* Time limits for c/m/atime in seconds */
-		time64_t		   s_time_min;
-		time64_t		   s_time_max;
+		time64_t		   s_time_min; // 最小时间限制
+		time64_t		   s_time_max; // 最大时间限制
 	#ifdef CONFIG_FSNOTIFY
 		__u32			s_fsnotify_mask;
 		struct fsnotify_mark_connector __rcu	*s_fsnotify_marks;
 	#endif
 
-		char			s_id[32];	/* Informational name */
-		uuid_t			s_uuid;		/* UUID */
+		char			s_id[32];	/* Informational name */ //标志名称
+		uuid_t			s_uuid;		/* UUID */ //fs uuid
 
 		unsigned int		s_max_links;
-		fmode_t			s_mode;
 
 		/*
 		 * The next field is for VFS *only*. No filesystems have any business
@@ -94,20 +94,18 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 		const struct dentry_operations *s_d_op; /* default d_op for dentries */
 
-		/*
-		 * Saved pool identifier for cleancache (-1 means none)
-		 */
-		int cleancache_poolid;
-
 		struct shrinker s_shrink;	/* per-sb shrinker handle */
 
 		/* Number of inodes with nlink == 0 but still referenced */
 		atomic_long_t s_remove_count;
 
-		/* Pending fsnotify inode refs */
-		atomic_long_t s_fsnotify_inode_refs;
+		/*
+		 * Number of inode/mount/sb objects that are being watched, note that
+		 * inodes objects are currently double-accounted.
+		 */
+		atomic_long_t s_fsnotify_connectors;
 
-		/* Being remounted read-only */
+		/* Read-only state of the superblock is being changed */
 		int s_readonly_remount;
 
 		/* per-sb errseq_t for reporting writeback errors via syncfs */
@@ -129,12 +127,12 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * of per-node lru lists, each of which has its own spinlock.
 		 * There is no need to put them into separate cachelines.
 		 */
-		struct list_lru		s_dentry_lru;
-		struct list_lru		s_inode_lru;
+		struct list_lru		s_dentry_lru; // lru方式挂载的目录
+		struct list_lru		s_inode_lru; // lru方式挂载的inode
 		struct rcu_head		rcu;
 		struct work_struct	destroy_work;
 
-		struct mutex		s_sync_lock;	/* sync serialisation lock */
+		struct mutex		s_sync_lock;	/* sync serialisation lock */ // 同步锁
 
 		/*
 		 * Indicates how deep in a filesystem stack this SB is
@@ -145,14 +143,56 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
 		struct list_head	s_inodes;	/* all inodes */ // 指向fs内所有的inode, 通过它可遍历inode对象
 
-		spinlock_t		s_inode_wblist_lock;
-		struct list_head	s_inodes_wb;	/* writeback inodes */
-	} __randomize_layout;	
+		spinlock_t		s_inode_wblist_lock; // 回写inode的锁
+		struct list_head	s_inodes_wb;	/* writeback inodes */ //挂载所有要回写的inode
+	} __randomize_layout;
+
+	// https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1912
+	struct super_operations {
+	   	struct inode *(*alloc_inode)(struct super_block *sb);  //分配一个新的索引结点结构
+		void (*destroy_inode)(struct inode *); //销毁给定的索引节点
+		void (*free_inode)(struct inode *); //释放给定的索引节点
+
+	   	void (*dirty_inode) (struct inode *, int flags); //VFS在索引节点为脏(改变)时，会调用此函数
+		int (*write_inode) (struct inode *, struct writeback_control *wbc);  //该函数用于将给定的索引节点写入磁盘
+		int (*drop_inode) (struct inode *); //在最后一个指向索引节点的引用被释放后，VFS会调用该函数
+		void (*evict_inode) (struct inode *);
+		void (*put_super) (struct super_block *); //减少超级块计数调用
+		int (*sync_fs)(struct super_block *sb, int wait); //同步文件系统调用
+		int (*freeze_super) (struct super_block *); //释放超级块调用
+		int (*freeze_fs) (struct super_block *); //释放文件系统调用
+		int (*thaw_super) (struct super_block *);
+		int (*unfreeze_fs) (struct super_block *);
+		int (*statfs) (struct dentry *, struct kstatfs *); //VFS通过调用该函数，获取文件系统状态
+		int (*remount_fs) (struct super_block *, int *, char *); //当指定新的安装选项重新安装文件系统时，VFS会调用此函数
+		void (*umount_begin) (struct super_block *); //VFS调用该函数中断安装操作。该函数被网络文件系统使用，如NFS
+
+		int (*show_options)(struct seq_file *, struct dentry *);
+		int (*show_devname)(struct seq_file *, struct dentry *);
+		int (*show_path)(struct seq_file *, struct dentry *);
+		int (*show_stats)(struct seq_file *, struct dentry *);
+	#ifdef CONFIG_QUOTA
+		ssize_t (*quota_read)(struct super_block *, int, char *, size_t, loff_t);
+		ssize_t (*quota_write)(struct super_block *, int, const char *, size_t, loff_t);
+		struct dquot **(*get_dquots)(struct inode *);
+	#endif
+		long (*nr_cached_objects)(struct super_block *,
+					  struct shrink_control *);
+		long (*free_cached_objects)(struct super_block *,
+					    struct shrink_control *);
+		void (*shutdown)(struct super_block *sb);
+	};
 	```
+
+	在文件系统被挂载到 VFS 的某个目录下时，VFS 会调用获取文件系统自己的超级块的函数，用具体文件系统的信息构造一个super_block实例，有了这个结构实例, VFS 就能感知到一个文件系统加入.
+
+	super_operations 结构中所有函数指针所指向的函数，都应该要由一个具体文件系统实现.
 
 	kernel有一个[super_blocks](https://elixir.bootlin.com/linux/v5.12.9/source/fs/super.c#L45), 所有super_block均在该双向链表中. fs中每个文件在打开时都会在内存分配一个inode并链接到super_block. 因此通过super_blocks可遍历os打开的所有inode.
 
-1. 索引节点对象([inode](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L612))：代表具体的文件, 用于存储该文件的元信息
+1. 索引节点对象(inode)：代表具体的文件, 用于存储该文件的元信息
+
+	VFS 用 inode 结构表示一个文件索引结点，它里面包含文件权限、文件所属用户、文件访问和修改时间、文件数据块号等一个文件的全部信息，一个 inode 结构就对应一个文件
 
 	索引节点用来记录文件的元信息，比如 inode 编号、文件大小、访问权限、创建时间、修改时间、 数据在磁盘的位置, 对文件的读写函数, 文件的读写缓存 等等. **索引节点是文件的 唯一 标识**，它们之间一一对应，也同样都会被存储在硬盘中，即占用磁盘空间.
 
@@ -163,14 +203,15 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	`dentry + inode`可表示一个文件.
 
 	```c
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L608
 	/*
 	 * Keep mostly read-only and often accessed (especially for
 	 * the RCU path lookup and 'stat' data) fields at the beginning
 	 * of the 'struct inode'
 	 */
 	struct inode {
-		umode_t			i_mode; // 代表不同类型的文件, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10)
-		unsigned short		i_opflags;
+		umode_t			i_mode; //文件访问权限, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10)
+		unsigned short		i_opflags; // 打开file时的标志
 		kuid_t			i_uid;
 		kgid_t			i_gid;
 		unsigned int		i_flags;
@@ -180,16 +221,16 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct posix_acl	*i_default_acl;
 	#endif
 
-		const struct inode_operations	*i_op;
-		struct super_block	*i_sb;
-		struct address_space	*i_mapping; // 缓存文件的内容 by radix tree. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
+		const struct inode_operations	*i_op; //操作inode的函数集合
+		struct super_block	*i_sb; //指向所属超级块
+		struct address_space	*i_mapping; //文件数据在内存中的页缓存. 缓存文件的内容 by radix tree. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
 
 	#ifdef CONFIG_SECURITY
 		void			*i_security;
 	#endif
 
 		/* Stat data, not accessed from path walking */
-		unsigned long		i_ino; // inode号
+		unsigned long		i_ino; //inode
 		/*
 		 * Filesystems may only read i_nlink directly.  They shall use the
 		 * following functions for modification:
@@ -201,14 +242,14 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 			const unsigned int i_nlink;
 			unsigned int __i_nlink;
 		};
-		dev_t			i_rdev;
-		loff_t			i_size; // 文件长度, 单位B
+		dev_t			i_rdev; //实际设备
+		loff_t			i_size; //文件大小(B)
 		struct timespec64	i_atime;
 		struct timespec64	i_mtime;
 		struct timespec64	i_ctime;
 		spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */
-		unsigned short          i_bytes;
-		u8			i_blkbits; // 文件块的位数
+		unsigned short          i_bytes; //使用的字节数
+		u8			i_blkbits; //块大小(bit)
 		u8			i_write_hint;
 		blkcnt_t		i_blocks;
 
@@ -237,19 +278,19 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct list_head	i_sb_list; // 用于链接到super_block中的s_inodes链表
 		struct list_head	i_wb_list;	/* backing dev writeback list */
 		union {
-			struct hlist_head	i_dentry; // 一个文件可能对应多个dentry, 这些dentry都要链接到这里
+			struct hlist_head	i_dentry; //一个文件可能对应多个dentry, 这些dentry都要链接到这里
 			struct rcu_head		i_rcu;
 		};
-		atomic64_t		i_version;
+		atomic64_t		i_version; //版本
 		atomic64_t		i_sequence; /* see futex */
-		atomic_t		i_count; // inode的引用计数
-		atomic_t		i_dio_count;
-		atomic_t		i_writecount;
+		atomic_t		i_count; //计数
+		atomic_t		i_dio_count; //直接io进程计数
+		atomic_t		i_writecount; //写进程计数
 	#if defined(CONFIG_IMA) || defined(CONFIG_FILE_LOCKING)
 		atomic_t		i_readcount; /* struct files open RO */
 	#endif
 		union {
-			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ // file_operations类型的指针. 文件的读写函数和异步io函数都由它提供
+			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ //操作file的函数集合
 			void (*free_inode)(struct inode *);
 		};
 		struct file_lock_context	*i_flctx;
@@ -277,12 +318,59 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct fsverity_info	*i_verity_info;
 	#endif
 
-		void			*i_private; /* fs or device private pointer */
+		void			*i_private; /* fs or device private pointer */ //私有数据指针
 	} __randomize_layout;
+
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1826
+	struct inode_operations {
+		struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);  //该函数在特定目录中寻找索引节点，该索引节点要对应于dentry中给出的文件名
+		const char * (*get_link) (struct dentry *, struct inode *, struct delayed_call *);
+		int (*permission) (struct mnt_idmap *, struct inode *, int); //该函数用来检查给定的inode所代表的文件是否允许特定的访问模式，如果允许特定的访问模式，返回0，否则返回负值的错误码
+		struct posix_acl * (*get_inode_acl)(struct inode *, int, bool);
+
+		int (*readlink) (struct dentry *, char __user *,int); //被系统readlink()接口调用，拷贝数据到特定的缓冲buffer中。拷贝的数据来自dentry指定的符号链接
+
+		int (*create) (struct mnt_idmap *, struct inode *,struct dentry *,
+			       umode_t, bool); //VFS通过系统create()和open()接口来调用该函数，从而为dentry对象创建一个新的索引节点
+		int (*link) (struct dentry *,struct inode *,struct dentry *); //被系统link()接口调用，用来创建硬连接。硬链接名称由dentry参数指定
+		int (*unlink) (struct inode *,struct dentry *); //被系统unlink()接口调用，删除由目录项dentry链接的索引节点对象
+		int (*symlink) (struct mnt_idmap *, struct inode *,struct dentry *,
+				const char *); //被系统symlik()接口调用，创建符号连接，该符号连接名称由symname指定，连接对象是dir目录中的dentry目录项
+		int (*mkdir) (struct mnt_idmap *, struct inode *,struct dentry *,
+			      umode_t); //被mkdir()接口调用，创建一个新目录。
+		int (*rmdir) (struct inode *,struct dentry *); //被rmdir()接口调用，删除dentry目录项代表的文件
+		int (*mknod) (struct mnt_idmap *, struct inode *,struct dentry *,
+			      umode_t,dev_t); //被mknod()接口调用，创建特殊文件(设备文件、命名管道或套接字)。
+		int (*rename) (struct mnt_idmap *, struct inode *, struct dentry *,
+				struct inode *, struct dentry *, unsigned int); //VFS调用该函数来移动文件。文件源路径在old_dir目录中，源文件由old_dentry目录项所指定，目标路径在new_dir目录中，目标文件由new_dentry指定
+		int (*setattr) (struct mnt_idmap *, struct dentry *, struct iattr *); //被notify_change接口调用，在修改索引节点之后，通知发生了改变事件
+		int (*getattr) (struct mnt_idmap *, const struct path *,
+				struct kstat *, u32, unsigned int); //在通知索引节点需要从磁盘中更新时，VFS会调用该函数
+		ssize_t (*listxattr) (struct dentry *, char *, size_t); //该函数将特定文件所有属性列表拷贝到一个缓冲列表中
+		int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
+			      u64 len);
+		int (*update_time)(struct inode *, struct timespec64 *, int);
+		int (*atomic_open)(struct inode *, struct dentry *,
+				   struct file *, unsigned open_flag,
+				   umode_t create_mode);
+		int (*tmpfile) (struct mnt_idmap *, struct inode *,
+				struct file *, umode_t);
+		struct posix_acl *(*get_acl)(struct mnt_idmap *, struct dentry *,
+					     int);
+		int (*set_acl)(struct mnt_idmap *, struct dentry *,
+			       struct posix_acl *, int);
+		int (*fileattr_set)(struct mnt_idmap *idmap,
+				    struct dentry *dentry, struct fileattr *fa);
+		int (*fileattr_get)(struct dentry *dentry, struct fileattr *fa);
+	} ____cacheline_aligned;
 	```
 
+	inode 结构表示一个文件的全部信息，但这个 inode 结构是 VFS 使用的，跟某个具体文件系统上的“inode”结构并不是一一对应关系.
+
+	VFS 通过定义 inode 结构和函数集合，并让具体文件系统实现这些函数，使得 VFS 及其上层只要关注 inode 结构，底层的具体文件系统根据自己的文件信息生成相应的 inode 结构，达到了 VFS 表示一个文件的目的
+
 	kernel存在一个[inode_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/inode.c#L60), 所有的inode均会链接到这里. 与它作用类似的还有[dentry_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/dcache.c#L99).
-1. 目录项对象([dentry](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L90))：代表一个目录项，描述了文件系统的层次结构.
+1. 目录项对象(dentry)：代表一个目录项，描述了文件系统的层次结构.
 
 	目录项用来记录文件的名字、 索引节点指针 以及与其他目录项的层级关联关系. 多个目录项关联起来，就会形成目录结构，但它与索引节点不同的是，**目录项是由内核维护的一个数据结构，不存放于磁盘，而是缓存在内存**
 
@@ -292,30 +380,31 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache.
 
 	```c
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/dcache.h#L82
 	struct dentry {
 		/* RCU lookup touched fields */
-		unsigned int d_flags;		/* protected by d_lock */
+		unsigned int d_flags;		/* protected by d_lock */ //目录标志
 		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
-		struct hlist_bl_node d_hash;	/* lookup hash list */ // 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
-		struct dentry *d_parent;	/* parent directory */ // 指向父dentry
-		struct qstr d_name; // 文件或目录的名称. 打开一个文件时, 会根据这个名称来查找目标文件.
+		struct hlist_bl_node d_hash;	/* lookup hash list */ //目录的hash链表, 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
+		struct dentry *d_parent;	/* parent directory */ //指向父目录
+		struct qstr d_name; //目录名称. 打开一个文件时, 会根据这个名称来查找目标文件.
 		struct inode *d_inode;		/* Where the name belongs to - NULL is
-						 * negative */ // 指向一个inode. inode与dentry共同描述了一个普通文件或目录文件
-		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */
+						 * negative */ //指向目录文件的inode, inode与dentry共同描述了一个普通文件或目录文件
+		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */ //短目录名
 
 		/* Ref lookup also touches following */
-		struct lockref d_lockref;	/* per-dentry lock and refcount */
-		const struct dentry_operations *d_op;
-		struct super_block *d_sb;	/* The root of the dentry tree */
-		unsigned long d_time;		/* used by d_revalidate */
-		void *d_fsdata;			/* fs-specific data */
+		struct lockref d_lockref;	/* per-dentry lock and refcount */ //目录锁与计数
+		const struct dentry_operations *d_op; //操作目录的函数集合
+		struct super_block *d_sb;	/* The root of the dentry tree */ //指向超级块
+		unsigned long d_time;		/* used by d_revalidate */ //时间
+		void *d_fsdata;			/* fs-specific data */ //指向具体fs的数据
 
 		union {
 			struct list_head d_lru;		/* LRU list */
 			wait_queue_head_t *d_wait;	/* in-lookup ones only */
 		};
-		struct list_head d_child;	/* child of parent list */ // dentry自身的链表头, 会链接到父dentry的d_subdirs. 但移动文件时需要将一个dentry从旧的父dentry链表中脱离, 再链接到新的父dentry的d_subdirs中
-		struct list_head d_subdirs;	/* our children */ // 子项的链表头, 其所有的子项都会链接到这里
+		struct list_head d_child;	/* child of parent list */ //挂入父目录的链表, dentry自身的链表头, 会链接到父dentry的d_subdirs. 但移动文件时需要将一个dentry从旧的父dentry链表中脱离, 再链接到新的父dentry的d_subdirs中
+		struct list_head d_subdirs;	/* our children */ //挂载所有子目录的链表
 		/*
 		 * d_alias and d_rcu can share memory
 		 */
@@ -325,37 +414,67 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 	struct rcu_head d_rcu;
 		} d_u;
 	} __randomize_layout;
+
+
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/dcache.h#L128
+	struct dentry_operations {
+		int (*d_revalidate)(struct dentry *, unsigned int); //该函数判断目录对象是否有效
+		int (*d_weak_revalidate)(struct dentry *, unsigned int);
+		int (*d_hash)(const struct dentry *, struct qstr *); //该函数为目录项生成散列值，当目录项要加入散列表中时，VFS调用该函数
+		int (*d_compare)(const struct dentry *,
+				unsigned int, const char *, const struct qstr *); //VFS调用该函数来比较name1和name2两个文件名。多数文件系统使用VFS的默认操作，仅做字符串比较。对于有些文件系统，比如FAT，简单的字符串比较不能满足其需要，因为 FAT文件系统不区分大小写
+		int (*d_delete)(const struct dentry *); //当目录项对象的计数值等于0时，VFS调用该函数
+		int (*d_init)(struct dentry *);//当分配目录时调用
+		void (*d_release)(struct dentry *); //当目录项对象要被释放时，VFS调用该函数，默认情况下，它什么也不做
+		void (*d_prune)(struct dentry *);
+		void (*d_iput)(struct dentry *, struct inode *); //当一个目录项对象丢失了相关索引节点时，VFS调用该函数。默认情况下VFS会调用iput()函数释放索引节点
+		char *(*d_dname)(struct dentry *, char *, int); //当需要生成一个dentry的路径名时被调用
+		struct vfsmount *(*d_automount)(struct path *); //当要遍历一个自动挂载时被调用（可选），这应该创建一个新的VFS挂载记录并将该记录返回给调用者
+		int (*d_manage)(const struct path *, bool); //文件系统管理从dentry的过渡（可选）时，被调用
+		struct dentry *(*d_real)(struct dentry *, const struct inode *); //叠加/联合类型的文件系统实现此方法
+	} ____cacheline_aligned;
 	```
-1. 文件对象([file](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L917))：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
+
+	目录也是文件，需要用 inode 索引结构来管理目录文件数据.
+
+	dentry_operations 结构中的函数，也需要具体文件系统实现，下层代码查找或者操作目录时 VFS 就会调用这些函数，让具体文件系统根据自己储存设备上的目录信息处理并设置 dentry 结构中的信息，这样文件系统中的目录就和 VFS 的目录对应了.
+1. 文件对象(file)：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
 
 	文件对象代表进程与具体文件交互的关系. kernel为每个打开的文件申请一个文件对象并返回该文件的fd. 每个进程有一个文件描述符表, 它用数组保存了进程打开的每个文件.
 
 	当且仅当进程访问文件期间存在与内存中. 同一个文件可能对应多个文件对象, 但其对应的索引节点对象是唯一的.
 
 	```c
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L961
+	/*
+	 * f_{lock,count,pos_lock} members can be highly contended and share
+	 * the same cacheline. f_{lock,mode} are very frequently used together
+	 * and so share the same cacheline as well. The read-mostly
+	 * f_{path,inode,op} are kept on a separate cacheline.
+	 */
 	struct file {
 		union {
-			struct llist_node	fu_llist;
-			struct rcu_head 	fu_rcuhead;
-		} f_u;
-		struct path		f_path;
-		struct inode		*f_inode;	/* cached value */
-		const struct file_operations	*f_op;
+			struct llist_node	f_llist;
+			struct rcu_head 	f_rcuhead;
+			unsigned int 		f_iocb_flags;
+		};
 
 		/*
 		 * Protects f_ep, f_flags.
 		 * Must not be taken from IRQ context.
 		 */
 		spinlock_t		f_lock;
-		enum rw_hint		f_write_hint;
-		atomic_long_t		f_count;
-		unsigned int 		f_flags;
-		fmode_t			f_mode;
-		struct mutex		f_pos_lock;
-		loff_t			f_pos; // 进程为文件操作的位置. 比如对文件读取前10字节, f_pos就指向第11B.
+		fmode_t			f_mode; //文件权限
+		atomic_long_t		f_count; //文件对象
+		struct mutex		f_pos_lock; //文件读写位置锁
+		loff_t			f_pos; //进程读写文件的当前位置. 比如对文件读取前10字节, f_pos就指向第11B
+		unsigned int		f_flags;
 		struct fown_struct	f_owner;
 		const struct cred	*f_cred;
 		struct file_ra_state	f_ra; // 用于文件预读的位置
+		struct path		f_path; //文件路径
+		struct inode		*f_inode;	/* cached value */ //对应的inode
+		const struct file_operations	*f_op; //操作文件的函数集合
 
 		u64			f_version;
 	#ifdef CONFIG_SECURITY
@@ -368,14 +487,66 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		/* Used by fs/eventpoll.c to link all the hooks to this file */
 		struct hlist_head	*f_ep;
 	#endif /* #ifdef CONFIG_EPOLL */
-		struct address_space	*f_mapping; // 指向一个address_space, 该结构封装了文件的读写缓存页面
+		struct address_space	*f_mapping; //指向一个address_space, 该结构封装了文件的读写缓存页面
 		errseq_t		f_wb_err;
 		errseq_t		f_sb_err; /* for syncfs */
 	} __randomize_layout
 	  __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+
+	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L961
+	struct file_operations {
+		struct module *owner; //所在的module
+		loff_t (*llseek) (struct file *, loff_t, int); //调整读写偏移
+		ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
+		ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
+		ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
+		ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
+		int (*iopoll)(struct kiocb *kiocb, struct io_comp_batch *,
+				unsigned int flags);
+		int (*iterate_shared) (struct file *, struct dir_context *);
+		__poll_t (*poll) (struct file *, struct poll_table_struct *);
+		long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
+		long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
+		int (*mmap) (struct file *, struct vm_area_struct *);
+		unsigned long mmap_supported_flags;
+		int (*open) (struct inode *, struct file *);
+		int (*flush) (struct file *, fl_owner_t id);
+		int (*release) (struct inode *, struct file *);
+		int (*fsync) (struct file *, loff_t, loff_t, int datasync);
+		int (*fasync) (int, struct file *, int);
+		int (*lock) (struct file *, int, struct file_lock *);
+		unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+		int (*check_flags)(int);
+		int (*flock) (struct file *, int, struct file_lock *);
+		ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
+		ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
+		void (*splice_eof)(struct file *file);
+		int (*setlease)(struct file *, long, struct file_lock **, void **);
+		long (*fallocate)(struct file *file, int mode, loff_t offset,
+				  loff_t len);
+		void (*show_fdinfo)(struct seq_file *m, struct file *f);
+	#ifndef CONFIG_MMU
+		unsigned (*mmap_capabilities)(struct file *);
+	#endif
+		ssize_t (*copy_file_range)(struct file *, loff_t, struct file *,
+				loff_t, size_t, unsigned int);
+		loff_t (*remap_file_range)(struct file *file_in, loff_t pos_in,
+					   struct file *file_out, loff_t pos_out,
+					   loff_t len, unsigned int remap_flags);
+		int (*fadvise)(struct file *, loff_t, loff_t, int);
+		int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
+		int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
+					unsigned int poll_flags);
+	} __randomize_layout;
 	```
 
+	在进程结构中有个文件表，那个表其实就是 file 结构的指针数组，进程每打开一个文件就会建立一个 file 结构实例，并将其地址放入数组中，最后返回对应的数组下标，就是调用 open 函数返回的那个整数.
+
 它们对应的操作对象分别是[super_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L2009), [indoe_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1930), [dentry_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/dcache.h#L136), [file_operations](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/fs.h#L1888), fs只要实现了这4个对象的操作方法即可注册到kernel. 每个对象都包含一组操作方法，用于操作相应的文件系统.
+
+到此为止，有超级块、目录结构、文件索引节点，打开文件的实例，通过四大对象就可以描述抽象出一个文件系统了。而四大对象的对应的操作函数集合，又由具体的文件系统来实现，这两个一结合，一个文件系统的状态和行为都具备了.
+
+文件系统demo见[trfs](https://gitee.com/lmos/cosmos/tree/master/lesson35).
 
 linux fs会为每个文件分配两个数据结构： 索引节点(index node)和目录项(directory entry).
 
@@ -497,6 +668,8 @@ close(fd);             # 关闭文件
 - 当用户进程把 1 个字节大小的数据写进文件时，文件系统则找到需要写入数据的数据块的位置，然后修改数据块中对应的部分，最后再把数据块写回磁盘
 
 即**kernel只能基于块来访问fs, 块也被成为fs的最小寻址单位**.
+
+在 x86_64 架构里，open 函数会执行 syscall 指令，从用户态转换到内核态，并且最终调用到 do_sys_open 函数，然进而调用 do_sys_openat2 函数.
 
 ## 文件的存储
 文件的数据是要存储在硬盘上面的，数据在磁盘上的存放方式，就像程序在内存中存放的方式那样，有以下两种：
