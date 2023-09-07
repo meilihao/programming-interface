@@ -46,6 +46,485 @@ socket 函数有三个参数:
 
 通信结束后，还要像关闭文件一样，关闭 socket.
 
+在 Linux 操作系统下，对套接字、套接字的属性、套接字传输的数据格式还有管理套接字连接状态的数据结构分别做了一系列抽象定义.
+
+每个程序使用的套接字都有一个 struct socket 数据结构与 struct sock 数据结构的实例.
+
+Linux 内核在套接字层定义了包含套接字通用属性的数据结构，分别是 struct socket 与 struct sock，它们独立于具体协议；而具体的协议族与协议实例继承了通用套接字的属性，加入协议相关属性，就形成了管理协议本身套接字的结构.
+
+```c
+//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/net.h#L117
+/**
+ *  struct socket - general BSD socket
+ *  @state: socket state (%SS_CONNECTED, etc)
+ *  @type: socket type (%SOCK_STREAM, etc)
+ *  @flags: socket flags (%SOCK_NOSPACE, etc)
+ *  @ops: protocol specific socket operations
+ *  @file: File back pointer for gc
+ *  @sk: internal networking protocol agnostic socket representation
+ *  @wq: wait queue for several uses
+ */
+struct socket {
+  socket_state    state; // 套接字的状态
+
+  short     type; // 套接字的类型。其取值为SOCK_XXXX形式
+
+  unsigned long   flags; // 套接字的设置标志。存放套接字等待缓冲区的状态信息，其值的形式如SOCK_ASYNC_NOSPACE等
+
+  struct file   *file; // 套接字所属的文件描述符
+  struct sock   *sk; // 指向存放套接字属性的结构指针
+  const struct proto_ops  *ops; // 套接字层的操作函数块
+
+  struct socket_wq  wq;
+};
+
+//https://elixir.bootlin.com/linux/v6.5.2/source/include/net/sock.h#L357
+/**
+  * struct sock - network layer representation of sockets
+  * @__sk_common: shared layout with inet_timewait_sock
+  * @sk_shutdown: mask of %SEND_SHUTDOWN and/or %RCV_SHUTDOWN
+  * @sk_userlocks: %SO_SNDBUF and %SO_RCVBUF settings
+  * @sk_lock: synchronizer
+  * @sk_kern_sock: True if sock is using kernel lock classes
+  * @sk_rcvbuf: size of receive buffer in bytes
+  * @sk_wq: sock wait queue and async head
+  * @sk_rx_dst: receive input route used by early demux
+  * @sk_rx_dst_ifindex: ifindex for @sk_rx_dst
+  * @sk_rx_dst_cookie: cookie for @sk_rx_dst
+  * @sk_dst_cache: destination cache
+  * @sk_dst_pending_confirm: need to confirm neighbour
+  * @sk_policy: flow policy
+  * @sk_receive_queue: incoming packets
+  * @sk_wmem_alloc: transmit queue bytes committed
+  * @sk_tsq_flags: TCP Small Queues flags
+  * @sk_write_queue: Packet sending queue
+  * @sk_omem_alloc: "o" is "option" or "other"
+  * @sk_wmem_queued: persistent queue size
+  * @sk_forward_alloc: space allocated forward
+  * @sk_reserved_mem: space reserved and non-reclaimable for the socket
+  * @sk_napi_id: id of the last napi context to receive data for sk
+  * @sk_ll_usec: usecs to busypoll when there is no data
+  * @sk_allocation: allocation mode
+  * @sk_pacing_rate: Pacing rate (if supported by transport/packet scheduler)
+  * @sk_pacing_status: Pacing status (requested, handled by sch_fq)
+  * @sk_max_pacing_rate: Maximum pacing rate (%SO_MAX_PACING_RATE)
+  * @sk_sndbuf: size of send buffer in bytes
+  * @__sk_flags_offset: empty field used to determine location of bitfield
+  * @sk_padding: unused element for alignment
+  * @sk_no_check_tx: %SO_NO_CHECK setting, set checksum in TX packets
+  * @sk_no_check_rx: allow zero checksum in RX packets
+  * @sk_route_caps: route capabilities (e.g. %NETIF_F_TSO)
+  * @sk_gso_disabled: if set, NETIF_F_GSO_MASK is forbidden.
+  * @sk_gso_type: GSO type (e.g. %SKB_GSO_TCPV4)
+  * @sk_gso_max_size: Maximum GSO segment size to build
+  * @sk_gso_max_segs: Maximum number of GSO segments
+  * @sk_pacing_shift: scaling factor for TCP Small Queues
+  * @sk_lingertime: %SO_LINGER l_linger setting
+  * @sk_backlog: always used with the per-socket spinlock held
+  * @sk_callback_lock: used with the callbacks in the end of this struct
+  * @sk_error_queue: rarely used
+  * @sk_prot_creator: sk_prot of original sock creator (see ipv6_setsockopt,
+  *       IPV6_ADDRFORM for instance)
+  * @sk_err: last error
+  * @sk_err_soft: errors that don't cause failure but are the cause of a
+  *         persistent failure not just 'timed out'
+  * @sk_drops: raw/udp drops counter
+  * @sk_ack_backlog: current listen backlog
+  * @sk_max_ack_backlog: listen backlog set in listen()
+  * @sk_uid: user id of owner
+  * @sk_prefer_busy_poll: prefer busypolling over softirq processing
+  * @sk_busy_poll_budget: napi processing budget when busypolling
+  * @sk_priority: %SO_PRIORITY setting
+  * @sk_type: socket type (%SOCK_STREAM, etc)
+  * @sk_protocol: which protocol this socket belongs in this network family
+  * @sk_peer_lock: lock protecting @sk_peer_pid and @sk_peer_cred
+  * @sk_peer_pid: &struct pid for this socket's peer
+  * @sk_peer_cred: %SO_PEERCRED setting
+  * @sk_rcvlowat: %SO_RCVLOWAT setting
+  * @sk_rcvtimeo: %SO_RCVTIMEO setting
+  * @sk_sndtimeo: %SO_SNDTIMEO setting
+  * @sk_txhash: computed flow hash for use on transmit
+  * @sk_txrehash: enable TX hash rethink
+  * @sk_filter: socket filtering instructions
+  * @sk_timer: sock cleanup timer
+  * @sk_stamp: time stamp of last packet received
+  * @sk_stamp_seq: lock for accessing sk_stamp on 32 bit architectures only
+  * @sk_tsflags: SO_TIMESTAMPING flags
+  * @sk_use_task_frag: allow sk_page_frag() to use current->task_frag.
+  *        Sockets that can be used under memory reclaim should
+  *        set this to false.
+  * @sk_bind_phc: SO_TIMESTAMPING bind PHC index of PTP virtual clock
+  *               for timestamping
+  * @sk_tskey: counter to disambiguate concurrent tstamp requests
+  * @sk_zckey: counter to order MSG_ZEROCOPY notifications
+  * @sk_socket: Identd and reporting IO signals
+  * @sk_user_data: RPC layer private data. Write-protected by @sk_callback_lock.
+  * @sk_frag: cached page frag
+  * @sk_peek_off: current peek_offset value
+  * @sk_send_head: front of stuff to transmit
+  * @tcp_rtx_queue: TCP re-transmit queue [union with @sk_send_head]
+  * @sk_security: used by security modules
+  * @sk_mark: generic packet mark
+  * @sk_cgrp_data: cgroup data for this cgroup
+  * @sk_memcg: this socket's memory cgroup association
+  * @sk_write_pending: a write to stream socket waits to start
+  * @sk_wait_pending: number of threads blocked on this socket
+  * @sk_state_change: callback to indicate change in the state of the sock
+  * @sk_data_ready: callback to indicate there is data to be processed
+  * @sk_write_space: callback to indicate there is bf sending space available
+  * @sk_error_report: callback to indicate errors (e.g. %MSG_ERRQUEUE)
+  * @sk_backlog_rcv: callback to process the backlog
+  * @sk_validate_xmit_skb: ptr to an optional validate function
+  * @sk_destruct: called at sock freeing time, i.e. when all refcnt == 0
+  * @sk_reuseport_cb: reuseport group container
+  * @sk_bpf_storage: ptr to cache and control for bpf_sk_storage
+  * @sk_rcu: used during RCU grace period
+  * @sk_clockid: clockid used by time-based scheduling (SO_TXTIME)
+  * @sk_txtime_deadline_mode: set deadline mode for SO_TXTIME
+  * @sk_txtime_report_errors: set report errors mode for SO_TXTIME
+  * @sk_txtime_unused: unused txtime flags
+  * @ns_tracker: tracker for netns reference
+  * @sk_bind2_node: bind node in the bhash2 table
+  */
+struct sock {
+  /*
+   * Now struct inet_timewait_sock also uses sock_common, so please just
+   * don't add nothing before this first member (__sk_common) --acme
+   */
+  struct sock_common  __sk_common;
+#define sk_node     __sk_common.skc_node
+#define sk_nulls_node   __sk_common.skc_nulls_node
+#define sk_refcnt   __sk_common.skc_refcnt
+#define sk_tx_queue_mapping __sk_common.skc_tx_queue_mapping
+#ifdef CONFIG_SOCK_RX_QUEUE_MAPPING
+#define sk_rx_queue_mapping __sk_common.skc_rx_queue_mapping
+#endif
+
+#define sk_dontcopy_begin __sk_common.skc_dontcopy_begin
+#define sk_dontcopy_end   __sk_common.skc_dontcopy_end
+#define sk_hash     __sk_common.skc_hash
+#define sk_portpair   __sk_common.skc_portpair
+#define sk_num      __sk_common.skc_num
+#define sk_dport    __sk_common.skc_dport
+#define sk_addrpair   __sk_common.skc_addrpair
+#define sk_daddr    __sk_common.skc_daddr
+#define sk_rcv_saddr    __sk_common.skc_rcv_saddr
+#define sk_family   __sk_common.skc_family
+#define sk_state    __sk_common.skc_state
+#define sk_reuse    __sk_common.skc_reuse
+#define sk_reuseport    __sk_common.skc_reuseport
+#define sk_ipv6only   __sk_common.skc_ipv6only
+#define sk_net_refcnt   __sk_common.skc_net_refcnt
+#define sk_bound_dev_if   __sk_common.skc_bound_dev_if
+#define sk_bind_node    __sk_common.skc_bind_node
+#define sk_prot     __sk_common.skc_prot
+#define sk_net      __sk_common.skc_net
+#define sk_v6_daddr   __sk_common.skc_v6_daddr
+#define sk_v6_rcv_saddr __sk_common.skc_v6_rcv_saddr
+#define sk_cookie   __sk_common.skc_cookie
+#define sk_incoming_cpu   __sk_common.skc_incoming_cpu
+#define sk_flags    __sk_common.skc_flags
+#define sk_rxhash   __sk_common.skc_rxhash
+
+  /* early demux fields */
+  struct dst_entry __rcu  *sk_rx_dst;
+  int     sk_rx_dst_ifindex;
+  u32     sk_rx_dst_cookie;
+
+  socket_lock_t   sk_lock;
+  atomic_t    sk_drops;
+  int     sk_rcvlowat;
+  struct sk_buff_head sk_error_queue;
+  struct sk_buff_head sk_receive_queue;
+  /*
+   * The backlog queue is special, it is always used with
+   * the per-socket spinlock held and requires low latency
+   * access. Therefore we special case it's implementation.
+   * Note : rmem_alloc is in this structure to fill a hole
+   * on 64bit arches, not because its logically part of
+   * backlog.
+   */
+  struct {
+    atomic_t  rmem_alloc;
+    int   len;
+    struct sk_buff  *head;
+    struct sk_buff  *tail;
+  } sk_backlog;
+
+#define sk_rmem_alloc sk_backlog.rmem_alloc
+
+  int     sk_forward_alloc;
+  u32     sk_reserved_mem;
+#ifdef CONFIG_NET_RX_BUSY_POLL
+  unsigned int    sk_ll_usec;
+  /* ===== mostly read cache line ===== */
+  unsigned int    sk_napi_id;
+#endif
+  int     sk_rcvbuf;
+  int     sk_wait_pending;
+
+  struct sk_filter __rcu  *sk_filter;
+  union {
+    struct socket_wq __rcu  *sk_wq;
+    /* private: */
+    struct socket_wq  *sk_wq_raw;
+    /* public: */
+  };
+#ifdef CONFIG_XFRM
+  struct xfrm_policy __rcu *sk_policy[2];
+#endif
+
+  struct dst_entry __rcu  *sk_dst_cache;
+  atomic_t    sk_omem_alloc;
+  int     sk_sndbuf;
+
+  /* ===== cache line for TX ===== */
+  int     sk_wmem_queued;
+  refcount_t    sk_wmem_alloc;
+  unsigned long   sk_tsq_flags;
+  union {
+    struct sk_buff  *sk_send_head;
+    struct rb_root  tcp_rtx_queue;
+  };
+  struct sk_buff_head sk_write_queue;
+  __s32     sk_peek_off;
+  int     sk_write_pending;
+  __u32     sk_dst_pending_confirm;
+  u32     sk_pacing_status; /* see enum sk_pacing */
+  long      sk_sndtimeo;
+  struct timer_list sk_timer;
+  __u32     sk_priority;
+  __u32     sk_mark;
+  unsigned long   sk_pacing_rate; /* bytes per second */
+  unsigned long   sk_max_pacing_rate;
+  struct page_frag  sk_frag;
+  netdev_features_t sk_route_caps;
+  int     sk_gso_type;
+  unsigned int    sk_gso_max_size;
+  gfp_t     sk_allocation;
+  __u32     sk_txhash;
+
+  /*
+   * Because of non atomicity rules, all
+   * changes are protected by socket lock.
+   */
+  u8      sk_gso_disabled : 1,
+        sk_kern_sock : 1,
+        sk_no_check_tx : 1,
+        sk_no_check_rx : 1,
+        sk_userlocks : 4;
+  u8      sk_pacing_shift;
+  u16     sk_type;
+  u16     sk_protocol;
+  u16     sk_gso_max_segs;
+  unsigned long         sk_lingertime;
+  struct proto    *sk_prot_creator;
+  rwlock_t    sk_callback_lock;
+  int     sk_err,
+        sk_err_soft;
+  u32     sk_ack_backlog;
+  u32     sk_max_ack_backlog;
+  kuid_t      sk_uid;
+  u8      sk_txrehash;
+#ifdef CONFIG_NET_RX_BUSY_POLL
+  u8      sk_prefer_busy_poll;
+  u16     sk_busy_poll_budget;
+#endif
+  spinlock_t    sk_peer_lock;
+  int     sk_bind_phc;
+  struct pid    *sk_peer_pid;
+  const struct cred *sk_peer_cred;
+
+  long      sk_rcvtimeo;
+  ktime_t     sk_stamp;
+#if BITS_PER_LONG==32
+  seqlock_t   sk_stamp_seq;
+#endif
+  atomic_t    sk_tskey;
+  atomic_t    sk_zckey;
+  u32     sk_tsflags;
+  u8      sk_shutdown;
+
+  u8      sk_clockid;
+  u8      sk_txtime_deadline_mode : 1,
+        sk_txtime_report_errors : 1,
+        sk_txtime_unused : 6;
+  bool      sk_use_task_frag;
+
+  struct socket   *sk_socket;
+  void      *sk_user_data;
+#ifdef CONFIG_SECURITY
+  void      *sk_security;
+#endif
+  struct sock_cgroup_data sk_cgrp_data;
+  struct mem_cgroup *sk_memcg;
+  void      (*sk_state_change)(struct sock *sk);
+  void      (*sk_data_ready)(struct sock *sk);
+  void      (*sk_write_space)(struct sock *sk);
+  void      (*sk_error_report)(struct sock *sk);
+  int     (*sk_backlog_rcv)(struct sock *sk,
+              struct sk_buff *skb);
+#ifdef CONFIG_SOCK_VALIDATE_XMIT
+  struct sk_buff*   (*sk_validate_xmit_skb)(struct sock *sk,
+              struct net_device *dev,
+              struct sk_buff *skb);
+#endif
+  void                    (*sk_destruct)(struct sock *sk);
+  struct sock_reuseport __rcu *sk_reuseport_cb;
+#ifdef CONFIG_BPF_SYSCALL
+  struct bpf_local_storage __rcu  *sk_bpf_storage;
+#endif
+  struct rcu_head   sk_rcu;
+  netns_tracker   ns_tracker;
+  struct hlist_node sk_bind2_node;
+};
+
+//https://elixir.bootlin.com/linux/v6.5.2/source/include/net/sock.h#L1575
+struct socket_alloc {
+  struct socket socket;
+  struct inode vfs_inode;
+};
+
+//https://elixir.bootlin.com/linux/v6.5.2/source/net/socket.c#L3172
+static int __init sock_init(void)
+{
+  int err;
+  /*
+   *      Initialize the network sysctl infrastructure.
+   */
+  err = net_sysctl_init();
+  if (err)
+    goto out;
+
+  /*
+   *      Initialize skbuff SLAB cache
+   */
+  skb_init();
+
+  /*
+   *      Initialize the protocols module.
+   */
+
+  init_inodecache();
+
+  err = register_filesystem(&sock_fs_type);
+  if (err)
+    goto out;
+  sock_mnt = kern_mount(&sock_fs_type);
+  if (IS_ERR(sock_mnt)) {
+    err = PTR_ERR(sock_mnt);
+    goto out_mount;
+  }
+
+  /* The real protocol initialization is performed in later initcalls.
+   */
+
+#ifdef CONFIG_NETFILTER
+  err = netfilter_init();
+  if (err)
+    goto out;
+#endif
+
+  ptp_classifier_init();
+
+out:
+  return err;
+
+out_mount:
+  unregister_filesystem(&sock_fs_type);
+  goto out;
+}
+
+//https://elixir.bootlin.com/linux/v6.5.2/source/include/net/protocol.h#L76
+/* This is used to register socket interfaces for IP protocols.  */
+struct inet_protosw {
+  struct list_head list;
+
+        /* These two fields form the lookup key.  */
+  unsigned short   type;     /* This is the 2nd argument to socket(2). */
+  unsigned short   protocol; /* This is the L4 protocol number.  */
+
+  struct proto   *prot;
+  const struct proto_ops *ops;
+  
+  unsigned char  flags;      /* See INET_PROTOSW_* below.  */
+};
+```
+
+struct sock 数据结构包含了大量的内核管理套接字的信息，内核把最重要的成员存放在 struct sock_common 数据结构中，struct sock_common 数据结构嵌入在 struct sock 结构中，它是 struct sock 数据结构的第一个成员.
+
+struct sock_common 数据结构是套接字在网络中的最小描述，它包含了内核管理套接字最重要信息的集合。而 struct sock 数据结构中包含了套接字的全部信息与特点，有的特性很少用到，甚至根本就没有用到.
+
+struct sock 数据结构组织在特定协议的哈希链表中，skc_node 是连接哈希链表中成员的哈希节点，skc_hash 是引用的哈希值。接收和发送数据放在数据 struct sock 数据结构的两个等待队列中：sk_receive_queue 和 sk_write_queue。这两个队列中包含的都是 Socket Buffer.
+
+内核使用 struct sock 数据结构实例中的回调函数，获取套接字上某些事件发生的消息或套接字状态发生变化. 其中，使用最频繁的回调函数是 sk_data_ready，用户进程等待数据到达时，就会调用该回调函数.
+
+套接字的文件描述符的文件访问的重定向，对网络协议栈各层是透明的. 而 inode 和 socket 的关联是通过直接分配一个辅助数据结构socket_alloc来实现的.
+
+
+在 Linux 网络子系统中，Socket Buffer 代表了一个要发送或者处理的报文, 是一个关键的数据结构，因为它贯穿于整个 TCP/IP 协议栈的各层。Linux 内核对网络数据打包处理的全过程中，始终伴随着这个 Socket Buffer。 可以理解为 Socket Buffer 就是网络数据包在内核中的对象实例.
+
+Socket Buffer 主要由两部分组成:
+1. 数据包：存放了在网络中实际流通的数据
+2. 管理数据结构（struct sk_buff）：当在内核中对数据包进行时，内核还需要一些其他的数据来管理数据包和操作数据包，例如协议之间的交换信息，数据的状态，时间等
+
+struct sk_buff 数据结构中存放了套接字接收 / 发送的数据。在发送数据时，在套接字层创建了 Socket Buffer 缓冲区与管理数据结构，存放来自应用程序的数据。在接收数据包时，Socket Buffer 则在网络设备的驱动程序中创建，存放来自网络的数据。在发送和接受数据的过程中，各层协议的头信息会不断从数据包中插入和去掉，sk_buff 结构中描述协议头信息的地址指针也会被不断地赋值和复位.
+
+套接字层的初始化`sock_init`要为以后各协议初始化 struct sock 数据结构对象、套接字缓冲区 Socket Buffer 对象等做好准备，预留内存空间.
+
+TCP/IP 协议栈处理完输入数据包后，将数据包交给套接字层，放在套接字的接收缓冲区队列（sk_rcv_queue）。然后数据包从套接字层离开内核，送给应用层等待数据包的用户程序。用户程序向外发送的数据包缓存在套接字的传送缓冲区队列（sk_write_queue），从套接字层进入内核地址空间.
+
+在同一个主机中，可以同时在多个协议上打开多个套接字, 在 Linux 内核里有一个叫做 struct inet_protosw 的数据结构来区分当前数据包的目标套接字. 它就是管理和描述 struct proto_ops 和 struct proto 之间的对应关系, struct proto_ops 就是系统调用套接字的操作函数块，而 struct proto 就是跟内核协议相关的套接字操作函数块.
+
+内核使用 struct  inet_protosw 数据结构实现的协议交换表，将应用程序通过 socketcall 系统调用指定的套接字操作，转换成对某个协议实例实现的套接字操作函数的调用.
+
+struct inet_protosw 类型把 INET 套接字的协议族操作集与传输层协议操作集关联起来。该类型的 inetsw_array 数组变量实现了 INET 套接字的协议族操作集与具体的传输层协议关联。由 struct inet_protosw 数据结构类型数组 inetsw_array[]构成的向量表，称为协议交换表，协议交换表满足了套接字支持多协议栈这项功能.
+
+创建套接字应用程序一般要经过后面这 6 个步骤:
+1. 创建套接字
+2. 将套接字与地址绑定，设置套接字选项
+3. 建立套接字之间的连接
+4. 监听套接字
+5. 接收、发送数据
+6. 关闭、释放套接字
+
+在应用程序中执行 socket 函数，socket 产生系统调用中断执行内核的套接字分路函数 sys_socket call，在 sys_socket call 套接字函数分路器中将调用传送到 sys_socket 函数，由 sys_socket 函数调用套接字的通用创建函数 sock_create。sock_create 函数完成通用套接字创建、初始化任务后，再调用特定协议族的套接字创建函数
+
+一个新的 struct socket 数据结构起始由 sock_create 函数创建，该函数直接调用 `__sock_create` 函数，`__sock_create` 函数的任务是为套接字预留需要的内存空间，由 sock_alloc 函数完成这项功能.
+
+sock_alloc 函数不仅会为 struct socket 数据结构实例预留空间，也会为 struct inode 数据结构实例分配需要的内存空间，这样可以使两个数据结构的实例相关联.
+
+当具体的协议与新套接字相连时，其内部状态的管理由协议自身维护.
+
+创建完套接字后，应用程序需要调用 [sys_bind](https://elixir.bootlin.com/linux/v6.5.2/source/net/socket.c#L1801) 函数把套接字和地址绑定起来.
+
+sys_bind 函数首先会查找套接字对应的 socket 实例，调用 sockfd_lookup_light。在绑定之前，将用户空间的地址拷贝到内核空间的缓冲区中，在拷贝过程中会检查用户传入的地址是否正确。等上述的准备工作完成后，就会调用 inet_bind 函数来完成绑定操作.
+
+当应用程序调用 connect 函数发出连接请求时，内核会启动函数 sys_connect.
+
+调用 listen 函数时，应用程序触发内核的 sys_listen 函数，把套接字描述符 fd 对应的套接字设置为监听模式，观察连接请求.
+
+接受一个客户端的连接请求会调用 accept 函数，应用程序触发内核函数 sys_accept，等待接收连接请求。如果允许连接，则重新创建一个代表该连接的套接字，并返回其套接字描述符.
+
+这个新的套接字描述符与最初创建套接字时，设置的套接字地址族与套接字类型、使用的协议一样。原来创建的套接字不与连接关联，它继续在原套接字上侦听，以便接收其他连接请求.
+
+套接字应用中最简单的传送函数是 send, send 函数的作用类似于 write，但 send 函数允许应用程序指定标志，规定如何对待传送数据. 调用 send 函数时，会触发内核的 sys_send 函数，把发送缓冲区的数据发送出去.
+
+sys_send 函数具体调用流程如下:
+1. 应用程序的数据被复制到内核后，sys_send 函数调用 sock_sendmsg，依据协议族类型来执行发送操作
+2. 如果是 INET 协议族套接字，sock_sendmsg 将调用 inet_sendmsg 函数
+3. 如果采用 TCP 协议，inet_sendmsg 函数将调用 tcp_sendmsg，并按照 TCP 协议规则来发送数据包
+
+send 函数返回发送成功，并不意味着在连接的另一端的进程可以收到数据，这里只能保证发送 send 函数执行成功，发送给网络设备驱动程序的数据没有出错.
+
+接收数据recv 函数与文件读 read 函数类似，recv 函数中可以指定标志来控制如何接收数据，调用 recv 函数时，应用程序会触发内核的 sys_recv 函数，把网络中的数据递交到应用程序。当然，read、recvfrom 函数也会触发 sys_recv 函数.
+
+sys_recv具体流程如下:
+1. 为把内核的网络数据转入应用程序的接收缓冲区，sys_recv 函数依次调用 sys_recvfrom、sock_recvfrom 和 `__sock_recvmsg`，并依据协议族类型来执行具体的接收操作
+2. 如果是 INET 协议族套接字，`__sock_recvmsg` 将调用 sock_common_recvmsg 函数
+3. 如果采用 TCP 协议，sock_common_recvmsg 函数将调用 tcp_recvmsg，按照 TCP 协议规则来接收数据包如果接收方想获取数据包发送端的标识符，应用程序可以调用 sys_recvfrom 函数来获取数据包发送方的源地址
+
+当应用程序调用 shutdown 函数关闭连接时，内核会启动函数 sys_shutdown.
 ## IPsec
 IPsec提供了一种网络层安全解决方案, 它使用ESP和AH协议. 它在ipv6中是强制执行的, 在ipv4中是可选的. 大部分vpn(virtual private network)解决方案都以ipsec为基础.
 
