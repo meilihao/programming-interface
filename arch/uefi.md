@@ -171,8 +171,152 @@ TSL阶段之所以称为临时系统，在于它存在的目的就是为操作�
 ### 是否以uefi启动
 使用`ls /sys/firmware/efi/efivars`, 如果目录存在，则系统是以 UEFI 模式启动的.
 
+### bootx64.efi/boot.efi
+uefi固件会发现所有fat(不区分大小写)分区并加入启动菜单, 选中某个菜单, 就是检查其是否存在`efi/boot/bootx64.efi(64 os)或boot.efi(32 os)`并执行它. 如果该efi存在, 某些情况下会自动执行它, 比如qemu环境仅有一个fat分区.
+
 # coreboot
 参考:
 - [Mainboards supported by coreboot](https://coreboot.org/status/board-status.html)
 
 由于coreboot要初始化裸硬件，所以必须为所要支持的每个芯片组和主板移植. 因此而言，coreboot只适用于有限的硬件平台和主板型号.
+
+# edk2
+## 环境搭建
+ref:
+- [「Coding Tools」 第3话 Ubuntu下EDK2开发环境搭建](https://www.bilibili.com/read/cv12197402/)
+- [Linux UEFI 学习环境搭建](https://martins3.github.io/uefi/uefi-linux.html)
+- [我的第一支 edk2 Application](https://damn99.com/2020-05-18-edk2-first-app/)
+
+```bash
+# git clone -b <release_version> --depth 1 https://github.com/tianocore/edk2.git
+# cd edk2
+# git submodule update --init
+# apt install uuid-dev
+# ln -s /usr/bin/python3.8 /usr/bin/python
+# make -C BaseTools
+# source edksetup.sh
+# vim Conf/target.txt # 参考Conf/tools_def.txt
+ACTIVE_PLATFORM       = MdeModulePkg/MdeModulePkg.dsc # 想要编译的内容
+TARGET_ARCH           = X64 # 取决于你要运行的 Guest 机器的架构
+TOOL_CHAIN_TAG        = GCC5 # 关于编译器，官方文档反复强调是 gcc5，但是参考 [stackoverflow](https://stackoverflow.com/questions/63725239/build-edk2-in-linux)实际上系统中的 gcc 是 gcc9 或者 gcc10 也是无所谓的
+MAX_CONCURRENT_THREAD_NUMBER = 9 # 这个取决于你的机器 CPU 核心数量
+# build
+ls Build/MdeModule/DEBUG_*/*/HelloWorld.efi # 构建出HelloWorld.efi
+```
+
+> 当ACTIVE_PLATFORM=OvmfPkg/OvmfPkgX64.dsc, build时可构建出OVMF.fd(`Build/OvmfX64/DEBUG_GCC5/FV/OVMF.fd`)
+
+如果想要在 x86 电脑上编译安装 ARM 版本的 edk2, 其 Conf/target.txt 对应的配置为:
+```
+ACTIVE_PLATFORM       = ArmVirtPkg/ArmVirtQemu.dsc
+TARGET_ARCH           = AARCH64
+TOOL_CHAIN_TAG        = GCC5
+MAX_CONCURRENT_THREAD_NUMBER = 9
+```
+
+并设置env:
+```
+export GCC5_AARCH64_PREFIX=aarch64-linux-gnu-          # ubuntu 中
+```
+
+### 构建
+命令行编译platform pkg:
+```bash
+# build默认使用`Conf/target.txt`参数, 也支持指定
+build -p $WORKSPACE/EmulatorPkg/EmulatorPkg.dsc -a X64 -b DEBUG -t GCC5 [-D BUILD_64 -D UNIX_SEC_BUILD] -n 3
+
+option说明：
+-p PLATFORMFILE: 目标平台描述文件
+-a TARGETARCH: 目标平台X64/IA32
+-b BUILDTARGET: 可选项（DEBUG, RELEASE, NOOPT），将只编译dsc文件中特定的模块
+-m MODULEFILE: 编译目标module
+-t TOOLCHAIN : 使用目标编译器编译
+-n THREADNUMBER : 多线程编译
+-D MACROS: Macro格式: "Name [= Value]"，传入宏定义
+```
+
+将自己的uefi project放在edk2外编译容易遇到错误, 因此推荐将其放入edk2, 具体方法:
+1. 将自己项目加入现有的edk2项目进行构建, 比如`OvmfPkg`
+1. 将自己项目放在edk2根目录进行构建
+
+### Stdlib
+ref:
+- [使用 Rust 编写 UEFI Application](https://martins3.github.io/uefi/uefi-linux.html)
+
+UEFI 提供了 StdLib, 其尽可能提供和 glibc 相同的接口，这样，很多用户态程序几乎不需要做任何修改就可以 直接编译为 .efi 文件，在 UEFI shell 中运行.
+
+```bash
+git clone https://github.com/tianocore/edk2-libc
+mv edk2-libc/* path/to/edk2
+cd path/to/edk2
+build -p AppPkg/AppPkg.dsc
+```
+
+其实 edk2-libc 主要就是两个文件夹:
+- StdLib : 利用 UEFI native 的接口实现 glib 的接口
+- AppPkg : 各种测试程序，甚至包括 lua 解释器
+
+### 如何让自动运行 efi 程序
+UEFI 启动之后会自动执行 startup.nsh
+
+在 edk2 中搜索 startup.nsh 可以找到 OvmfPkg/PlatformCI/PlatformBuildLib.py, 了解到 QEMU 可以通过参数实现`-drive file=fat:rw:${VirtualDrive},format=raw,media=disk`
+
+> 在 shell 会等待 5s 来等待程序的执行, 可在 ShellPkg/Application/Shell/Shell.c 中修改为等待时间 0s
+
+### qemu
+```
+cp ~/edk2/Build/MdeModule/DEBUG_GCC5/X64/HelloWorld.efi ~/run-ovmf/hda-contents/
+qemu-system-x86_64 -bios OVMF.fd -hda fat:rw:hda-contents -net none
+```
+
+- `-hda fat:rw:hda-contents`=`-drive format=raw,file=fat:rw:hda-contents`
+- `-bios OVMF.fd`=`-drive if=pflash,format=raw,file=OVMF_CODE.fd,readonly=on`
+
+	启用uefi bios时追加`-drive if=pflash,format=raw,file=OVMF_VARS.fd`(建议单独拷贝一份OVMF_VARS.fd), 否则会生成其他名称的OVMF_VARS
+
+### gdb
+ref:
+- [Debugging OVMF with GDB](https://retrage.github.io/2019/12/05/debugging-ovmf-en.html)
+- [我的第一支 edk2 Application](https://damn99.com/2020-05-18-edk2-first-app/)+[uefi.sh](https://github.com/Martins3/Martins3.github.io/blob/master/docs/uefi/uefi/uefi.sh)
+
+## examples
+- [luobing/uefi-practical-programming](https://github.com/luobing/uefi-practical-programming)
+- [UEFI](https://www.bilibili.com/video/BV1HL4y1W7dJ)
+
+## src
+- `*Pkg`: edk2的主体, 每个Pkg都是一个解决方案
+
+	某些Pkg比如MdePkg提供了很多的接口, 充当了lib的角色
+
+	说明:
+	- dsc: Platform Description File, 是对整个包的描述
+	- dec: Package Declaration File, 定义了公开的数据和接口, 其他Pkg可以调用它们, 是UEFI接口的实现
+	- inf: 描述具体工程
+
+		- Defines: 描述了这个工程的名称, guid, 类型, 版本, 执行入口等
+		- Sources: 工程用到的源代码以及字符串资源等文件的列表
+		- Packages: 本工程需要引用的接口来自哪些Pkg
+		- LibraryClasses: 用到了哪些Pkg里的具体哪些库的接口
+		- Pcd: 工程用到的全局字符串等信息, 是引用的DEC定义的内容
+- BaseTools: 编译pkg所需的基本工具
+
+	edk2有自己的工具链, 不使用系统的
+- Build: Pkg的编译结果, 按Pkg, TARGET_ARCH, TOOL_CHAIN_TAG, TARGET存放
+- Conf: 保存配置
+
+### 接口说明
+```
+// https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html?highlight=getmemorymap#efi-boot-services-getmemorymap
+// MdePkg/Include/Uefi/UefiSpec.h
+typedef
+EFI_STATUS
+(EFIAPI \*EFI_GET_MEMORY_MAP) (
+   IN OUT UINTN                  *MemoryMapSize,
+   OUT EFI_MEMORY_DESCRIPTOR     *MemoryMap,
+   OUT UINTN                     *MapKey,
+   OUT UINTN                     *DescriptorSize,
+   OUT UINT32                    *DescriptorVersion
+  );
+```
+
+EFIAPI,EFI_STATUS,IN,OUT都是宏定义(在`MdePkg/Include/Base.h`), 只是简单定义一下, 没有具体值, 纯粹是说明性的. UINTN是数据类型(在`MdePkg/Include/X64/ProcessorBind.h`).
