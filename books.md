@@ -16,3 +16,6 @@
 ## kernel
 - [《Linux 内核编码风格》官方手册最新中译本](https://linux.cn/article-13494-1.html)
 - [Linux-0.12内核学习资料汇总+Linux 内核 0.12 完全注释](https://zhuanlan.zhihu.com/p/630740573)
+
+	- [code](http://www.oldlinux.org/Book-Lite/)
+	- [ultraji/linux-0.12 实验环境](https://github.com/ultraji/linux-0.12)

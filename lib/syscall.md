@@ -13,11 +13,25 @@ OS向程序提供的内核服务接口, 调用过程: 用户态 - 系统调用 -
 > 调用系统调用的优选方式是使用VDSO，VDSO是映射在每个进程地址空间中的存储器的一部分，其允许更有效地使用系统调用. int 0x80是一种调用系统调用的传统方法，应该避免.
 > 在 Linux 上,系统调用syscall遵循的惯例是调用成功则返回非负值. 发生错误时,例程会对相应 errno 常量取反,返回一负值.
 
+其实对于 Linux 内核, 应用程序会调用库函数，在库函数中调用 API 入口函数，触发中断进入 Linux 内核执行系统调用，完成相应的功能服务.
+
+在 Linux 内核之上，使用最广泛的 C 库是 glibc，其中包括 C 标准库的实现，也包括所有和系统 API 对应的库接口函数。几乎所有 C 程序都要调用 glibc 的库函数，所以 glibc 是 Linux 内核上 C 程序运行的基础.
+
 glibc 是 Linux 下使用的开源的标准 C 库即(libc). 它为程序员提供丰富的API, 除了例如字符串处理、数学运算等用户态服务之外, 最重要的是封装了系统调用以便于使用(每个api至少封装了一个syscall). 通常使用strace命令来跟踪进程执行时系统调用和所接收的信号.
 
 系统调用在内核中的实现函数要有一个声明, 在[`include/linux/syscalls.h`](https://elixir.bootlin.com/linux/latest/source/include/linux/syscalls.h)里. 真正的实现这个系统调用，一般在一个.c 文件里面，例如 sys_open 的实现在 [fs/open.c](https://elixir.bootlin.com/linux/latest/source/fs/open.c#L1168) 里面.
 
 > 查看glic版本: `$ /lib/x86_64-linux-gnu/libc-2.23.so`
+
+在编译的过程中，根据 syscall_32.tbl 和 syscall_64.tbl 生成自己的 syscalls_32.h 和 syscalls_64.h 文件. 生成方式在 arch/x86/entry/syscalls/Makefile 文件中, 这里面会使用两个脚本，即 syscallhdr.sh、syscalltbl.sh，它们最终生成的 syscalls_32.h 和 syscalls_64.h 两个文件中就保存了系统调用号和系统调用实现函数之间的对应关系.
+
+Linux 内核一共有 `__NR_syscall_max` 个系统调用, 而系统调用号从 0 开始到 `__NR_syscall_max` 结束.
+
+Linux 内核有 400 多个系统调用，它使用了一个函数指针数组，存放所有的系统调用函数的地址，通过数组下标就能索引到相应的系统调用。这个数组叫 sys_call_table，即 Linux 系统调用表.
+
+定义一个系统调用函数，需要使用专门的宏. 根据参数不同选用不同的宏，对于无参数的系统调用函数，应该使用 SYSCALL_DEFINE0 宏来定义.
+
+添加syscall demo见[这里](https://time.geekbang.org/column/article/407343).
 
 ### 32 bit syscall
 参考:
@@ -212,6 +226,8 @@ flags:
 	调用 open()成功后,后续的 I/O 操作也是非阻塞的. 若 I/O 系统调用未能立即完成,则可能会只传输部分数据,或者系统调用失败,并返回 EAGAIN 或 EWOULDBLOCK 错误.
 	管道、 FIFO、套接字、设备(比如终端、伪终端)都支持非阻塞模式.(因为无法通过 open()来获取管道和套接字的文件描述符,所以要启用非阻塞标志,就必须fcntl()的F_SETFL)
 	由于内核缓冲区保证了普通文件 I/O 不会陷入阻塞,故而打开普通文件时一般会忽略 O_NONBLOCK 标志. 然而,当使用强制文件锁时, O_NONBLOCK标志对普通文件也是起作用的.
+
+在glibc/intl/loadmsgcat.c, open 只是宏，实际工作的是 `__open_nocancel` 函数，其中会用 INLINE_SYSCALL_CALL 宏经过一系列替换，最终根据参数的个数替换成相应的 `internal_syscall##nr 宏`.
 
 ## sync()
 使包含更新文件信息的所有内核缓冲区(即数据块、指针块、元数据等)刷新到磁盘上. 在 Linux 实现中,sync()调用仅在所有数据已传递到磁盘上(或者至少高速缓存)时返回.

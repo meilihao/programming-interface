@@ -193,7 +193,7 @@ ref:
 # git submodule update --init
 # apt install uuid-dev
 # ln -s /usr/bin/python3.8 /usr/bin/python
-# make -C BaseTools
+# make -C BaseTools # BaseTools contains all the tools required for building EDK II
 # source edksetup.sh
 # vim Conf/target.txt # 参考Conf/tools_def.txt
 ACTIVE_PLATFORM       = MdeModulePkg/MdeModulePkg.dsc # 想要编译的内容
@@ -236,8 +236,71 @@ option说明：
 ```
 
 将自己的uefi project放在edk2外编译容易遇到错误, 因此推荐将其放入edk2, 具体方法:
-1. 将自己项目加入现有的edk2项目进行构建, 比如`OvmfPkg`
-1. 将自己项目放在edk2根目录进行构建
+1. 将自己项目加入现有的edk2项目进行构建, 比如`OvmfPkg`, 参考[UEFI 基础教程 （一） - 运行第一个APP HelloWorld](https://blog.csdn.net/weixin_41028621/article/details/112546820)
+
+	步骤:
+	1. OvmfPkg/HelloWorld/HelloWorld.c
+
+		```
+		#include <Uefi.h>
+		#include <Library/UefiLib.h>
+		#include <Library/BaseLib.h>
+		#include <Library/DebugLib.h>
+		#include <Library/BaseMemoryLib.h>
+		#include <Library/UefiBootServicesTableLib.h>
+
+		//ShellCEntryLib call user interface ShellAppMain
+		EFI_STATUS
+		EFIAPI
+		HelloWorldEntry(
+		  IN EFI_HANDLE        ImageHandle,
+		  IN EFI_SYSTEM_TABLE  *SystemTable
+		)
+		{
+		  EFI_STATUS  Status = EFI_SUCCESS;
+		  Print (L"[Console]  HelloWorldEntry Start..\n");
+
+		  Print (L"[Console]  HelloWorldEntry  End ... \n");
+		  return Status;
+		}
+		```
+	2. OvmfPkg/HelloWorld/HelloWorld.inf
+		```
+		[Defines]
+		  INF_VERSION = 0x00010007
+		  BASE_NAME = HelloWorld
+		  FILE_GUID = 69A6DE6D-FA9F-485E-9A4E-EA70FDCFD82F
+		  MODULE_TYPE = UEFI_APPLICATION
+		  VERSION_STRING = 1.0
+		  ENTRY_POINT = HelloWorldEntry
+
+		[Sources]
+		  HelloWorld.c
+
+		[Packages]
+		  MdePkg/MdePkg.dec
+
+		[LibraryClasses]
+		  UefiApplicationEntryPoint
+		  UefiLib
+		```
+	3. OvmfPkg/OvmfPkgX64.dsc
+		```
+		diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+		index c9235e4..c42708a 100644
+		--- a/OvmfPkg/OvmfPkgX64.dsc
+		+++ b/OvmfPkg/OvmfPkgX64.dsc
+		@@ -661,6 +661,7 @@
+		 ################################################################################
+		 [Components]
+		   OvmfPkg/ResetVector/ResetVector.inf
+		+  OvmfPkg/HelloWorld/HelloWorld.inf
+		```
+	4. `build -a X64 -p OvmfPkg/OvmfPkgX64.dsc`
+	5. 获取`Build/OvmfX64/DEBUG_GCC5/X64/HelloWorld.efi`
+	6. 测试见`https://github.com/emvivre/uefi_hello_world.git`
+
+1. 将自己项目放在edk2根目录进行构建, 参考[UEFI QEMU虚拟机下运行第一个APP HelloWorld图解](https://blog.csdn.net/Wang20122013/article/details/108737763)
 
 ### Stdlib
 ref:
@@ -303,6 +366,33 @@ ref:
 	edk2有自己的工具链, 不使用系统的
 - Build: Pkg的编译结果, 按Pkg, TARGET_ARCH, TOOL_CHAIN_TAG, TARGET存放
 - Conf: 保存配置
+
+## 编译执行过程
+build编译HelloWorld.c的过程：
+1. HelloWorld.c 首先被编译成目标文件 HelloWorld.obj
+1. 连接器将目标文件HelloWorld.c 和其它库连接成HelloWorld.dll??
+
+	连接器在生成HelloWorld.dll时使用了`/dll/entry:_ModuleEntryPoint`. efi是遵循了PE32格式的二进制文件，`_ModuleEntryPoint`便是这个二进制文件的入口函数.
+1. GenFw 工具将HelloWorld.dll 转化成 HelloWorld.efi
+
+
+标准应用程序加载过程:
+1. 将HelloWorld.efi 文件加载到内存
+1. 当shell中执行HelloWorld.efi时，shell首先用gBS->LoadImage()将HelloWorld.efi文件加载到内存生成Image对象，然后调用gBS->StartImag(Image)启动这个Image对象。gBS->StartImage()是一个函数指针，它实际指向的是CoreStartImage()
+1. 进入映像入口函数
+
+	CoreStartImage()的主要作用是调用映像入口函数，在gBS->StartImage 的核心是Image->EntryPoint(···),它就是程序映像的入口函数，对应程序来说就是`_ModuleEntryPoint` 函数. 进入 `_ModuleEntryPoint` 后，控制权才转交给应用程序(HelloWorld.efi).
+　　
+	`_ModuleEntryPoint`主要处理三件事:
+　　1. 初始化：初始化函数ProcessLibraryConstructorList中调用一系列构造函数
+　　2. 调用本模块的入口函数 : ProcessModuleEntryPointList 中调用的是工程模块定义的入口函数
+　　3. 析构：ProcessLibraryDestructorList 中调用一系列析构函数
+
+	> 这三个对应的函数AutoGen.h,AutoGen.c中.
+
+1.进入模块入口函数
+
+	在ProcessModuleEntryPointList函数中调用了工程模块的真正入口函数UefiMain
 
 ### 接口说明
 ```
