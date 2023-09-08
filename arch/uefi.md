@@ -302,6 +302,8 @@ option说明：
 
 1. 将自己项目放在edk2根目录进行构建, 参考[UEFI QEMU虚拟机下运行第一个APP HelloWorld图解](https://blog.csdn.net/Wang20122013/article/details/108737763)
 
+	为了能用git管理自己的Pkg, 我是在edk2外建立Pkg, 再软链接到edk2根目录下
+
 ### Stdlib
 ref:
 - [使用 Rust 编写 UEFI Application](https://martins3.github.io/uefi/uefi-linux.html)
@@ -335,7 +337,7 @@ qemu-system-x86_64 -bios OVMF.fd -hda fat:rw:hda-contents -net none
 - `-hda fat:rw:hda-contents`=`-drive format=raw,file=fat:rw:hda-contents`
 - `-bios OVMF.fd`=`-drive if=pflash,format=raw,file=OVMF_CODE.fd,readonly=on`
 
-	启用uefi bios时追加`-drive if=pflash,format=raw,file=OVMF_VARS.fd`(建议单独拷贝一份OVMF_VARS.fd), 否则会生成其他名称的OVMF_VARS
+	建议启用uefi bios时追加`-drive if=pflash,format=raw,file=OVMF_VARS.fd`(建议单独拷贝一份OVMF_VARS.fd), 否则会在fat分区生成其他名称的OVMF_VARS, 比如NvVars
 
 ### gdb
 ref:
@@ -370,7 +372,7 @@ ref:
 ## 编译执行过程
 build编译HelloWorld.c的过程：
 1. HelloWorld.c 首先被编译成目标文件 HelloWorld.obj
-1. 连接器将目标文件HelloWorld.c 和其它库连接成HelloWorld.dll??
+1. 连接器将目标文件HelloWorld.c 和其它库连接成HelloWorld.dll(看build时的log就可见该过程)
 
 	连接器在生成HelloWorld.dll时使用了`/dll/entry:_ModuleEntryPoint`. efi是遵循了PE32格式的二进制文件，`_ModuleEntryPoint`便是这个二进制文件的入口函数.
 1. GenFw 工具将HelloWorld.dll 转化成 HelloWorld.efi
