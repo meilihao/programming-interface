@@ -400,6 +400,7 @@ ref:
 - [UEFI](https://www.bilibili.com/video/BV1HL4y1W7dJ)
 
 	[code](https://gitee.com/tanyugang/UEFI)
+- [xv6_uefi](https://gitee.com/naoki9911/xv6_uefi)
 
 ## src
 - `*Pkg`: edk2的主体, 每个Pkg都是一个解决方案
@@ -489,3 +490,11 @@ EFI_STATUS EFIAPI UefiMain(
 SystemTable是系统表指针, SystemTable是全局实例, 且仅存在一个, 定义在`MdePkg/Libaray/UefiBootServicesTableLib/UefiBootServicesTableLib.c`
 
 > EFI_BOOT_SERVICES其实全局也只有一份实例.
+
+> uefi字符串是双字节, 即有`L`前缀的原因
+
+## FAQ
+### 显卡
+真机环境, uefi优先初始化并使用集显.
+
+因为固件只加载必要的设备.
