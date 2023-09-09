@@ -88,6 +88,8 @@ SEC（Security  Phase）阶段是平台初始化的第一个阶段，计算机�
 SEC阶段它执行以下4种任务:
 1. 接收并处理系统启动和重启信号：系统加电信号、系统重启信号、系统运行过程中的严重异常信号
 1. 初始化临时存储区域：系统运行在SEC阶段时，仅CPU和CPU内部资源被初始化，各种外部设备和内存都没有被初始化，因而系统需要一些临时RAM区域，用于代码和数据的存取，我们将之称为临时RAM，以示与内存的区别. 这些临时RAM只能位于CPU内部. 最常用的临时RAM是Cache，当Cache被配置为no-eviction模式时，可以作为内存使用，读命中时返回Cache中的数据，读缺失时不会向主存发出缺失事件；写命中时将数据写入Cahce，写缺失时不会向主存发出缺失事件，这种技术称为CAR（Cache As Ram）
+
+	需要临时RAM区域的原因: 除了最初的一些汇编代码, SEC还有C代码需要堆栈, 在当前物理内存没有初始化时就临时使用cpu缓存
 1. 作为可信系统的根：作为取得对系统控制权的第一部分，SEC阶段是整个可信系统的根. SEC能被系统信任，以后的各个阶段才有被信任的基础. 通常，SEC在将控制权转移给PEI之前，可以验证PEI.
 1. 传递系统参数给下一阶段（即PEI）：SEC阶段的一切工作都是为PEI阶段做准备，最终SEC要把控制权转交给PEI，同时要将现阶段的成果汇报给PEI. 汇报的手段就是将如
 下信息作为参数传递给PEI的入口函数:
@@ -99,6 +101,8 @@ SEC阶段它执行以下4种任务:
 
 ![SEC的执行流程](/misc/img/arch/20160728202857796.png)
 
+code: `UefiCpuPkg`
+
 SEC阶段执行流程以临时RAM初始化为界，SEC的执行又分为两大部分：临时RAM生效之前称为Reset Vector阶段，临时RAM生效后调用SEC入口函数从而进入SEC功能区.
 
 其中Reset Vector的执行流程如下:
@@ -109,13 +113,21 @@ SEC阶段执行流程以临时RAM初始化为界，SEC的执行又分为两大�
 1. 若是64位系统，从32位模式转换到64位模式
 1. 调用SEC入口函数
 
+> SEC会设置IDT处理各种情况以避免崩溃.
+
 ### 2. PEI阶段
-PEI（Pre-EFI  Initialization）阶段资源仍然十分有限，内存到了PEI后期才被初始化，其主要功能是为DXE准备执行环境，将需要传递到DXE的信息组成HOB（Handoff Block）列表，最终将控制权转交到DXE手中.
+PEI（Pre-EFI  Initialization, 早期EFI初始化）阶段资源仍然十分有限，内存到了PEI后期才被初始化，其主要功能是为DXE准备执行环境，将需要传递到DXE的信息组成HOB（Handoff Block）列表，最终将控制权转交到DXE手中.
+
+> HOB是一种用于交换的块, 负责阶段间的数据传递
+
+> PEI会会初始化一部分永久内存并设置页表位, 为DXE服务.
 
 ![PEI执行流程](/misc/img/arch/20160728203103656.jpeg)
 
 从功能上讲，PEI可分为以下两部分:
 1. PEI 内核（PEI Foundation）：负责PEI基础服务和流程
+
+	接收SEC发送的交换数据, 并扮演模块分发的角色
 1. PEIM（PEI  Module）派遣器：主要功能是找出系统中的所有PEIM，并根据PEIM之间的依赖关系按顺序执行PEIM. PEI阶段对系统的初始化主要是由PEIM完成的.
 
 	每个PEIM是一个独立的模块
@@ -129,13 +141,15 @@ PPI与DXE阶段的Protocol类似，每个PPI是一个结构体，包含了函数
 UEFI的一个重要特点是其模块化的设计. 模块载入内存后生成Image. Image的入口函数为`_ModuleEntryPoint`. PEI也是一个模块，PEI  Image的入口函数`_ModuleEntryPoint`，位于`MdePkg/Library/PeimEntryPoint/PeimEntryPoint.c`. `_ModuleEntryPoint`最终调用PEI模块的入口函数`PeiCore`，位于`MdeModulePkg/Core/Pei/PeiMain/PeiMain.c`. 进入PeiCore后，首先根据从SEC阶段传入的信息设置Pei  Core  Services，然后调用PeiDispatcher执行系统中的PEIM，当内存初始化后，系统会发生栈切换并重新进入PeiCore. 重新进入PeiCore后使用的内存为我们所熟悉的内存. 所有PEIM都执行完毕后，调用PeiServices的LocatePpi服务得到DXE  IPL  PPI，并调用DXE  IPL  PPI的Entry服务，这个Entry服务实际上是DxeLoadCore，它找出DXE  Image的入口函数，执行DXE  Image的入口函数并将HOB列表传递给DXE.
 
 ### 3. DXE阶段
-DXE（Driver  Execution  Environment）阶段执行大部分系统初始化工作，进入此阶段时，内存已经可以被完全使用，因而此阶段可以进行大量的复杂工作. 从程序设计的角度讲，DXE阶段与PEI阶段相似.
+DXE（Driver  Execution  Environment, 驱动执行环境）阶段加载硬件的基本驱动, 并执行大部分系统初始化工作，进入此阶段时，内存已经可以被完全使用，因而此阶段可以进行大量的复杂工作. 从程序设计的角度讲，DXE阶段与PEI阶段相似.
 
 ![执行流程](/misc/img/arch/20160728203131610.jpeg)
 
 与PEI类似，从功能上讲，DXE可分为以下两部分:
 1. DXE内核：负责DXE基础服务和执行流程
-1. DXE派遣器：负责调度执行DXE 驱动，初始化系统设备.
+1. DXE派遣器+一系列驱动：负责调度执行DXE 驱动，初始化系统设备.
+
+	为更上层的接口提供基础支持, 比如显卡驱动就支持`Print()`
 
 DXE提供的基础服务包括系统表、启动服务、Run Time Services. 每个DXE驱动是一个独立的模块. DXE驱动之间通过Protocol通信. Protocol是一种特殊的结构体，每个Protocol对应一个GUID，利用系统BootServices的OpenProtocol，并根据GUID来打开对应的Protocol，进而使用这个Protocol提供的服务.
 
@@ -147,21 +161,58 @@ BDS（Boot Device Selection）的主要功能是执行启动策略，其主要�
 1. 加载必要的设备驱动
 1. 根据系统设置加载和执行启动项.
 
+	生成开机的启动菜单: 寻找具有FAT32分区的设备
+
 	如果加载启动项失败，系统将重新执行DXE  dispatcher以加载更多的驱动，然后重新尝试加载启动项
 
 BDS策略通过全局NVRAM变量配置. 这些变量可以通过运行时服务的GetVariable()读取，通过SetVariable()设置. 例如，变量BootOrder定义了启动顺序，变量Boot####定义了各个启动项（####为4个十六进制大写符号）.
 用户选中某个启动项（或系统进入默认的启动项）后，OS Loader启动，系统进入TSL阶段.
 
 ### 5. TSL阶段
-TSL（Transient System Load）是操作系统加载器（OS Loader）执行的第一阶段，在这一阶段OS Loader作为一个UEFI应用程序运行，系统资源仍然由UEFI内核控制. 当启动服务的ExitBootServices()服务被调用后，系统进入Run Time阶段.
+TSL（Transient System Load）是操作系统加载器（OS Loader）执行的第一阶段，在这一阶段OS Loader作为一个UEFI应用程序运行, 需要loader找到并加载os，此时系统资源仍然由UEFI内核控制. 当启动服务的ExitBootServices()服务被调用后，系统进入Run Time阶段.
 
 TSL阶段之所以称为临时系统，在于它存在的目的就是为操作系统加载器准备执行环境. 虽然是临时系统，但其功能已经很强大，已经具备了操作系统的雏形，UEFI  Shell是这个临时系统的人机交互界面. 正常情况下，系统不会进入UEFI  Shell，而是直接执行操作系统加载器，只有在用户干预下或操作系统加载器遇到严重错误时才会进入UEFI Shell.
+
+> loader可使用BootService和RuntimeService; os只能使用RuntimeService.
+
+> loader可使用BootService的Gop显示字符串或图片
+
+loader属于APPLICATION, 普通APPLICATION使用完成后会退出, 但loader会调用`EFI_BOOT_SERVICES.ExitBootServices()`后再结束.
 
 ### 6. RT阶段
 系统进入RT（Run Time）阶段后，系统的控制权从UEFI内核转交到OS  Loader手中，UEFI占用的各种资源被回收到OS  Loader，仅有UEFI运行时服务保留给OS  Loader和OS使用. 随着OS Loader的执行，OS最终取得对系统的控制权.
 
 ### 7. AL阶段
 在RT阶段，如果系统（硬件或软件）遇到灾难性错误，系统固件需要提供错误处理和灾难恢复机制，这种机制运行在AL（After  Life）阶段. UEFI和UEFI  PI标准都没有定义此阶段的行为和规范.
+
+	关机, 休眠, 睡眠, 重启过程的信息都会在该阶段保存
+
+## 驱动模型
+Legacy BIOS受限于实模式1MB内存, 能用的内存资源很少. Option Rom会包含16位汇编代码. Option Rom自己扫描总线上的外部设备, 与硬件关联, 根本原因是bios没有统一标准.
+
+因此UEFI是一启动就先切到平坦模式, 切换模式的汇编代码在`UefiCpuPkg/ResetVector`. 它将cpu从16位模式切换到32位保护模式或长模式(如果支持).
+
+UEFI对硬件, 功能, 驱动分别进行抽象, 各自的职责也划分的层次分明.
+
+不同的硬件设备统一抽象为控制器(ControllerHandler), 控制器的主要责任就是与CPU的I/O.
+
+ControllerHandler分:
+- 总线控制器
+
+	总线控制器下还可有连接总线	
+- 终端控制器(叶子节点)
+
+	叶子节点设备由设备控制器连接到总线, 通过总线控制器与cpu交互
+
+cpu和设备就抽象成了一颗设备树. uefi把总线驱动固化在主板固件里, 该驱动负责发现连接在自身上的叶子节点设备, 创建控制器句柄. 同时UEFI也定义了叶子节点设备的驱动程序标准, 比如pci设备的驱动. 总线驱动发现符号uefi标准的节点设备驱动, 并加载到内存里. 驱动程序在内存中被称为一个image, 通过ImageHandle访问, 具体的访问方式就是protocol.
+
+protocol是一种接口的合集, 分:
+- 驱动protocol
+- 固件功能protocol, 比如EFI_DRIVER_BINDING_PROTOCOL(用于绑定驱动和设备)
+
+一个驱动程序可支持多个procotol. 每个procotol都有唯一guid.
+
+uefi提供了大部分总线控制器的驱动程序, 以及大量的功能性procotols.
 
 ## tool
 - efivar : 操作 UEFI 变量的库和工具 (被 efibootmgr 用到)
@@ -348,6 +399,8 @@ ref:
 - [luobing/uefi-practical-programming](https://github.com/luobing/uefi-practical-programming)
 - [UEFI](https://www.bilibili.com/video/BV1HL4y1W7dJ)
 
+	[code](https://gitee.com/tanyugang/UEFI)
+
 ## src
 - `*Pkg`: edk2的主体, 每个Pkg都是一个解决方案
 
@@ -375,6 +428,15 @@ build编译HelloWorld.c的过程：
 1. 连接器将目标文件HelloWorld.c 和其它库连接成HelloWorld.dll(看build时的log就可见该过程)
 
 	连接器在生成HelloWorld.dll时使用了`/dll/entry:_ModuleEntryPoint`. efi是遵循了PE32格式的二进制文件，`_ModuleEntryPoint`便是这个二进制文件的入口函数.
+
+	efi是pe32+的变种, 主要是程序头略有不同.
+
+	PE32+ Subsystem type确定了Image的子类型, 有3种:
+	- APPLICATION(10): 应用程序
+	- BOOT_SERVICE_DRIVER(11): 启动时驱动
+	- RUNTIME_DRIVER(12)： 运行时驱动
+
+	PE32+ Machine type确定了指令集架构
 1. GenFw 工具将HelloWorld.dll 转化成 HelloWorld.efi
 
 
@@ -412,3 +474,18 @@ EFI_STATUS
 ```
 
 EFIAPI,EFI_STATUS,IN,OUT都是宏定义(在`MdePkg/Include/Base.h`), 只是简单定义一下, 没有具体值, 纯粹是说明性的. UINTN是数据类型(在`MdePkg/Include/X64/ProcessorBind.h`).
+
+```c
+#include <Uefi.h>
+
+EFI_STATUS EFIAPI UefiMain(
+	IN EFI_HANDLE ImageHandle, // image句柄
+	IN EFI_SYSTEM_TABLE *SystemTable) // 系统表指针
+{
+	SystemTable->ConOut->OutputString(SystemTable->ConOut,L"Hello World\n");
+	return EFI_SUCCESS;
+}
+```
+SystemTable是系统表指针, SystemTable是全局实例, 且仅存在一个, 定义在`MdePkg/Libaray/UefiBootServicesTableLib/UefiBootServicesTableLib.c`
+
+> EFI_BOOT_SERVICES其实全局也只有一份实例.
