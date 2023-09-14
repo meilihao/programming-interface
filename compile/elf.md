@@ -54,6 +54,8 @@ elf Magic(`7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00`) elf解析器(通常
 
 > [elf标准, v1.2后未更新](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 
+默认下gcc编译出的elf可执行文件被认为是linux/unix下程序， 因此在文件入口链接了`/lib64/ld-linux-x86-64.so.2`, 其入口是`_start`, 然后才是`_start`调用`main`.
+
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
 
