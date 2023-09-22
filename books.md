@@ -19,3 +19,4 @@
 
 	- [code](http://www.oldlinux.org/Book-Lite/)
 	- [ultraji/linux-0.12 实验环境](https://github.com/ultraji/linux-0.12)
+	- [Linux-0.12](https://github.com/sky-big/Linux-0.12)

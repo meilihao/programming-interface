@@ -56,6 +56,8 @@ systemd-boot是为现代硬件设计的，Fedora也正在计划迁移到Systemd-
 
 	所有uefi image都会接收到一个指向uefi system table的指针来访问固件提供的uefi protocol.
 
+uefi环境是开启分页的, 每页是4k.
+
 ## 组成
 UEFI提供给操作系统的接口分为两部分:
 1. 启动服务（Boot Services，BS）以及隐藏在BS之后的丰富的Protocol
@@ -126,6 +128,8 @@ SEC阶段它执行以下4种任务:
 
 code: `UefiCpuPkg`
 
+> OvmfPkg\ResetVector\Ia32\PageTables64.asm???不知是什么作用
+
 SEC阶段执行流程以临时RAM初始化为界，SEC的执行又分为两大部分：临时RAM生效之前称为Reset Vector阶段，临时RAM生效后调用SEC入口函数从而进入SEC功能区.
 
 其中Reset Vector的执行流程如下:
@@ -133,7 +137,7 @@ SEC阶段执行流程以临时RAM初始化为界，SEC的执行又分为两大�
 1. 从实模式转换到32位平坦模式（是不分页的平坦模式）
 1. 定位固件中的BFV（Boot Firmware Volume）
 1. 定位BFV中的SEC映像
-1. 若是64位系统，从32位模式转换到64位模式
+1. 若是64位环境，从32位模式转换到64位模式
 1. 调用SEC入口函数
 
 > SEC会设置IDT处理各种情况以避免崩溃. SEC可执行微码升级, 以解决cpu缺陷.
@@ -175,6 +179,8 @@ PPI与DXE阶段的Protocol类似，每个PPI是一个结构体，包含了函数
 每个PPI都有一个GUID. 根据GUID，通过PeiServices的LocatePpi服务可以得到GUID对应的PPI实例.
 
 UEFI的一个重要特点是其模块化的设计. 模块载入内存后生成Image. Image的入口函数为`_ModuleEntryPoint`. PEI也是一个模块，PEI  Image的入口函数`_ModuleEntryPoint`，位于`MdePkg/Library/PeimEntryPoint/PeimEntryPoint.c`. `_ModuleEntryPoint`最终调用PEI模块的入口函数`PeiCore`，位于`MdeModulePkg/Core/Pei/PeiMain/PeiMain.c`. 进入PeiCore后，首先根据从SEC阶段传入的信息设置Pei  Core  Services，然后调用PeiDispatcher执行系统中的PEIM，当内存初始化后，系统会发生栈切换并重新进入PeiCore. 重新进入PeiCore后使用的内存为我们所熟悉的内存. 所有PEIM都执行完毕后，调用PeiServices的LocatePpi服务得到DXE  IPL  PPI，并调用DXE  IPL  PPI的Entry服务，这个Entry服务实际上是DxeLoadCore，它找出DXE  Image的入口函数，执行DXE  Image的入口函数并将HOB列表传递给DXE.
+
+ps: PEI到DXE转换的最后部分的`Library/PeilessStartupLib/DxeLoad.c:  HandOffToDxeCore`的`CreateIdentityMappingPageTables`有注释`虚拟地址和物理地址是一一对应`, 其实还有另一次设置页表在`OvmfPkg\ResetVector\Ia32\PageTables64.asm`.
 
 ### 3. DXE阶段
 DXE（Driver  Execution  Environment, 驱动执行环境）阶段加载硬件的基本驱动, 并执行大部分系统初始化工作, 为后续的uefi和os提供了uefi的系统表, 启用服务和运行时服务. 进入此阶段时，内存已经可以被完全使用，因而此阶段可以进行大量的复杂工作. 从程序设计的角度讲，DXE阶段与PEI阶段相似.
@@ -293,14 +299,16 @@ ref:
 - [「Coding Tools」 第3话 Ubuntu下EDK2开发环境搭建](https://www.bilibili.com/read/cv12197402/)
 - [Linux UEFI 学习环境搭建](https://martins3.github.io/uefi/uefi-linux.html)
 - [我的第一支 edk2 Application](https://damn99.com/2020-05-18-edk2-first-app/)
+- [Using EDK II with Native GCC](https://github.com/tianocore/tianocore.github.io/wiki/Using-EDK-II-with-Native-GCC)
 
 ```bash
 # git clone -b <release_version> --depth 1 https://github.com/tianocore/edk2.git
 # cd edk2
 # git submodule update --init
-# apt install uuid-dev
-# ln -s /usr/bin/python3.8 /usr/bin/python
+# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` from `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
+# ln -s /usr/bin/python3.8 /usr/bin/python # 如果安装python3-distutils而不是python-is-python3就需要这句, 因为EDK2还是用的python2.x版本，而其命令是python
 # make -C BaseTools # BaseTools contains all the tools required for building EDK II
+# source edksetup.sh # 执行两次原因: `_omb_alias_general_cp_init：未找到命令`部分命令依赖edksetup.sh先设置env
 # source edksetup.sh
 # vim Conf/target.txt # 参考Conf/tools_def.txt, 定义了支持的编译工具链
 ACTIVE_PLATFORM       = MdeModulePkg/MdeModulePkg.dsc # 想要编译的内容
@@ -487,6 +495,7 @@ ref:
 	网上也有基于Intel UDK Debugger Tool的调试案例.
 
 ## examples
+- [从零开始的UEFI裸机编程](https://kagurazakakotori.github.io/ubmp-cn/index.html)
 - [luobing/uefi-practical-programming](https://github.com/luobing/uefi-practical-programming)
 - [UEFI](https://www.bilibili.com/video/BV1HL4y1W7dJ)
 
@@ -549,7 +558,15 @@ ref:
 - EmulatorPkg: uefi模拟器
 - ShellPkg: 可用于制作uefi bios的启动盘
 
-	将编译出的程序重命名为bootx32.efi/bootx64.efi, 放到fat32分区的efi/boot下即可, 开机按F11选择启动项
+	用`build -p ShellPkg/ShellPkg.dsc -t GCC5 -b RELEASE -a X64`将编译出的程序重命名为bootx32.efi/bootx64.efi, 放到fat32分区的efi/boot下即可, 开机按F11选择启动项
+
+	> /usr/lib/systemd/boot/efi/systemd-bootx64.efi是systemd-boot
+- OvmfPkg : x64相关代码以及特定的虚拟化代码，如virtio驱动
+- ArmVirtPkg : ARM特定代码
+- MdePkg, MdeModulePkg ： 主要核心代码，如PCI支持，USB至此和，通用服务和驱动等等
+- PcAtChipsetPkg : Intel架构的驱动和库
+- ArmPkg, ArmPlatformPkg : ARM架构支持代码
+- CryptoPkg, NetworkPkg, FatPkg, CpuPkg, ... : 加密支持(使用openssl，网络支持(包括网络启动),FAT文件系统驱动等等
 
 ### 头文件
 - Uefi.h: 定义了UEFI中的基本数据类型和核心数据结构
@@ -630,8 +647,53 @@ SystemTable是系统表指针, SystemTable是全局实例, 且仅存在一个, �
 
 > uefi字符串是双字节, 即有`L`前缀的原因
 
+## uefi shell
+ref:
+- [UEFI Shell commands](https://techlibrary.hpe.com/docs/iss/proliant_uefi/UEFI_TM_030617/GUID-D7147C7F-2016-0901-0A6D-000000000E1B.html)
+
+- memmap: 查看内存map
+
+	`fs0:`+`memmap > memmap.out`即可在fs0得到输出
+
 ## FAQ
 ### 显卡
 真机环境, uefi优先初始化并使用集显.
 
 因为固件只加载必要的设备.
+
+### ovmf
+ref:
+- [编译QEMU+OVMF(ARM架构)](https://cloud-atlas.readthedocs.io/zh_CN/latest/kvm/arm_kvm/build_qemu_ovmf.html)
+
+	支持多个构建选项, 可见OvmfPkgX64.dsc的if逻辑
+
+编译x64的UEFI镜像:
+```conf
+# build -t GCC5 -a X64 -p OvmfPkg/OvmfPkgX64.dsc
+ACTIVE_PLATFORM       = OvmfPkg/OvmfPkgX64.dsc
+TARGET_ARCH           = X64
+TOOL_CHAIN_TAG        = GCC5
+````
+
+编译ARM 64位的UEFI镜像:
+```conf
+# build -t GCC5 -a AARCH64 -p ArmVirtPkg/ArmVirtQemu.dsc
+ACTIVE_PLATFORM       = ArmVirtPkg/ArmVirtQemu.dsc
+TARGET_ARCH           = AARCH64
+TOOL_CHAIN_TAG        = GCC5
+```
+
+x86 firmware build会创建3各不同镜像:
+- OVMF_VARS.fd : 这是持久化的UEFI变量的firmware卷, 即firmware存储所有配置(引导条目和引导顺序、安全引导密钥等).
+
+	通常这个文件用作空变量存储的模板，每个VM都有自己的私有副本. 例如 Libvirt虚拟机管理器 将文件存储在 /var/lib/libvirt/qemu/nvram 中
+- OVMF_CODE.fd : 带有代码的firmware卷, 将它和 VARS 分开可以:
+
+	- 确保轻松更新固件
+	- 允许将只读代码映射到guest操作系统
+
+- OVMF.fd: 是包含 CODE 和 VARS 的一体化镜像, 这样就可以使用`-bios`直接作为ROM加载, 但是有2个缺点:
+	
+	- UEFI 变量不是持久的
+	- 不适用于 SMM_REQUIRE=TRUE 构建
+

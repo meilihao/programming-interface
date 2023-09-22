@@ -56,3 +56,28 @@ ref:
 > 控制显卡用的是内存映射+io映射.
 
 对于Linux内核而言, 它适用于不同的CPU, 所以它必须都要考虑这两种方式, 于是它采用一种新的方法, 将基于I/O映射方式(对应于独立编址)的或内存映射方式(对应于统一编址)的I/O端口通称为`I/O区域(I/O region, include/linux/ioport.h)`, 不论采用哪种方式, 都要先申请IO区域: request_resource(), 结束时释放它: release_resource().
+
+## 中断
+单核cpu使用pic模型, 只有一张IDT; 多核使用APIC.
+
+APIC由2部分组成:
+- LAPIC
+
+	每个core一个LAPIC, 且有一个唯一id, 该id用作区分多核cpu不同核心的标志
+
+	每个LAPIC有自己的定时器, 能处理自己的内部中断.
+
+	x86 LAPIC的属性在一些列的寄存器中, 它们通过mmio映射, 因此设置LAPIC定时器的中断时间就可通过mmio实现.
+
+	LVT(Local Vector Table, 本地向量表)是联系中断信号和IDT的纽带, 是程序调度实现的关键硬件基础.
+
+	LVT的Vector保存IDT的中断号
+
+	获取LAPIC路径: RSDP->XSDT->MADT->LAPIC
+- IO APIC
+
+	只有一个io apic, 也有表, 可设置哪个中断由哪个cpu处理.
+
+	处理硬盘, 网卡等外部设备产生的中断
+
+ps: bsp(随机指定by IPI) cpu core通过IPI(Inter-Processor Interrupt, 是硬件中断)中断来唤醒其他cpu core.

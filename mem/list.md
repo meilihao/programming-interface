@@ -1,7 +1,14 @@
 # list
 ## layout
 - [riscv/vm-layout.rst](https://elixir.bootlin.com/linux/v6.4-rc7/source/Documentation/riscv/vm-layout.rst)
+- [RISCV MMU 概述](https://tinylab.org/riscv-mmu/)
+- [**Linux系统启动之后，物理内存的布局是怎么样的？**](https://www.zhihu.com/question/274054284)
+
+	内存模型: 平坦模型 -> Discontiguous Memory -> sparse memory
+
 - [x86_64/mm.txt](https://elixir.bootlin.com/linux/v4.20.17/source/Documentation/x86/x86_64/mm.txt)
+
+[仅找到risv64支持4k内存页(Sv39/Sv48/Sv57的page offset都是4k), 见`Page-Based <39/48/57>-bit Virtual-Memory System`](https://five-embeddev.com/riscv-isa-manual/latest/supervisor.html), 没找到其他大小的支持文档.
 
 ## malloc
 - [18张图解密新时代内存分配器TCMalloc](http://tigerb.cn/2021/01/31/go-base/tcmalloc/)
