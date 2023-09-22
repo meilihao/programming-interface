@@ -128,7 +128,7 @@ SEC阶段它执行以下4种任务:
 
 code: `UefiCpuPkg`
 
-> OvmfPkg\ResetVector\Ia32\PageTables64.asm???不知是什么作用
+> OvmfPkg\ResetVector\Ia32\PageTables64.asm和Flat32ToFlat64.asm(32平坦到64平坦), 调用时机未知
 
 SEC阶段执行流程以临时RAM初始化为界，SEC的执行又分为两大部分：临时RAM生效之前称为Reset Vector阶段，临时RAM生效后调用SEC入口函数从而进入SEC功能区.
 
