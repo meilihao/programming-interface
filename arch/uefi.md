@@ -655,6 +655,22 @@ ref:
 
 	`fs0:`+`memmap > memmap.out`即可在fs0得到输出
 
+### 设备
+ref:
+- [UEFI原理与编程实践--Device Path](https://blog.csdn.net/u011397314/article/details/121608012)
+
+	uefi支持的设备的类型和次类型
+
+	可通过`map`命令查看设备路径
+
+系统中每个设备都有一个唯一的路径. 设备路径中的节点称为设备节点, 路径中的最后一个设备称为"结束设备节点".
+
+结束设备节点是一个特设的设备节点, 它的类型是0x7F, 此类型是0xFF(整个设备路径结束)或0x01(前一设备路径结束, 新的设备路径开始), 节点长度是2B.
+
+每个设备节点的定义都以EFI_DEVICE_PATH_PROTOCOL开始, 其定义在`MdePkg/Include/Protocol/DevicePath.h`中.
+
+HARDDRIVE_DEVICE_PATH节点对应一个硬盘分区
+
 ## FAQ
 ### 显卡
 真机环境, uefi优先初始化并使用集显.
