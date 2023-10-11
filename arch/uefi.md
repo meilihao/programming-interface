@@ -560,7 +560,7 @@ ref:
 
 	用`build -p ShellPkg/ShellPkg.dsc -t GCC5 -b RELEASE -a X64`将编译出的程序重命名为bootx32.efi/bootx64.efi, 放到fat32分区的efi/boot下即可, 开机按F11选择启动项
 
-	> /usr/lib/systemd/boot/efi/systemd-bootx64.efi是systemd-boot
+	> /usr/lib/systemd/boot/efi/systemd-bootx64.efi是systemd-boot. 根据[systemd/PKGBUILD](https://gitlab.archlinux.org/archlinux/packaging/packages/systemd/-/blob/main/PKGBUILD), 推测其构建选项是`-Dbootloader=true`
 - OvmfPkg : x64相关代码以及特定的虚拟化代码，如virtio驱动
 - ArmVirtPkg : ARM特定代码
 - MdePkg, MdeModulePkg ： 主要核心代码，如PCI支持，USB至此和，通用服务和驱动等等

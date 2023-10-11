@@ -7,6 +7,8 @@ ref:
 
 2020 8.11开始不再维护x86, 而是转向riscv
 
+xv6不支持swap.
+
 ## x86
 ```bash
 # git clone --depth 1 git://github.com/mit-pdos/xv6-public.git

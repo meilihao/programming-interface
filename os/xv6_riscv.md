@@ -10,3 +10,4 @@ ref:
 - [S1-Boot XV6](https://zhuanlan.zhihu.com/p/573032543)
 - [XV6 启动过程](https://mit-public-courses-cn-translatio.gitbook.io/mit6-s081/lec03-os-organization-and-system-calls/3.9-xv6-qi-dong-guo-cheng)
 - [XV6：操作系统组成](https://zhuanlan.zhihu.com/p/624607389)
+- [**MIT 6.S081**](https://blog.csdn.net/zzy980511/category_11740137.html)
