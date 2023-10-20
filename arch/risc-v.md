@@ -10,6 +10,12 @@
 ## 指令集
 RISC-V只支持小端格式(little-endian).
 
+优点:
+- 设计简洁
+- 模块化
+- 开源
+- 丰富的生态
+
 ## boot
 - [An Introduction to RISC-V Boot Flow](https://riscv.org/wp-content/uploads/2019/12/Summit_bootflow.pdf)
 - [RISC-V CPU加电执行流程](https://www.cnblogs.com/mkh2000/p/15811708.html)

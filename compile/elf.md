@@ -34,7 +34,7 @@ typedef struct elf64_hdr {
   Elf64_Addr e_entry;		/* Entry point virtual address */ 虚拟地址,是这个程序运行的入口即_start符号的地址
   Elf64_Off e_phoff;		/* Program header table file offset */
   Elf64_Off e_shoff;		/* Section header table file offset */
-  Elf64_Word e_flags;
+  Elf64_Word e_flags;   // 与文件关联的特定于处理器的标志, 格式是EF_<machin_flag>
   Elf64_Half e_ehsize;    // Size of this header
   Elf64_Half e_phentsize; // Size of program headers
   Elf64_Half e_phnum;     // Number of program headers
@@ -55,6 +55,17 @@ elf Magic(`7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00`) elf解析器(通常
 > [elf标准, v1.2后未更新](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 
 默认下gcc编译出的elf可执行文件被认为是linux/unix下程序， 因此在文件入口链接了`/lib64/ld-linux-x86-64.so.2`, 其入口是`_start`, 然后才是`_start`调用`main`.
+
+### proghdr
+字段  含义  备注
+Type  段的类型，暗含了如何解析此段的内容 
+Offset  本段内容在文件的位置  
+FileSiz 本段内容在文件中的大小 
+VirtAddr  本段内容的开始位置在进程空间中的虚拟地址  
+MemSiz  本段内容在进程空间中的大小 
+PhysAddr  本段内容的开始位置在进程空间中的物理地址  由于MMU的存在，物理地址不可知，大多时候等于虚拟地址
+Flags 段的权限  R/W/E 分别表示 读/写/可执行
+Align 大小对齐信息
 
 ### 可重定位文件 (Relocatable File),
 即编译时生成的`.o`文件, ELF 的一种类型
