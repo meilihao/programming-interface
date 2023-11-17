@@ -181,6 +181,7 @@ ext4, xfs, btrfs
 ## 硬盘
 参考:
 - [存储基础：ATA、SATA、SCSI、SAS、FC](https://blog.csdn.net/solaraceboy/article/details/79122090)
+- [关于NVMe SSD以及其IO性能抖动和blktrace工具](https://blog.51cto.com/u_15333820/3461809)
 
 低级格式化: 划分磁道和扇区的过程, 通常由厂商完成.
 高级格式化: 对磁盘上所存储的数据进行文件系统的标记.
@@ -203,6 +204,8 @@ ext4, xfs, btrfs
 硬盘类型:
 - HDD
 - SSD
+
+  SSD市场按照接口协议主要分为SATA SSD，PCIe SSD和NVMe SSD，其中SATA SSD沿用了传统的HDD使用的SATA协议，在企业应用和服务器兼容性上具有优势； PCIe SSD则一般使用私有协议，处于比较小众的产品；NVMe SSD则在PCIe接口上使用新的标准协议NVMe，由于NVMe由大厂Intel推出并交由nvmexpress组织推广，现在被全球大部分存储企业采纳.
 
   为优化磁道寻址而提出的"电梯算法"不适合ssd.
 - 非易失性存储, 比如Intel Optane
