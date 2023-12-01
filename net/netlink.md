@@ -38,6 +38,26 @@ netlink协议实现大都位于[`net/netlink`](https://elixir.bootlin.com/linux/
 
 一旦创建套接字，必须调用 bind() 来准备发送和接收消息.
 
+### Buffer sizing
+ref:
+- [Buffer sizing](https://docs.kernel.org/userspace-api/netlink/intro.html)
+
+    Netlink sockets are datagram sockets rather than stream sockets, meaning that each message must be received in its entirety by a single recv()/recvmsg() system call. If the buffer provided by the user is too short, the message will be truncated and the MSG_TRUNC flag set in struct msghdr (struct msghdr is the second argument of the recvmsg() system call, not a Netlink header).
+
+- [关于recvfrom使用过程中的一个坑点](https://blog.csdn.net/itachi0/article/details/85248450)
+- [UDP数据包的发送和接收问题](https://www.cnblogs.com/yajunLi/p/6605110.html)
+- [UDP 请求丢失有哪些原因？](https://cloud.tencent.com/developer/article/2228134)
+
+    1. UDP socket缓冲区满造成的UDP丢包
+    1. UDP socket缓冲区过小或数据过大造成的UDP丢包
+    1. 发送的包巨大丢包
+- [UDP 发送缓冲区和接收缓冲区细节分析](https://zhuanlan.zhihu.com/p/408369874)
+
+    UDP 是没有流量控制的：较快的发送端可以很容易淹没较慢的接收端，导致接收端的 UDP 丢弃数据报
+- [Netlink Performance 測試](https://neokentblog.blogspot.com/2015/01/netlink-performance.html)
+
+recvmsg()可能一次收到多包netlink数据, 用[NLMSG_OK+NLMSG_NEXT](https://man7.org/linux/man-pages/man7/netlink.7.html)处理, 或参考[Netlink的简单例子](https://blog.csdn.net/m0_37844072/article/details/126788140), 或go的[src/syscall/netlink_linux.go](https://go.dev/src/syscall/netlink_linux.go)
+
 ## netlink lib
 推荐使用libnl api, iproute2就使用了它.
 
@@ -259,6 +279,7 @@ rtnetlink(NETLINK_ROUTE)消息并非限制于网络路由选择子系统消息, 
 参考:
 - [netlink遇到ENOBUFS错误](https://xixitalk.github.io/blog/2016/08/18/netlink-ENOBUFS/)
 - [no buffer space available](https://www.ibm.com/support/pages/no-buffer-space-available)
+- [Receive: netlink receive: recvmsg: no buffer space available](https://github.com/google/nftables/issues/103)
 
 recv buf大小是`1<<20 * 32`
 

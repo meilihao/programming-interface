@@ -57,3 +57,7 @@ ref:
 	- [DCF](https://docs.opengauss.org/zh/docs/3.1.1/docs/CharacteristicDescription/DCF.html)
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
 - [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE_BP3/src/logservice/palf)
+- [浅析华为Cantian引擎](https://www.modb.pro/db/1701776671271636992)
+
+	- [【创新项目探索】浅析openEuler Cantian引擎](https://www.openeuler.org/zh/blog/20230915-Cantian/20230915-Cantian.html)
+	- [openEuler/cantian](https://gitee.com/openeuler/cantian)
