@@ -21,6 +21,10 @@ RISC-V只支持小端格式(little-endian).
 - [RISC-V CPU加电执行流程](https://www.cnblogs.com/mkh2000/p/15811708.html)
 - [QEMU 启动方式分析（1）：QEMU 及 RISC-V 启动流程简介](https://gitee.com/YJMSTR/riscv-linux/blob/master/articles/20220816-introduction-to-qemu-and-riscv-upstream-boot-flow.md)
 - [EDK2 RISC-V Platform Project](https://github.com/tianocore/edk2-platforms/blob/master/Platform/RISC-V/PlatformPkg/Readme.md)
+- [戴鸿君教授团队在RISC-V基础软件方面取得新突破](https://www.view.sdu.edu.cn/info/1021/184807.htm)
+
+	- [How to build Risc-V architecture UEFI](https://github.com/tianocore/edk2/discussions/5040)
+	- https://github.com/tianocore/edk2-platforms/tree/master/Platform/Sophgo
 
 ## 虚拟内存
 ref:

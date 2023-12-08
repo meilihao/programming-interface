@@ -1,6 +1,9 @@
 # iptables/netfilter
 参考:
 - [iptables/netfilter](https://mp.weixin.qq.com/s?__biz=MzkyMTIzMTkzNA==&mid=2247506496&idx=1&sn=c629e22f0de944c0940ffb3a665b726f)
+- [iptables/netfilter](https://tonydeng.github.io/sdn-handbook/linux/iptables.html)
+
+新版本的内核（3.13+）也提供了nftables, 用于取代iptables.
 
 淘汰原因:
 1. 路径太长

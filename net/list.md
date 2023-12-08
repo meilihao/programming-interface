@@ -131,7 +131,18 @@
 - [【重识云原生】第四章云网络4.8.6节——Dragonflow](https://blog.csdn.net/junbaozi/article/details/125530931)
 
     Dragonflow目的是提供全功能的SDN解决方案.
+- [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
+
 ## offload
+现在很多网卡本身支持数据分片，这样，上层L4/L3就可以不用进行分片(最大64KB)，而由NIC来完成，从而提高网络性能:
+- Large Segment Offload (LSO)：使得网络协议栈能够将超过PMTU的数据包推送至网卡，然后网卡执行分片工作，这样减轻了CPU的负荷
+- TCP Segmentation Offload (TSO)：类似于LSO，针对TCP协议包
+- UDP Fragmentation Offload (UFO): 类似于TSO，针对UDP包
+- Large Receive Offload (LRO): 将接收到的包聚合成一个大的数据包，然后再发给协议栈处理
+- Generic Segmentation Offload (GSO): TSO/LSO的增强，同时支持TCP和UDP协议，负责把超过MTU的包分片
+- Generic Receive Offload (GRO)：LRO的增强，负责将接收到的多个包聚合成一个大的数据包，然后再发给协议栈处理
+
+
 - [【重识云原生】第四章云网络4.9.1节——网络卸载加速技术综述](https://cloud.tencent.com/developer/article/2046707)
 
     OpenStack Pike版本中引入了对switchdev的支持，实现了Open vSwitch硬件卸载offloading功能.
@@ -157,6 +168,9 @@
 
     ![DPU竞争格局, 各家实现 from 赛迪顾问](https://ask.qcloudimg.com/http-save/yehe-9519988/1084dd572b6eaef39f914ac1b18c55d3.png?imageView2/2/w/1620)
 - [【重识云原生】第四章云网络4.9.6节——linux switchdev技术](https://cloud.tencent.com/developer/article/2108936)
+
+## 路由
+- [VRF](https://tonydeng.github.io/sdn-handbook/linux/vrf.html)
 
 ## 限速
 - [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)
