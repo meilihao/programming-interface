@@ -127,12 +127,13 @@ tap/tun 设备文件就像一个管道，一端连接着用户空间，一端连
 ## OVS交换机(Open vSwtich)
 ref:
 - [《跟唐老师学习云网络》 - OVS交换机](https://bbs.huaweicloud.com/blogs/358029)
+- [Open vSwitch](https://tonydeng.github.io/sdn-handbook/ovs/)
 
 交换机是hub的进阶版, 功能更多.
 
 
 ```bash
-# apt-get install -y openvswitch-switch
+# apt-get install -y openvswitch-switch/yum install openvswitch
 # ovs-vsctl add-br br-tsj # 添加ovs. 当一个新的交换机被创建的时候，会自带一个同名的端口，也会有一个同名的网卡插到这个口子上，并且这个网卡也会加入到Host中(状态是down).
 # ip link set br-tsj up # 将 br-tsj 网卡up
 # ip addr add 192.168.0.3/24 dev br-tsj
@@ -263,6 +264,30 @@ FC光模块与以太网光模块区别:
 	在实现上述应用场景时，保持光模块与交换机之间的稳定连接至关重要。一般情况下FC模块安装到到FC交换机上，而以太网模块则匹配到以太网交换机，不会出现混合使用的情况。
 
 	传统的光纤通道网络包括FC交换机和光纤卡（FC HBAs），是SAN的主要选择之一。FC交换机将存储连接到SAN，而光纤卡将交换机连接到服务器。以太网网络交换机具有多样性，体现在可堆叠性、端口数、传输速率等方面。当最新的400G以太网光模块安装到400G网络交换机上时，就可以实现400G网络。
+
+## ovn
+OVN (Open Virtual Network) 是OVS提供的原生虚拟化网络方案，旨在解决传统SDN架构（比如Neutron DVR）的性能问题, 其主要功能包括
+1. L2/L3虚拟网络以及逻辑交换机(logical switch)
+1. L2/L3/L4 ACL
+1. IPv4/IPv6分布式L3路由
+1. ARP and IPv6 Neighbor Discovery suppression for known IP-MAC bindings
+1. Native support for NAT and load balancing using OVS connection tracking
+1. Native fully distributed support for DHCP
+1. Works with any OVS datapath (such as the default Linux kernel datapath, DPDK, or Hyper-V) that supports all required features (namely Geneve tunnels and OVS connection tracking)
+1. Supports L3 gateways from logical to physical networks
+1. Supports software-based L2 gateways
+1. Supports TOR (Top of Rack) based L2 gateways that implement the hardware_vtep schema
+1. Can provide networking for both VMs and containers running inside of those VMs, without a second layer of overlay networking
+
+OVN由以下组件构成：
+1. northbound database：存储逻辑交换机、路由器、ACL、端口等的信息，目前基于ovsdb-server，未来可能会支持etcd v3
+1. ovn-northd: 集中式控制器，负责把northbound database数据分发到各个ovn-controller
+1. ovn-controller: 运行在每台机器上的本地SDN控制器
+1. southbound database：基于ovsdb-server（未来可能会支持etcd v3），包含三类数据
+
+	- 物理网络数据，比如VM的IP地址和隧道封装格式
+	- 逻辑网络数据，比如报文转发方式
+	- 物理网络和逻辑网络的绑定关系
 
 ## 裸金属
 ref:

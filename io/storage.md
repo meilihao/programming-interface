@@ -61,6 +61,12 @@
 
         只有一个端口, 通过SATA转接卡上的端口选择芯片模拟出两个端口, 但实际上在某刻只有一个端口是活动的.
       - SCSI
+
+        SCSI磁盘路径在Linux上有3中表现方式:
+        1. /dev/sdX
+        1. 通过major:minor
+        1. /dev/disk/by-path
+
       - SAS(serial attached scsi), 新一代scsi技术, 速度更快, cpu占用更低
 
         传输速度: 12Gbbps

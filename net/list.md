@@ -10,6 +10,7 @@
 - [2022龙蜥社区全景白皮书|5.5.2 面向HTTP 3.0时代的高性能网络协议栈](https://openanolis.cn/assets/static/openanoliswhitepaper.pdf)
 
     ExpressUDP(xudp) + ngx_xquic_module + xquic
+- [QUIC 发生了什么](https://kiosk007.top/post/quic-%E5%8F%91%E7%94%9F%E4%BA%86%E4%BB%80%E4%B9%88/)
 
 ## next
 - [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
@@ -56,6 +57,13 @@
 - [G-SRv6技术详细介绍与应用场景解析.pdf](/misc/img/net/srv6/G-SRv6技术详细介绍与应用场景解析.pdf)
 - [使用AF_XDP Socket更高效的网络传输](https://colobu.com/2023/04/17/use-af-xdp-socket/)
 - [每秒1百万的包传输，几乎不耗CPU的那种](https://colobu.com/2023/04/02/support-1m-pps-with-zero-cpu-usage/)
+- [LWN：数据中心中替代TCP，第二部分！Homa](https://blog.csdn.net/Linux_Everything/article/details/128029673)
+    
+    - [霍马传输协议](https://homa-transport.atlassian.net/wiki/spaces/HOMA/overview)
+- [当 HTTP 抛弃 TCP 和 QUIC](https://zhuanlan.zhihu.com/p/614813824)
+- [L4S(低延迟低损耗可扩展) 的意义](https://zhuanlan.zhihu.com/p/614223442)
+- [virtio 网络的演化：原始virtio ＞ vhost-net(内核态) ＞ vhost-user(DPDK) ＞ vDPA](https://blog.csdn.net/Rong_Toa/article/details/113819506)
+- [SRIOV：智能网卡就靠它了！](https://www.eet-china.com/mp/a14091.html)
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)
@@ -95,6 +103,7 @@
 
     > vlan的vid是12b, 也就是最大4095.
 - [Nova中VIF(虚拟网卡)的实现](http://niusmallnan.com/_build/html/_templates/openstack/nova_vif.html)
+- [Neo-T / Open-NPStack](https://gitee.com/Neo-T/open-npstack)
 
 ## cloud
 - [VXLAN vs VLAN](https://zhuanlan.zhihu.com/p/36165475)
@@ -109,6 +118,7 @@
     裸机上针对VM间通信加速，DPDK基本处于垄断地位，留给AF_XDP的空间很小，针对这种场景的性能改进工作，想象空间很小. 如果从硬件可获得角度看，可以改用AF_XDP代替DPDK，性能上略有差距，但可以弥补硬件不可获得的缺陷.
 - [VXLAN](https://support.huawei.com/enterprise/zh/doc/EDOC1100023543?section=j016)
 - [**IP报文在阿里云上的神奇之旅系列一：同地域内云上通信**](https://developer.aliyun.com/article/1054404)
+- [Neutron中的网络I/O虚拟化](https://www.cnblogs.com/gccbuaa/p/7123211.html)
 
 ## Protocol
 - [【重识云原生】第四章云网络4.3.2节——VLAN技术](https://blog.csdn.net/junbaozi/article/details/124956412)

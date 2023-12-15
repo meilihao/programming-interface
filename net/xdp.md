@@ -9,6 +9,7 @@ ref:
 - [Get started with XDP](https://developers.redhat.com/blog/2021/04/01/get-started-with-xdp)
 - [Using the eXpress Data Path (XDP) in Red Hat Enterprise Linux 8](https://www.redhat.com/en/blog/using-express-data-path-xdp-red-hat-enterprise-linux-8)
 - [XDP driver support status](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org)
+- [XDP](https://tonydeng.github.io/sdn-handbook/linux/XDP/)
 
 相对于DPDK, XDP具有以下优点:
 - 无需第三方代码库和许可

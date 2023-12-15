@@ -2,6 +2,7 @@
 
 ## base
 - [虚拟化调试和优化指南](https://access.redhat.com/documentation/zh-cn/red_hat_enterprise_linux/7/html/virtualization_tuning_and_optimization_guide)
+- [详解ZStack 高性能网络方案以及性能对比测试](https://www.zstack.io/recentnews/marketing_voice/2022/0704/2391.html)
 
 ## driver
 - [qemu backend block device driver in practice by qingcloud](/misc/pdf/virt/qingcloud_block_device_driver.pdf)
@@ -49,6 +50,7 @@
 
 ## next
 - [浅谈Linux设备虚拟化技术的演进之路](https://www.modb.pro/db/110904)
+- **[Intel Scalable IOV已计划取代SR-IOV - Intel Scalable IOV介绍及应用实例](https://mp.weixin.qq.com/s/u76IZhPSFdVtGt1ar5DR5g)**
 
 ## 迁移
 - [Nova实现虚拟机块迁移](http://niusmallnan.com/_build/html/_templates/openstack/block_migration.html)

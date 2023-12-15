@@ -258,7 +258,7 @@ ref:
 		- host<H> : 光纤口
 
 			- port_id : HBA端口的 24位交换机端口ID
-			- port_name : 存储端口的64位port name
+			- port_name : 存储端口的64位port name, wwpn
 			- issues_lip : 重置HBA端口，重新尝试发现存储端口
 			- symbolic_name : 保持光纤卡型号, 固件版本, 使用的qla2xxx驱动版本
 	- fc_remote_ports : 主机到存储端口链路信息（包含未给主机分配存储的链路信息）
@@ -266,7 +266,7 @@ ref:
 		- rport-H:B-R : (H代表主机，B代表bus号，T代表target，L代表lun id，R代表对端端口号)
 			- port_id : 存储端口的 24位交换机端口ID
 			- node_name : 存储端口(即target)的64位node name
-			- port_name : 存储端口(即target)的64位port name
+			- port_name : 存储端口(即target)的64位port name, wwpn
 			- dev_loss_tmo : 链路故障等待时间
 
 				故障链路不再处理任何新的IO。默认dev_loss_tmo值视具体HBA卡而定，Qlogic默认是35秒，Emulex默认是30秒。HBA卡自带驱动可以覆盖这个 参数值。dev_loss_tmo最大值600秒，如果dev_loss_tmo值小于0或者大于600，HBA自带超时值生效。
