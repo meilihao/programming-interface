@@ -7,6 +7,8 @@
 	- [操作系统设计与实现-上册](https://github.com/8427003/study-minix-os)
 	- [操作系统设计与实现-下册](https://cwlrin.wiki/wp-content/uploads/2021/02/%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0_%E7%AC%AC3%E7%89%88(%E4%B8%8B%E5%86%8C).pdf)
 
+[OS书籍推荐](https://zhuanlan.zhihu.com/p/499407835)：OSPP，是美国四大的教材，OS Three Easy Pieces（国内引进为《操作系统导论》），以及上交陈海波教授的《现代操作系统 原理与实现》， 这三本书，每本都是吊打现代操作系统的存在.
+
 ## bpf
 ### Linux Observability with BPF/Linux内核观测技术BPF
 - [BPF视角下的Linux可观察性](https://github.com/learnre/Linux-Observability-with-BPF)

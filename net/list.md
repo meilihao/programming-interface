@@ -191,6 +191,11 @@
 ## 资源
 - [www.IPv6Plus.net/resources](https://github.com/IPv6Plus/IPv6Plus.github.io)
 
+## 产品
+- [分布式存储 ZBS 的自主研发之旅｜接入协议之 NVMe-oF](https://www.smartx.com/blog/2023/02/zbs-nvmeof/)
+
+    目前 ZBS 提供 4 种接入协议，分别是 NFS、iSCSI、NVMe-oF 和 vHost，其中 NFS 和 vHost 主要应用场景是超融合架构
+
 # 概念
 ## 工作组 Work Group
 在一个网络内，可能有成百上千台电脑，如果这些电脑不进行分组，都列在“网上邻居”内，可想而知会有多么乱. 为了解决这一问 题，Windows就引用了“工作组”这个概念，将不同的电脑一般按功能分别列入不同的组中，如财务部的电脑都列入“财务部”工作组中，人事部的电脑都 列入“人事部”工作组中. 要访问某个部门的资源，就在“网上邻居”里找到那个部门的工作组名，双击就可以看到那个部门的电脑了.

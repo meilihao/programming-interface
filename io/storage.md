@@ -77,6 +77,73 @@
 
         AHCI 为单队列模式. 对于 HDD 这种慢速设备来说，主要瓶颈在存储设备，而非 AHCI协议; 但对应SSD, AHCI 的单队列模式成为限制 SSD 并发性的瓶颈, 而催生了NVMe协议.
 
+## 存储技术架构
+现代存储系统从底层到上层共由5部分组成:
+1. 存储介质
+
+  常见的有:
+  - HDD
+  - SSD
+  - Tape
+  - Cdrom
+
+  AFA: 全闪
+  HFA: 混闪
+  HDD: 全机械盘
+
+1. 组网方式
+
+  - ip: 1/10/25/100Gb
+  - fc: 8/16/32Gb
+
+    传统 4、16 或 32 Gbps 光纤通道部署速度可能不足以真正发挥出 NVMe 设备的性能提升
+  - ib: 40/45/100/200Gb
+1. 存储类型和协议
+
+  文件存储:
+  - NFS
+  - CIFS
+  - FTP
+
+  块存储:
+  - SCSI
+  - iSCSi
+  - NVME
+
+  对象存储:
+  - S3
+  - Swift
+
+  其他:
+  - HDFS
+  - 表存储
+1. 存储架构
+
+  - 集中式
+  - 分布式
+1. 连接方式
+
+  - SAN
+  - NAS
+  - DAS
+
+## NVDIMM(非易失性双列直插式内存模块)
+随着存储技术的不断发展及人们对存储性能的不懈追求，高性能存储开始探索向内存通道的迁移。在这样的背景下，NVDIMM（Non-Volatile Dual In-Line Memory Module）技术便应运而生了。
+
+NVDIMM是一种可以随机访问的非易失内存。非易失内存是指即使在不通电的情况下数据也不会消失，即在计算机掉电、系统崩溃和正常关机的情况下，依然可以保留数据。它填补了从硬盘到DRAM之间, 存在在性能, 延迟, 容量成本的鸿沟, 为多样化的解决方案奠定了坚实的基础.
+
+NVDIMM同时表明它使用的封装是双内联存储器模块封装，与标准双内联存储器模块插槽兼容，并且能通过标准的DRAM硬件接口进行通信。使用NVDIMM可以提高应用的性能和数据安全性，也可以减少系统启动或恢复的时间。目前，根据JEDEC标准化组织的定义，有以下3种NVDIMM的实现:
+
+1. NVDIMM-N：指在一个模块上同时放入传统DRAM和Flash闪存，计算机可以直接访问传统DRAM，既支持按字节寻址，也支持块寻址。通过使用一个小的后备电源，可以做到在断电时，将数据从传统DRAM复制进闪存中，当电力恢复时重新将数据加载到DRAM中。同时，使用两种介质的做法使成本急剧增加。
+
+  NVDIMM-N的主要工作方式和传统DRAM是一样的，因此它的延迟也在10^1纳秒级；它的容量受限于体积，相比传统的DRAM并没有什么提升；它的工作方式决定了它的Flash部分是不可寻址的。但是，NVDIMM-N为业界提出了持久性内存的新概念。
+
+1. NVDIMM-F：指使用了DRAM的DDR3或DDR4总线的Flash闪存。由NAND Flash作为介质的固态硬盘一般使用SATA、SAS或PCIe总线。DDR总线可以提高最大带宽，在一定程度上降低协议带来的延迟和减少开销，但是NVDIMM-F只支持块寻址。NVDIMM-F的主要工作方式在本质上和固态硬盘是一样的，因此它的延迟为10^1微秒级，它的容量也可以轻松达到TB级。
+
+1. NVDIMM-P：NVDIMM-P支持DDR5总线，采用全新介质，如英特尔和Micron联合开发的3D XPoint技术，在理论上，速度和耐用性可以达到普通NAND Flash的1000倍以上。
+
+  NVDIMM-P实际上是DRAM和Flash的混合，既支持块寻址，也支持类似传统DRAM的按字节寻址。它既可以在容量上达到类似NANDFlash的TB以上，也能把延迟保持在10^2纳秒级。通过将数据介质直接连接至内存总线，CPU可以直接访问数据，无须任何驱动程序或PCIe开销。而且由于内存是通过64字节的Cache Line访问的，CPU只需要访问它需要的数据，而不是像普通块设备那样每次都按块访问。应用程序可以直接访问NVDIMM-P，就像对于传统DRAM那样。这也消除了传统块设备和内存之间进行页交换的需求
+
 # linux存储服务
 ## 1. linux本地文件系统
 ext4, xfs, btrfs
@@ -184,10 +251,14 @@ ext4, xfs, btrfs
 
   SAS是Serial Attach SCSI（串行SCSI）, SATA是串行ATA.
 
+  通过主机总线适配器可以最多连接128个驱动器，速度范围从3GB/s，6GB/s，12GB/s到22.5GB/s.
+
 ## 硬盘
 参考:
 - [存储基础：ATA、SATA、SCSI、SAS、FC](https://blog.csdn.net/solaraceboy/article/details/79122090)
 - [关于NVMe SSD以及其IO性能抖动和blktrace工具](https://blog.51cto.com/u_15333820/3461809)
+- [NVMe HDD 安全“带外”认证在 OCP 上推出](https://www.storagereview.com/zh-CN/news/nvme-hdd-security-out-of-band-attestation-introduced-at-ocp)
+- [什么是NoF？](https://info.support.huawei.com/info-finder/encyclopedia/zh/NoF.html)
 
 低级格式化: 划分磁道和扇区的过程, 通常由厂商完成.
 高级格式化: 对磁盘上所存储的数据进行文件系统的标记.
@@ -252,7 +323,10 @@ ext4, xfs, btrfs
 - NVMe : 全称Non-Volatile Memory Express，非易失性存储器标准，是使用PCI-E通道的SSD一种规范，相比与现在的AHCI标准，NVMe标准可以带来多方面的性能提升
 
 > NVMe标准定义了SSD的访问命令及操作方式，并且定义了逻辑设备接口标准；和SATA体系类比，NVMe标准替代了SATA体系中的AHCI逻辑接口以及ATA/SCSI命令规范.
-> NVMe over Fabric，有两种类型的传输方式: 使用远程直接内存访问(RDMA)和使用光纤通道(FC-NVMe), 用以取代iSCSI和走光纤通道的SCSI. nvme-of与nvme有90%的相同, 只是在nvme transport部分进行了扩展以支持infiniband, 光纤通道等.
+> NVMe over Fabric，有3种类型的传输方式: 使用tcp, 远程直接内存访问(RDMA)和使用光纤通道(FC-NVMe), 用以取代iSCSI和走光纤通道的SCSI. nvme-of与nvme有90%的相同, 只是在nvme transport部分进行了扩展以支持infiniband, 光纤通道等.
+> NVMe和NVMe over Fabrics之间的主要区别之一是用于发送和接收命令或响应的传输映射机制。 NVMe-oF使用基于消息的模型在主机和目标存储设备之间进行通信。NVMe将通过PCIe接口协议将命令和响应映射到主机中的共享内存.
+> NVME over TCP 对网络的要求比较低，具有更强大的兼容性，不需要单独建设无损网络，传统以太网即可支持，因此在不追求高性能的情况下，NVMe over TCP 将是未来市场的普遍选择
+> NVMe-oF三种方案相比较，基于以太网的 RoCE 比 FC 性能更高（更高的带宽、更低的时延），同时兼具 TCP 的优势（全以太化、全 IP 化），因此 NVMe over RoCE 是 NoF最优的承载网络方案，也已成为业界 NoF 的主流技术
 - FC（Fiber Channel）
 
   FC即为光纤通道技术，最早应用于SAN (存储局域网络). FC接口是光纤对接的一种接口标准形式.

@@ -65,7 +65,11 @@
 - [SmartIO: Zero-overhead Device Sharing through PCIe Networking](/misc/pdf/io/ntb_SmartIO.pdf)
 - [Flexible device compositions and dynamic resource sharing in PCIe interconnected clusters using Device Lending](/misc/pdf/io/Flexible_device_compositions_and_dynamic_resource_.pdf)
 - [存储中的镜像技术](https://blog.csdn.net/linjiasen/article/details/104531417)
+
+    早期也有厂商通过SAS或者FC做镜像通道的，现在很多厂商也会使用网卡或者带RDMA功能的网卡作为存储的镜像通道。使用NTB做为镜像好处和坏处都显而易见。NTB做镜像通道对软硬件的工程能力的挑战远远高于RDMA，但是一旦稳定，成本和性能优势就转换成整个产品的护城河。当然如果整机厂商有自己的RDMA芯片也可以变成本做到很低.
+- [【冬瓜哥手绘】从多控缓存管理到集群锁](https://www.chinastor.com/jishu/SAN/0P6164392015.html)
 - [功能PCIE交换机之六：基于NTB夸节点的读写](https://developer.aliyun.com/article/506809)
+- [科技观察：神威·太湖之光超级计算机](https://solution.zhiding.cn/2016/0623/3079588.shtml)
 
 ## 性能
 - [【冬瓜哥手绘】它保你上线性能也吊炸天！](https://mp.weixin.qq.com/s?__biz=MzAwNzU3NzQ0MA==&mid=2652088576&idx=1&sn=af2557735037e254b2f1a5b6ad93e541)
@@ -121,6 +125,14 @@
     - [Huawei OceanStor 18500 and 18800 V5 Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://actfornet.com/ueditor/php/upload/file/20190104/1546532119794412.pdf)
 - [【重识云原生】第三章云存储3.3节——Ceph统一存储方案](https://blog.csdn.net/junbaozi/article/details/124003270)
 
+### 实现
+- [openeuler/fastblock](https://gitee.com/openeuler/fastblock)
+- [opencurve/curve](https://github.com/opencurve/curve)
+
+    - [CURVE是网易自主设计研发的高性能、高可用、高可靠分布式存储系统](https://opencurve.github.io/)和[了解Curve](https://zhuanlan.zhihu.com/p/338343002)
+- [FastCFS 是一款基于块存储的通用分布式文件系统，可以作为MySQL、PostgresSQL、Oracle等数据库和云平台的后端存储](https://www.oschina.net/p/fastcfs)
+- [Open vStorage 是一个开源的虚拟机存储路由器](https://blog.csdn.net/sinat_27186785/article/details/52060441)和[openvstorage / volumedriver](https://github.com/openvstorage/volumedriver)
+
 ## 多活
 - [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)
 
@@ -129,3 +141,15 @@
 - [Linux block 层 - BIO拆分分析 (V5.4内核)](https://zhuanlan.zhihu.com/p/164884780)
 
     磁盘单次传输的IO Size也有限制max_hw_sectors_kb （单位KB），block层单次下发的IO大小也有一个限制max_sectors_kb, max_sectors_kb支持动态修改, 但是不能超过max_hw_sectors_kb
+
+## 白皮书
+- [华为OceanStor 18000F V5高端全闪存存储系统技术白皮书](https://e.huawei.com/cn/material/datacenter/7e3a286b1f49493f996dff420374395f)
+
+    基于PCIE Switch互联, 4坏3
+
+    - [华为存储 OceanStor SmartMatrix 架构](https://zhuanlan.zhihu.com/p/81871403)
+- [OceanStor Dorado 6000, Dorado 18000 系列 6.1.2 产品技术白皮书](https://carrier.huawei.com/~/media/cnbgv2/download/products/it-new/oceanstor-dorado-180006800.pdf)
+
+    基于RDMA互联, 8坏7(OceanStor Dorado V6)
+
+    - [构建新型数据基础设施 华为OceanStor Dorado V6重定义存储架构](https://server.zhiding.cn/server/2019/0814/3120409.shtml)
