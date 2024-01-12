@@ -132,3 +132,18 @@ SLUB分配器是为了满足os（频繁的）分配小对象的需求, 其依赖
 
 ## 缓存染色
 染色机制是操作系统有效利用缓存的一种纯软件方法, 对应的硬件实现由intel CAT, aarch64的MPAM.
+
+## 进程/线程
+线程的上下文即为AArch64架构下CPU中部分寄存器的值, 包括X0～X30共31个通用寄存器及一些特殊寄存器的值. 比如, ELR_EL1（程序计数器）、SP_EL0（线程运行时的栈指针）、SPSR_EL1（线程执行时的CPU状态, 如条件码、中断状态、是否处于调试模式等）、TTBR0_EL1（线程对应的进程的页表）这些特殊寄存器的值需要被保存.
+
+## 总线
+ARM上的片上总线规范称为高级微控制器总线结构（Advanced Micro-controller Bus Architecture, AMBA）规范, 该规范定义了ARM架构片上系统（System-on-Chip, Soc）的通信标准.
+
+AMBA可以将ARM处理器和其他IP核进行集成, 通过对模块化的集成电路的重用, 提高片上系统的开发效率.
+
+在AMBA规范中一共包括三组总线:
+1. 高级高性能总线（Advanced High-PerfbrmanceBus, AHB）:用于连接其他高性能IP核、片上和片外内存以及中断控制器等高性能模块
+1. 高级系统总线（Advanced System Bus, ASB）: 用于某些不必使用AHB但同时又需要高性能特性的芯片中, 能起到一部分降低功耗的作用
+1. 高级设备总线（Advanced Peripheral Bus, APB）: 用于连接低速的设备, 作为低功耗的精简接口总线
+
+此外, AMBA规范中还包含高级可拓展接口（Advanced eXtensible Interlace, AXI）, 它被用作高带宽、低延迟的片内总线.

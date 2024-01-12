@@ -23,6 +23,7 @@
 ## 进阶
 - [good paper](https://people.freebsd.org/~lstewart/articles/)
 - [内存分页、寻址方式那些事](https://www.jianshu.com/p/b29dedb246d1)
+- [openKylin 2.0 揭秘 | 新一代不可变系统探索](https://www.oschina.net/news/274942)
 
 ## os
 - 操作系统: 三大简易元素(Operating Systems: Tree Easy Pieces)

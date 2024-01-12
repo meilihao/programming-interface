@@ -4,6 +4,9 @@
 
 PCI Express，是计算机总线PCI的一种，它沿用现有的PCI编程概念及通信标准，但建基于更快的串行通信系统. 最新版本是5.0, 但6.0已在制定中.
 
+任何厂商生产的设备只要符合PCIE规范, 都能通过PCI插槽和CPU进行通信. 每个PCI设备都有唯一的识别编号, 其内容包括:总线号（bus number）、设备号
+（device number）、功能号（function number）. 识别编号可用于在PCIE设备枚举阶段快速识别设备.
+
 PCIe采用的是树形拓扑结构， 它的体系架构一般由root complex，switch，endpoint等类型的PCIe设备组成:
 - root complex: 根桥设备，是PCIe最重要的一个组成部件； root complex主要负责PCIe报文的解析和生成.
 
