@@ -66,3 +66,8 @@
 	1. 异构互联：泛架构算力存储统一调度
 	1. sysMaster： 安全可靠机制可靠的服务管理系统
 - [fork () 成为负担，需要淘汰](https://www.oschina.net/news/105857/a-fork-in-the-road)
+
+## OpenHarmony
+- [OpenHarmony Release Notes](https://gitee.com/openharmony/docs/blob/master/zh-cn/release-notes/Readme.md)
+- [OpenHarmony](https://github.com/fenwii/OpenHarmony)
+- [获取源码](https://gitee.com/openharmony/docs/blob/master/zh-cn/device-dev/get-code/sourcecode-acquire.md)

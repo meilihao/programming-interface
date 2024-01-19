@@ -672,6 +672,8 @@ VM-Entry，称为从根模式切换到非根模式，也即切换到 guest 上�
 - VM-entry control fields，对 VM Entry(进入vmx non-root operation) 的行为进行控制. 比如，需要保存和恢复哪些 MSR 寄存器等
 - VM-exit information fields，记录下发生 VM Exit 发生的原因及一些必要的信息，方便对 VM Exit 事件进行处理.
 
+通过root/non-root模式, 过去不会引起下陷的敏感指令也能被运行在根模式的虚拟机监控器所捕捉, 继而实现相应的虚拟化操作.
+
 至此，内核准备完毕.
 
 再回到 qemu 的 kvm_init_vcpu 函数，这里面除了创建内核中的 vcpu 结构之外，还通过 mmap 将内核的 vcpu 结构，映射到 qemu 中 CPUState 的 kvm_run 中，为什么能用 mmap 呢，因为 vcpu 也是一个文件. 再回到这个 vcpu 的线程函数 [qemu_kvm_cpu_thread_fn](https://elixir.bootlin.com/qemu/v5.0.0/source/cpus.c#L1218)，它在执行 kvm_init_vcpu 创建 vcpu 之后，接下来是一个 do-while 循环，也即一直运行，并且通过调用 [kvm_cpu_exec](https://elixir.bootlin.com/qemu/v5.0.0/source/accel/kvm/kvm-all.c#L2307)，运行这个虚拟机.

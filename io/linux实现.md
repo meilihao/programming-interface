@@ -3,8 +3,835 @@
 - ![The Linux Storage Stack Diagram](/misc/img/io/The Linux Storage Stack Diagram.svg)
 - [大话 Block 层：数据单元](https://kernel.taobao.org/2020/08/Block_Story_Data_Unit/)
 - [sysfs-block属性](https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-block)
+- [Linux设备模型初始化——SCSI上层sd驱动分析](https://blog.csdn.net/u014104588/article/details/104712051)
+- [linux驱动移植-linux块设备驱动基础](https://www.cnblogs.com/zyly/p/16659955.html)
 
 virtio-scsi是一种新的半虚拟化SCSI控制器设备, 它是替代virtio-blk并改进其功能的KVM Virtualization存储堆栈的替代存储实现的基础.
+
+## block层
+> freeBSD废弃了块设备的抽象, 理由是块设备提供的缓存机制让系统和程序的运行变得不可靠, 程序无法追踪到底是哪次I/O出现了问题. 它将磁盘等设备当作裸设备（raw device）直接暴露给应用程序, 并将裸设备和字符设备统称为字符设备.
+
+初始化入口是[`subsys_initcall(genhd_device_init)`](https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L892), 里面的重点在[`blk_dev_init()`](https://elixir.bootlin.com/linux/v6.6.12/source/block/blk-core.c#L1184).
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/device/class.h#L52
+/**
+ * struct class - device classes
+ * @name:	Name of the class.
+ * @class_groups: Default attributes of this class.
+ * @dev_groups:	Default attributes of the devices that belong to the class.
+ * @dev_uevent:	Called when a device is added, removed from this class, or a
+ *		few other things that generate uevents to add the environment
+ *		variables.
+ * @devnode:	Callback to provide the devtmpfs.
+ * @class_release: Called to release this class.
+ * @dev_release: Called to release the device.
+ * @shutdown_pre: Called at shut-down time before driver shutdown.
+ * @ns_type:	Callbacks so sysfs can detemine namespaces.
+ * @namespace:	Namespace of the device belongs to this class.
+ * @get_ownership: Allows class to specify uid/gid of the sysfs directories
+ *		for the devices belonging to the class. Usually tied to
+ *		device's namespace.
+ * @pm:		The default device power management operations of this class.
+ * @p:		The private data of the driver core, no one other than the
+ *		driver core can touch this.
+ *
+ * A class is a higher-level view of a device that abstracts out low-level
+ * implementation details. Drivers may see a SCSI disk or an ATA disk, but,
+ * at the class level, they are all simply disks. Classes allow user space
+ * to work with devices based on what they do, rather than how they are
+ * connected or how they work.
+ */
+struct class {
+	const char		*name; // 类名称
+
+	const struct attribute_group	**class_groups; // 类所添加的属性
+	const struct attribute_group	**dev_groups; // 类所包含的设备所添加的属性
+
+	int (*dev_uevent)(const struct device *dev, struct kobj_uevent_env *env); // 用于在设备发出uevent消息时添加环境变量
+	char *(*devnode)(const struct device *dev, umode_t *mode); // 设备节点的相对路径名
+
+	void (*class_release)(const struct class *class); // 类被释放时调用的函数
+	void (*dev_release)(struct device *dev); // 设备被释放时调用的函数
+
+	int (*shutdown_pre)(struct device *dev); // 推测为关机前调用的函数
+
+	const struct kobj_ns_type_operations *ns_type;
+	const void *(*namespace)(const struct device *dev);
+
+	void (*get_ownership)(const struct device *dev, kuid_t *uid, kgid_t *gid);
+
+	const struct dev_pm_ops *pm; // 用于电源管理的函数
+};
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L1194
+// c是没有class关键字的, class其实是一个struct
+struct class block_class = {
+	.name		= "block",
+	.dev_uevent	= block_uevent,
+};
+
+//https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L876
+static int __init genhd_device_init(void)
+{
+	int error;
+
+	error = class_register(&block_class); // 块设备类的注册. block_class主要是使用类设备的链表结构，把gendisk结构放入block_class类的private->class_device->i_klist链表下面便于寻找
+	if (unlikely(error))
+		return error;
+	blk_dev_init(); // 块设备最基础的设备使用
+
+	register_blkdev(BLOCK_EXT_MAJOR, "blkext"); // 注册设备号为259的块设备
+
+	/* create top-level block dir */
+	block_depr = kobject_create_and_add("block", NULL); // 用于在驱动模型中/sys目录下生成block目录
+	return 0;
+}
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/blk-core.c#L1184
+int __init blk_dev_init(void)
+{
+	// BUILD_BUG_ON 会在编译时条件满足时打断编译过程
+	BUILD_BUG_ON((__force u32)REQ_OP_LAST >= (1 << REQ_OP_BITS));
+	BUILD_BUG_ON(REQ_OP_BITS + REQ_FLAG_BITS > 8 *
+			sizeof_field(struct request, cmd_flags));
+	BUILD_BUG_ON(REQ_OP_BITS + REQ_FLAG_BITS > 8 *
+			sizeof_field(struct bio, bi_opf));
+
+	/* used for unplugging and affects IO latency/throughput - HIGHPRI */
+	kblockd_workqueue = alloc_workqueue("kblockd",
+					    WQ_MEM_RECLAIM | WQ_HIGHPRI, 0); // 创建`N(cpu core)个kblockd`
+	if (!kblockd_workqueue)
+		panic("Failed to create kblockd\n");
+
+	blk_requestq_cachep = kmem_cache_create("request_queue",
+			sizeof(struct request_queue), 0, SLAB_PANIC, NULL); // `cat /proc/slabinfo  |grep request_queue`. 建立一个缓存池，主要是为了request_queue申请和释放使用的
+
+	blk_debugfs_root = debugfs_create_dir("block", NULL);
+
+	return 0;
+}
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/blkdev.h#L807
+int __register_blkdev(unsigned int major, const char *name,
+		void (*probe)(dev_t devt));
+#define register_blkdev(major, name) \
+	__register_blkdev(major, name, NULL)
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L214
+/**
+ * __register_blkdev - register a new block device
+ *
+ * @major: the requested major device number [1..BLKDEV_MAJOR_MAX-1]. If
+ *         @major = 0, try to allocate any unused major number.
+ * @name: the name of the new block device as a zero terminated string
+ * @probe: pre-devtmpfs / pre-udev callback used to create disks when their
+ *	   pre-created device node is accessed. When a probe call uses
+ *	   add_disk() and it fails the driver must cleanup resources. This
+ *	   interface may soon be removed.
+ *
+ * The @name must be unique within the system.
+ *
+ * The return value depends on the @major input parameter:
+ *
+ *  - if a major device number was requested in range [1..BLKDEV_MAJOR_MAX-1]
+ *    then the function returns zero on success, or a negative error code
+ *  - if any unused major number was requested with @major = 0 parameter
+ *    then the return value is the allocated major number in range
+ *    [1..BLKDEV_MAJOR_MAX-1] or a negative error code otherwise
+ *
+ * See Documentation/admin-guide/devices.txt for the list of allocated
+ * major numbers.
+ *
+ * Use register_blkdev instead for any new code.
+ */
+int __register_blkdev(unsigned int major, const char *name,
+		void (*probe)(dev_t devt))
+{
+	struct blk_major_name **n, *p;
+	int index, ret = 0;
+
+	mutex_lock(&major_names_lock);
+
+	/* temporary */
+	if (major == 0) {
+		for (index = ARRAY_SIZE(major_names)-1; index > 0; index--) {
+			if (major_names[index] == NULL)
+				break;
+		}
+
+		if (index == 0) {
+			printk("%s: failed to get major for %s\n",
+			       __func__, name);
+			ret = -EBUSY;
+			goto out;
+		}
+		major = index;
+		ret = major;
+	}
+
+	if (major >= BLKDEV_MAJOR_MAX) {
+		pr_err("%s: major requested (%u) is greater than the maximum (%u) for %s\n",
+		       __func__, major, BLKDEV_MAJOR_MAX-1, name);
+
+		ret = -EINVAL;
+		goto out;
+	}
+
+	p = kmalloc(sizeof(struct blk_major_name), GFP_KERNEL);
+	if (p == NULL) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	p->major = major;
+#ifdef CONFIG_BLOCK_LEGACY_AUTOLOAD
+	p->probe = probe;
+#endif
+	strscpy(p->name, name, sizeof(p->name));
+	p->next = NULL;
+	index = major_to_index(major);
+
+	spin_lock(&major_names_spinlock);
+	for (n = &major_names[index]; *n; n = &(*n)->next) {
+		if ((*n)->major == major)
+			break;
+	}
+	if (!*n)
+		*n = p;
+	else
+		ret = -EBUSY;
+	spin_unlock(&major_names_spinlock);
+
+	if (ret < 0) {
+		printk("register_blkdev: cannot get major %u for %s\n",
+		       major, name);
+		kfree(p);
+	}
+out:
+	mutex_unlock(&major_names_lock);
+	return ret;
+}
+EXPORT_SYMBOL(__register_blkdev);
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L158
+/*
+ * Can be deleted altogether. Later.
+ *
+ */
+#define BLKDEV_MAJOR_HASH_SIZE 255
+static struct blk_major_name {
+	struct blk_major_name *next;
+	int major;
+	char name[16];
+#ifdef CONFIG_BLOCK_LEGACY_AUTOLOAD
+	void (*probe)(dev_t devt);
+#endif
+} *major_names[BLKDEV_MAJOR_HASH_SIZE]; //定义了一个数组major_names, 有255个元素
+```
+块设备驱动注册是register_blkdev即__register_blkdev, 效果是`在/proc/devices的Block devices下能够看到这个块设备驱动注册了`.
+
+block 子系统提供了`blk_alloc_disk/blk_mq_alloc_disk`([旧版是alloc_disk](https://patchwork.kernel.org/project/linux-block/patch/20210816131910.615153-6-hch@lst.de/)) 和device_add_disk 两个接口来添加磁盘， 整体流程大致如下：
+1. 为磁盘分配设备编号， 并将其注册到块设备映射域
+1. 扫描磁盘分区， 建立磁盘与分区之间的联系
+1. 在sysfs文件系统中为磁盘和分区建立对应的目录
+
+> blk/blk_mq_alloc_disk和device_add_disk会将标准的设备注册函数device_register中的device_initialize和device_add函数分开在各自中分别执行.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/blkdev.h#L128
+struct gendisk {
+	/*
+	 * major/first_minor/minors should not be set by any new driver, the
+	 * block core will take care of allocating them automatically.
+	 */
+	int major;
+	int first_minor;
+	int minors;
+
+	char disk_name[DISK_NAME_LEN];	/* name of major driver */
+
+	unsigned short events;		/* supported events */
+	unsigned short event_flags;	/* flags related to event processing */
+
+	struct xarray part_tbl;
+	struct block_device *part0;
+
+	const struct block_device_operations *fops;
+	struct request_queue *queue;
+	void *private_data;
+
+	struct bio_set bio_split;
+
+	int flags;
+	unsigned long state;
+#define GD_NEED_PART_SCAN		0
+#define GD_READ_ONLY			1
+#define GD_DEAD				2
+#define GD_NATIVE_CAPACITY		3
+#define GD_ADDED			4
+#define GD_SUPPRESS_PART_SCAN		5
+#define GD_OWNS_QUEUE			6
+
+	struct mutex open_mutex;	/* open/close mutex */
+	unsigned open_partitions;	/* number of open partitions */
+
+	struct backing_dev_info	*bdi;
+	struct kobject queue_kobj;	/* the queue/ directory */
+	struct kobject *slave_dir;
+#ifdef CONFIG_BLOCK_HOLDER_DEPRECATED
+	struct list_head slave_bdevs;
+#endif
+	struct timer_rand_state *random;
+	atomic_t sync_io;		/* RAID */
+	struct disk_events *ev;
+
+#ifdef CONFIG_BLK_DEV_ZONED
+	/*
+	 * Zoned block device information for request dispatch control.
+	 * nr_zones is the total number of zones of the device. This is always
+	 * 0 for regular block devices. conv_zones_bitmap is a bitmap of nr_zones
+	 * bits which indicates if a zone is conventional (bit set) or
+	 * sequential (bit clear). seq_zones_wlock is a bitmap of nr_zones
+	 * bits which indicates if a zone is write locked, that is, if a write
+	 * request targeting the zone was dispatched.
+	 *
+	 * Reads of this information must be protected with blk_queue_enter() /
+	 * blk_queue_exit(). Modifying this information is only allowed while
+	 * no requests are being processed. See also blk_mq_freeze_queue() and
+	 * blk_mq_unfreeze_queue().
+	 */
+	unsigned int		nr_zones;
+	unsigned int		max_open_zones;
+	unsigned int		max_active_zones;
+	unsigned long		*conv_zones_bitmap;
+	unsigned long		*seq_zones_wlock;
+#endif /* CONFIG_BLK_DEV_ZONED */
+
+#if IS_ENABLED(CONFIG_CDROM)
+	struct cdrom_device_info *cdi;
+#endif
+	int node_id;
+	struct badblocks *bb;
+	struct lockdep_map lockdep_map;
+	u64 diskseq;
+	blk_mode_t open_mode;
+
+	/*
+	 * Independent sector access ranges. This is always NULL for
+	 * devices that do not have multiple independent access ranges.
+	 */
+	struct blk_independent_access_ranges *ia_ranges;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L1325
+struct gendisk *__alloc_disk_node(struct request_queue *q, int node_id,
+		struct lock_class_key *lkclass)
+{
+	struct gendisk *disk;
+
+	disk = kzalloc_node(sizeof(struct gendisk), GFP_KERNEL, node_id); // node/node_id是NUMA技术中的节点
+	if (!disk)
+		return NULL;
+
+	if (bioset_init(&disk->bio_split, BIO_POOL_SIZE, 0, 0))
+		goto out_free_disk;
+
+	disk->bdi = bdi_alloc(node_id);
+	if (!disk->bdi)
+		goto out_free_bioset;
+
+	/* bdev_alloc() might need the queue, set before the first call */
+	disk->queue = q;
+
+	disk->part0 = bdev_alloc(disk, 0);
+	if (!disk->part0)
+		goto out_free_bdi;
+
+	disk->node_id = node_id;
+	mutex_init(&disk->open_mutex);
+	xa_init(&disk->part_tbl); // 分区表相关功能被集成到了xa相关功能中
+	if (xa_insert(&disk->part_tbl, 0, disk->part0, GFP_KERNEL))
+		goto out_destroy_part_tbl;
+
+	if (blkcg_init_disk(disk))
+		goto out_erase_part0;
+
+	rand_initialize_disk(disk);
+	disk_to_dev(disk)->class = &block_class;
+	disk_to_dev(disk)->type = &disk_type;
+	device_initialize(disk_to_dev(disk));
+	inc_diskseq(disk);
+	q->disk = disk;
+	lockdep_init_map(&disk->lockdep_map, "(bio completion)", lkclass, 0);
+#ifdef CONFIG_BLOCK_HOLDER_DEPRECATED
+	INIT_LIST_HEAD(&disk->slave_bdevs);
+#endif
+	return disk;
+
+out_erase_part0:
+	xa_erase(&disk->part_tbl, 0);
+out_destroy_part_tbl:
+	xa_destroy(&disk->part_tbl);
+	disk->part0->bd_disk = NULL;
+	iput(disk->part0->bd_inode);
+out_free_bdi:
+	bdi_put(disk->bdi);
+out_free_bioset:
+	bioset_exit(&disk->bio_split);
+out_free_disk:
+	kfree(disk);
+	return NULL;
+}
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/blkdev.h#L800
+/**
+ * blk_alloc_disk - allocate a gendisk structure
+ * @node_id: numa node to allocate on
+ *
+ * Allocate and pre-initialize a gendisk structure for use with BIO based
+ * drivers.
+ *
+ * Context: can sleep
+ */
+#define blk_alloc_disk(node_id)						\
+({									\
+	static struct lock_class_key __key;				\
+									\
+	__blk_alloc_disk(node_id, &__key);				\
+})
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L1384
+struct gendisk *__blk_alloc_disk(int node, struct lock_class_key *lkclass)
+{
+	struct request_queue *q;
+	struct gendisk *disk;
+
+	q = blk_alloc_queue(node);
+	if (!q)
+		return NULL;
+
+	disk = __alloc_disk_node(q, node, lkclass);
+	if (!disk) {
+		blk_put_queue(q);
+		return NULL;
+	}
+	set_bit(GD_OWNS_QUEUE, &disk->state);
+	return disk;
+}
+EXPORT_SYMBOL(__blk_alloc_disk);
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/blk-mq.h#L692
+#define blk_mq_alloc_disk(set, queuedata)				\
+({									\
+	static struct lock_class_key __key;				\
+									\
+	__blk_mq_alloc_disk(set, queuedata, &__key);			\
+})
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/blk-mq.c#L4116
+struct gendisk *__blk_mq_alloc_disk(struct blk_mq_tag_set *set, void *queuedata,
+		struct lock_class_key *lkclass)
+{
+	struct request_queue *q;
+	struct gendisk *disk;
+
+	q = blk_mq_init_queue_data(set, queuedata);
+	if (IS_ERR(q))
+		return ERR_CAST(q);
+
+	disk = __alloc_disk_node(q, set->numa_node, lkclass); // linux 提供了 __alloc_disk_node 函数来分配genhd
+	if (!disk) {
+		blk_mq_destroy_queue(q);
+		blk_put_queue(q);
+		return ERR_PTR(-ENOMEM);
+	}
+	set_bit(GD_OWNS_QUEUE, &disk->state);
+	return disk;
+}
+EXPORT_SYMBOL(__blk_mq_alloc_disk);
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L396
+/**
+ * device_add_disk - add disk information to kernel list
+ * @parent: parent device for the disk
+ * @disk: per-device partitioning information
+ * @groups: Additional per-device sysfs groups
+ *
+ * This function registers the partitioning information in @disk
+ * with the kernel.
+ */
+int __must_check device_add_disk(struct device *parent, struct gendisk *disk,
+				 const struct attribute_group **groups)
+
+{
+	...
+}
+```
+device_add_disk是磁盘gendisk及其及分区添加到devices树及sysfs中:
+1. 初始化queue
+1. 设置disk的设备号
+1. 初始化event 相关的信息. block_device_operations中有一个check_events 回调, linux 会周期调用来检测磁盘状态是否发生变化
+1. 设置bdi相关信息 , 用于page cache 回写
+1. 扫描分区: disk_scan_partitions
+
+	>  block层还定义了一个BLKRRPART的ioctl， 可以触发重新扫描分区. 例如fdisk 更新完分区表信息之后, 就会通过这个ioctl重新扫描分区
+
+device_add_disk一般在块设备驱动的probe中调用, 比如对于ufs设备来讲，在drivers/scsi/sd.c的sd_probe中调用.
+
+设备被发现后, 需要向Linux驱动模型注册. 设备注册的函数为device_register. 注册设备分为两个步骤，首先初始化设备，然后将设备添加到sysfs.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.12/source/drivers/base/core.c#L3703
+/**
+ * device_register - register a device with the system.
+ * @dev: pointer to the device structure
+ *
+ * This happens in two clean steps - initialize the device
+ * and add it to the system. The two steps can be called
+ * separately, but this is the easiest and most common.
+ * I.e. you should only call the two helpers separately if
+ * have a clearly defined need to use and refcount the device
+ * before it is added to the hierarchy.
+ *
+ * For more information, see the kerneldoc for device_initialize()
+ * and device_add().
+ *
+ * NOTE: _Never_ directly free @dev after calling this function, even
+ * if it returned an error! Always use put_device() to give up the
+ * reference initialized in this function instead.
+ */
+int device_register(struct device *dev)
+{
+	device_initialize(dev);
+	return device_add(dev);
+}
+EXPORT_SYMBOL_GPL(device_register);
+
+//https://elixir.bootlin.com/linux/v6.6.12/source/drivers/base/core.c#L3091
+/**
+ * device_initialize - init device structure.
+ * @dev: device.
+ *
+ * This prepares the device for use by other layers by initializing
+ * its fields.
+ * It is the first half of device_register(), if called by
+ * that function, though it can also be called separately, so one
+ * may use @dev's fields. In particular, get_device()/put_device()
+ * may be used for reference counting of @dev after calling this
+ * function.
+ *
+ * All fields in @dev must be initialized by the caller to 0, except
+ * for those explicitly set to some other value.  The simplest
+ * approach is to use kzalloc() to allocate the structure containing
+ * @dev.
+ *
+ * NOTE: Use put_device() to give up your reference instead of freeing
+ * @dev directly once you have called this function.
+ */
+void device_initialize(struct device *dev)
+{
+	dev->kobj.kset = devices_kset; // 将设备内嵌的kobject关联到内核对象集
+	kobject_init(&dev->kobj, &device_ktype); // 初始化内核对象，类型定义为device_ktype，包含设备的公共属性操作表以及释放方法
+	INIT_LIST_HEAD(&dev->dma_pools);
+	mutex_init(&dev->mutex);
+	lockdep_set_novalidate_class(&dev->mutex);
+	spin_lock_init(&dev->devres_lock);
+	INIT_LIST_HEAD(&dev->devres_head);
+	device_pm_init(dev);
+	set_dev_node(dev, NUMA_NO_NODE);
+	INIT_LIST_HEAD(&dev->links.consumers);
+	INIT_LIST_HEAD(&dev->links.suppliers);
+	INIT_LIST_HEAD(&dev->links.defer_sync);
+	dev->links.status = DL_DEV_NO_DRIVER;
+#if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU_ALL)
+	dev->dma_coherent = dma_default_coherent;
+#endif
+	swiotlb_dev_init(dev);
+}
+EXPORT_SYMBOL_GPL(device_initialize);
+
+//https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/device.h#L705
+/**
+ * struct device - The basic device structure
+ * @parent:	The device's "parent" device, the device to which it is attached.
+ * 		In most cases, a parent device is some sort of bus or host
+ * 		controller. If parent is NULL, the device, is a top-level device,
+ * 		which is not usually what you want.
+ * @p:		Holds the private data of the driver core portions of the device.
+ * 		See the comment of the struct device_private for detail.
+ * @kobj:	A top-level, abstract class from which other classes are derived.
+ * @init_name:	Initial name of the device.
+ * @type:	The type of device.
+ * 		This identifies the device type and carries type-specific
+ * 		information.
+ * @mutex:	Mutex to synchronize calls to its driver.
+ * @bus:	Type of bus device is on.
+ * @driver:	Which driver has allocated this
+ * @platform_data: Platform data specific to the device.
+ * 		Example: For devices on custom boards, as typical of embedded
+ * 		and SOC based hardware, Linux often uses platform_data to point
+ * 		to board-specific structures describing devices and how they
+ * 		are wired.  That can include what ports are available, chip
+ * 		variants, which GPIO pins act in what additional roles, and so
+ * 		on.  This shrinks the "Board Support Packages" (BSPs) and
+ * 		minimizes board-specific #ifdefs in drivers.
+ * @driver_data: Private pointer for driver specific info.
+ * @links:	Links to suppliers and consumers of this device.
+ * @power:	For device power management.
+ *		See Documentation/driver-api/pm/devices.rst for details.
+ * @pm_domain:	Provide callbacks that are executed during system suspend,
+ * 		hibernation, system resume and during runtime PM transitions
+ * 		along with subsystem-level and driver-level callbacks.
+ * @em_pd:	device's energy model performance domain
+ * @pins:	For device pin management.
+ *		See Documentation/driver-api/pin-control.rst for details.
+ * @msi:	MSI related data
+ * @numa_node:	NUMA node this device is close to.
+ * @dma_ops:    DMA mapping operations for this device.
+ * @dma_mask:	Dma mask (if dma'ble device).
+ * @coherent_dma_mask: Like dma_mask, but for alloc_coherent mapping as not all
+ * 		hardware supports 64-bit addresses for consistent allocations
+ * 		such descriptors.
+ * @bus_dma_limit: Limit of an upstream bridge or bus which imposes a smaller
+ *		DMA limit than the device itself supports.
+ * @dma_range_map: map for DMA memory ranges relative to that of RAM
+ * @dma_parms:	A low level driver may set these to teach IOMMU code about
+ * 		segment limitations.
+ * @dma_pools:	Dma pools (if dma'ble device).
+ * @dma_mem:	Internal for coherent mem override.
+ * @cma_area:	Contiguous memory area for dma allocations
+ * @dma_io_tlb_mem: Software IO TLB allocator.  Not for driver use.
+ * @dma_io_tlb_pools:	List of transient swiotlb memory pools.
+ * @dma_io_tlb_lock:	Protects changes to the list of active pools.
+ * @dma_uses_io_tlb: %true if device has used the software IO TLB.
+ * @archdata:	For arch-specific additions.
+ * @of_node:	Associated device tree node.
+ * @fwnode:	Associated device node supplied by platform firmware.
+ * @devt:	For creating the sysfs "dev".
+ * @id:		device instance
+ * @devres_lock: Spinlock to protect the resource of the device.
+ * @devres_head: The resources list of the device.
+ * @knode_class: The node used to add the device to the class list.
+ * @class:	The class of the device.
+ * @groups:	Optional attribute groups.
+ * @release:	Callback to free the device after all references have
+ * 		gone away. This should be set by the allocator of the
+ * 		device (i.e. the bus driver that discovered the device).
+ * @iommu_group: IOMMU group the device belongs to.
+ * @iommu:	Per device generic IOMMU runtime data
+ * @physical_location: Describes physical location of the device connection
+ *		point in the system housing.
+ * @removable:  Whether the device can be removed from the system. This
+ *              should be set by the subsystem / bus driver that discovered
+ *              the device.
+ *
+ * @offline_disabled: If set, the device is permanently online.
+ * @offline:	Set after successful invocation of bus type's .offline().
+ * @of_node_reused: Set if the device-tree node is shared with an ancestor
+ *              device.
+ * @state_synced: The hardware state of this device has been synced to match
+ *		  the software state of this device by calling the driver/bus
+ *		  sync_state() callback.
+ * @can_match:	The device has matched with a driver at least once or it is in
+ *		a bus (like AMBA) which can't check for matching drivers until
+ *		other devices probe successfully.
+ * @dma_coherent: this particular device is dma coherent, even if the
+ *		architecture supports non-coherent devices.
+ * @dma_ops_bypass: If set to %true then the dma_ops are bypassed for the
+ *		streaming DMA operations (->map_* / ->unmap_* / ->sync_*),
+ *		and optionall (if the coherent mask is large enough) also
+ *		for dma allocations.  This flag is managed by the dma ops
+ *		instance from ->dma_supported.
+ *
+ * At the lowest level, every device in a Linux system is represented by an
+ * instance of struct device. The device structure contains the information
+ * that the device model core needs to model the system. Most subsystems,
+ * however, track additional information about the devices they host. As a
+ * result, it is rare for devices to be represented by bare device structures;
+ * instead, that structure, like kobject structures, is usually embedded within
+ * a higher-level representation of the device.
+ */
+struct device {
+	struct kobject kobj; // 内嵌的kobject
+	struct device		*parent; // 指向父设备的指针
+
+	struct device_private	*p; // 指向设备私有数据的指针
+
+	const char		*init_name; /* initial name of the device */ // 设备初始名字
+	const struct device_type *type; // 指向所属设备类型的指针，其中包含该类型设备公共的方法和成员
+
+	const struct bus_type	*bus;	/* type of bus device is on */ // 指向所属总线类型描述符的指针
+	struct device_driver *driver;	/* which driver has allocated this // 指向所绑定的驱动描述符的指针
+					   device */
+	void		*platform_data;	/* Platform specific data, device
+					   core doesn't touch it */ // 指向平台专有数据的指针，驱动模型核心代码不使用之
+	void		*driver_data;	/* Driver data, set and get with
+					   dev_set_drvdata/dev_get_drvdata */
+	struct mutex		mutex;	/* mutex to synchronize calls to
+					 * its driver.
+					 */
+
+	struct dev_links_info	links; // 该设备生产者和消费者的链接
+	struct dev_pm_info	power; // 设备电源管理信息 
+	struct dev_pm_domain	*pm_domain; // 提供当系统待机时的回调函数
+
+#ifdef CONFIG_ENERGY_MODEL
+	struct em_perf_domain	*em_pd; // 设备的能量模型性能域
+#endif
+
+#ifdef CONFIG_PINCTRL
+	struct dev_pin_info	*pins; // 用于设备pin管理
+#endif
+	struct dev_msi_info	msi;
+#ifdef CONFIG_DMA_OPS
+	const struct dma_map_ops *dma_ops;
+#endif
+	u64		*dma_mask;	/* dma mask (if dma'able device) */
+	u64		coherent_dma_mask;/* Like dma_mask, but for
+					     alloc_coherent mappings as
+					     not all hardware supports
+					     64 bit addresses for consistent
+					     allocations such descriptors. */
+	u64		bus_dma_limit;	/* upstream dma constraint */
+	const struct bus_dma_region *dma_range_map;
+
+	struct device_dma_parameters *dma_parms;
+
+	struct list_head	dma_pools;	/* dma pools (if dma'ble) */
+
+#ifdef CONFIG_DMA_DECLARE_COHERENT
+	struct dma_coherent_mem	*dma_mem; /* internal for coherent mem
+					     override */
+#endif
+#ifdef CONFIG_DMA_CMA
+	struct cma *cma_area;		/* contiguous memory area for dma
+					   allocations */
+#endif
+#ifdef CONFIG_SWIOTLB
+	struct io_tlb_mem *dma_io_tlb_mem;
+#endif
+#ifdef CONFIG_SWIOTLB_DYNAMIC
+	struct list_head dma_io_tlb_pools;
+	spinlock_t dma_io_tlb_lock;
+	bool dma_uses_io_tlb;
+#endif
+	/* arch specific additions */
+	struct dev_archdata	archdata;
+
+	struct device_node	*of_node; /* associated device tree node */
+	struct fwnode_handle	*fwnode; /* firmware device node */
+
+#ifdef CONFIG_NUMA
+	int		numa_node;	/* NUMA node this device is close to */
+#endif
+	dev_t			devt;	/* dev_t, creates the sysfs "dev" */
+	u32			id;	/* device instance */
+
+	spinlock_t		devres_lock; // 保护设备资源链表的自旋锁
+	struct list_head	devres_head; // 设备资源链表表头
+
+	const struct class	*class; // 指向所属类的指针
+	const struct attribute_group **groups;	/* optional groups */ //设备独有的属性组
+
+	void	(*release)(struct device *dev);
+	struct iommu_group	*iommu_group;
+	struct dev_iommu	*iommu;
+
+	struct device_physical_location *physical_location;
+
+	enum device_removable	removable;
+
+	bool			offline_disabled:1;
+	bool			offline:1;
+	bool			of_node_reused:1;
+	bool			state_synced:1;
+	bool			can_match:1;
+#if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU_ALL)
+	bool			dma_coherent:1;
+#endif
+#ifdef CONFIG_DMA_OPS_BYPASS
+	bool			dma_ops_bypass : 1;
+#endif
+};
+
+// https://elixir.bootlin.com/linux/v6.6.12/source/drivers/base/base.h#L87
+/**
+ * struct device_private - structure to hold the private to the driver core portions of the device structure.
+ *
+ * @klist_children - klist containing all children of this device
+ * @knode_parent - node in sibling list
+ * @knode_driver - node in driver list
+ * @knode_bus - node in bus list
+ * @knode_class - node in class list
+ * @deferred_probe - entry in deferred_probe_list which is used to retry the
+ *	binding of drivers which were unable to get all the resources needed by
+ *	the device; typically because it depends on another driver getting
+ *	probed first.
+ * @async_driver - pointer to device driver awaiting probe via async_probe
+ * @device - pointer back to the struct device that this structure is
+ * associated with.
+ * @dead - This device is currently either in the process of or has been
+ *	removed from the system. Any asynchronous events scheduled for this
+ *	device should exit without taking any action.
+ *
+ * Nothing outside of the driver core should ever touch these fields.
+ */
+struct device_private {
+	struct klist klist_children; // 本设备孩子链表的表头
+	struct klist_node knode_parent; // 连接到所属父设备的孩子链表的连接件
+	struct klist_node knode_driver; // 连接到所绑定驱动的设备链表的连接件
+	struct klist_node knode_bus; // 连接到所属总线类型的设备链表的连接件
+	struct klist_node knode_class; // 连接到所属类链表的连接件
+	struct list_head deferred_probe;
+	struct device_driver *async_driver;
+	char *deferred_probe_reason;
+	struct device *device; // 指向device结构
+	u8 dead:1;
+};
+```
+
+devices_kset在[devices_init(https://elixir.bootlin.com/linux/v6.6.12/source/drivers/base/core.c#L4072)函数中被创建. devices_kset包含了 device_uevent_ops 操作集，这个操作集会控制设备状态发生变化时向用户空间发送uevent的方式，该操作集路径位于/sys/devices. devices_init还会创建位于/sys/dev的名为dev的kobject，然后以dev为parent，再创建出两个kobject，分析出路径就应该位于/sys/dev/char和/sys/dev/block.
+
+device_add调用kobject_add即在/sys/devices目录下添加一个以设备名为名字的子目录; 调用device_create_file(dev, &dev_attr_uevent)会在设备目录下创建uevent属性对应的文件; 如果设备有设备号，会在设备目录下创建dev属性对应的文件，只读，用户读取这个文件可以获取设备号，然后调用device_create_sys_dev_entry函数，在sys/block或者sys/char下创建一个到该设备的符号链接; 发送一个uevent到用户空间处理; klist_add_tail, 将该设备加入到对应的链表中. 倘若成功运行，那么在/sys/devices下就会有该设备的子路径，在/sys/block下就会有该设备的符号链接，该设备的信息也录入了系统，设备注册成功.
+
+设备≠磁盘, 在底层发现了一个设备，想要将该设备作为一个磁盘（块设备）添加到系统，在标准设备注册的环节还需要一些额外的操作, 即blk/blk_mq_alloc_disk和device_add_disk.
+
+
+disk和partition的区别：
+- 共同点：
+
+	- 都对应了一个block_device， 可以当作block设备来操作
+	- sysfs中对应的class都是block_class, 因此能够在/sys/class/block中看到两者
+- 不同点：
+
+	- 分区没有独立的block_device_operations回调， 没有独立的queue结构， 没有独立的bdi结构， 这些都是disk相关的
+	- 分区对应的device_type是part_type， disk对应的device_type是disk_type， 这样在sysfs的目录里对应不同的属性
+
+在 Linux 内核中, blk_alloc_disk 和 blk_mq_alloc_disk 都是用于创建块设备的函数, 但它们主要用于不同的块 I/O 模型, 以下是它们的主要区别：
+
+- 块 I/O 模型：
+
+	blk_alloc_disk：用于传统的块 I/O 模型. 在这个模型中，I/O 请求由一个全局队列进行管理. 这是传统的块设备模型，称为"单队列"模型
+	blk_mq_alloc_disk：用于多队列（Multi-Queue，简称 MQ）块 I/O 模型. 在这个模型中，内核支持多个 I/O 队列，每个队列独立处理 I/O 请求，以提高性能和并发性
+- 底层实现：
+
+	blk_alloc_disk：使用传统的块 I/O 子系统，该子系统基于 request_queue 结构来管理 I/O 请求
+	blk_mq_alloc_disk：使用块多队列（blk-mq）子系统，该子系统基于 blk_mq_tag_set 结构来实现多队列支持
+- 多队列支持：
+
+	blk_alloc_disk：仅支持单队列，即一个块设备对应一个 I/O 队列
+	blk_mq_alloc_disk：支持多队列，可以创建多个 I/O 队列，每个队列独立处理 I/O 请求
+- 使用情境：
+
+	blk_alloc_disk：适用于传统的块设备场景，不需要多队列支持的情况
+	blk_mq_alloc_disk：适用于需要充分利用多核 CPU、提高并发性和性能的场景，特别是在高性能存储子系统中
+
+在实际使用中, 选择使用哪个函数取决于需求(blk-mq 在 Linux 内核的4.13版本引入). 如果应用场景简单，不需要多队列支持，那么 blk_alloc_disk 可能更适合. 如果需要更高的并发性和性能，特别是在多核系统中，那么考虑使用 blk_mq_alloc_disk.
 
 ## 用设备控制器屏蔽设备差异
 计算机系统里, CPU 并不直接和设备打交道，而是通过设备控制器（Device Control Unit）的组件中转.
@@ -1399,8 +2226,171 @@ make_request_fn 执行完毕后，可以想象 bio_list_on_stack[0]可能又多�
 因此`q->mq_ops->queue_rq`<=>[struct blk_mq_ops scsi_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1842).queue_rq即[scsi_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1622)封装更加底层的指令，给设备控制器下指令，实施真正的 I/O 操作.
 
 ### scsi
+ref:
+- [Linux Scsi子系统框架介绍](https://www.cnblogs.com/Linux-tech/p/13873882.html)
+
+scsi硬件拓扑:
+- host: 有scsi功能(发送和接收scsi命令)的控制器
+
+	host编号是linux scsi子系统管理
+
+	scsi子系统内部针对每个host控制器对应了Scsi_Host, 其内部有两个structdevice结构体：shost_gendev, shost_dev.
+- device: host连接着scsi设备
+- 每个device内部有若干个channel，每个channel下面有若干个id，每个id下面有若干个lun
+
+	这些lun就是可以接受scsi命令的实体, 例如可以是硬盘, cdrom, 磁带等等, 也可以是一些可以接收特殊scsi命令的wlun
+
+	lun是能够接收scsi命令的主体, 例如可以是一个物理硬盘，一个光驱等; 也有一些lun不是物理实体但是能接收scsi命令，也被看作为lun
+
+channel和id对scsi而言没有实质意义, 它们的编号是底层驱动自行管理的, 应该是驱动灵活性一个体现. 因此linux scsi子系统创造了一个targe=host编号+channel编号+id编号的概念. 引入target概念后，每个device内部可以看成被分为被多个target，每个target下面接着多个lun.
+
+主要bus和class:
+- `scsi` bus：所有host，target，lun都有对应的struct device放在这上面
+
+	通用的scsi的磁盘驱动`sd`，光盘驱动`sr`，磁带驱动`osst`等驱动也在这个bus上面, 这些驱动通过struct device被激活
+
+	shost_gendev在其上. 其scsi_bus_match不允许target不有driver，所以目前只有一些attribute可以在用户空间使用函数中的`if (dev->type != &scsi_dev_type)`不允许shost_gendev有driver对应, 所以目前只有一些attribute可以在用户空间使用
+
+	在scsi内部针对每个target创建了一个名字为`targetk:m:n`的device结构体(其中k是host编号，m是channel编号，n是id编号), 它也在其上, 同样scsi_bus_match不允许target不有driver，所以目前只有一些attribute可以在用户空间使用
+
+	sdev_gendev挂在`scsi` bus上，它会触发bus驱动，驱动会通过sdev_gendev->type字段，来判断该device是否和自己匹配. hdd的device会触发名为`sd`的驱动. sd驱动会给匹配上的lun，在用户空间创建对应的block设备节点，类似于sda，sdb这些（sda1,sda2是sda上GPT或者MBR搞出来的逻辑分区，不属于scsi内容）.
+
+	在`scsi bus上挂着很多驱动, 比如sd, sr. 这些驱动都通过scsi_register_driver注册到`scsi` bus上. 这些公版驱动有针对硬盘的，磁带的，光驱的，扫描仪，ROM等等各种设备的驱动. 基本上这些驱动都会在自己的probe里面去查看sdev_gendev->type字段，判断该device是否和自己匹配, 比如[sd_probe](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c#L3623), 只有符合指定类型的设备，才会触发对应的驱动程序.
+- `scsi_host` class: host有对应的device即shost_dev寄存在这上面，通过host的struct device的attr(group,type)获取到控制器的属性. 例如可以通过这上面的scan触发系统做对整个host做scan动作
+- `scsi_device` class:所有lun的对应的struct device寄存在这上面. 操作它们的驱动是sg.c
+
+	struct scsi_device有两个device对象，分别是sdev_gendev和sdev_dev. 它们的名字都是k:m:n:lunN，其中k是host编号，m是channel编号，n是id编号，lunN是lun编号.
+
+	sdev_dev是挂在名为`scsi_device`的class上，用作它用. 其中比较重要的sg.c驱动，它在这个class上注册了interface(callback), 当有device挂在这个class上时, interface会被调用，从而间接的创建对应的char设备. sg比较特殊，它会不加区分的给所有进来的lun创建一个对应的字符设备到用户空间, 类似于sg0，sg1.
+
+
+linux驱动子系统, 一般包含下面几个内容:
+1. 子系统初始化：驱动bus的建立，子设备驱动的挂载
+
+	- [init_scsi](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/scsi.c)
+
+		```c
+		// https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/scsi.c
+		static int __init init_scsi(void)
+		{
+			int error;
+
+			error = scsi_init_procfs(); // 创建一个/proc/scsi/scsi的文件节点. 这个节点会显示当前系统注册了哪些scsi设备，包括这些设备的channel编号,id编号 lun编号等信息. 这些信息都是实时变化的；如果有写入动作，也会触发子系统的scan动作
+			if (error)
+				goto cleanup_queue;
+			error = scsi_init_devinfo(); // 创建/proc/scsi/device_info节点
+			if (error)
+				goto cleanup_procfs;
+			error = scsi_init_hosts();
+			if (error)
+				goto cleanup_devlist;
+			error = scsi_init_sysctl(); // 创建一个/proc/sys/dev/scsi/logging_level节点，这个节点控制着scsi子系统debug打印的log等级，值越小，打印越少
+			if (error)
+				goto cleanup_hosts;
+			error = scsi_sysfs_register(); // scsi_init_hosts和scsi_sysfs_register创建了scsi子系统最关键的bus和class（scsi, scsi_host和scsi_device）
+			if (error)
+				goto cleanup_sysctl;
+
+			scsi_netlink_init();
+
+			printk(KERN_NOTICE "SCSI subsystem initialized\n");
+			return 0;
+
+		cleanup_sysctl:
+			scsi_exit_sysctl();
+		cleanup_hosts:
+			scsi_exit_hosts();
+		cleanup_devlist:
+			scsi_exit_devinfo();
+		cleanup_procfs:
+			scsi_exit_procfs();
+		cleanup_queue:
+			scsi_exit_queue();
+			printk(KERN_ERR "SCSI subsystem failed to initialize, error = %d\n",
+			       -error);
+			return error;
+		}
+		```
+
+		子设备驱动加载一般比较简单，而且单独以module形式，耦合性很小. 它们一般在module初始化时注册到`scsi` bus总线上，然后一直等待有对应的子设备sdev_devgen挂到`scsi` bus上来, 比如[init_sd](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c#L4022)
+1. 外设扫描：对于scsi而言就是把device侧的所有lun扫描出来
+
+	Scsi扫描过程定义： 是识别每个host，每个targe和每个lun，给其创建对应的device结构，并将device挂载到相应的bus或class上.
+
+	设备扫描的方式很多：
+	- 以host为单位进行scan。它会把host对应的device下面所有的target和lun全扫描出来
+
+		由于host控制器各个芯片平台不一样，它的扫描过程是host device的父设备所在驱动完成的，它的父设备驱动可以是platform总线，也可以是pcie设备对应的pci_driver.
+
+		比如通过`lspci -v -s 00:13.0`查到是ahci, `00:13.0`是来自`/sys/bus/scsi/devices/`的路径片段
+
+		无论哪种当上一级驱动找到host后，会通过:
+		1. scsi_host_alloc：创建shost_gendev和shost_dev
+		1. scsi_add_host: 把shost_gendev和shost_dev挂靠到各自的bus或class上
+
+	- 以target为单位触发scsi进行scan。它会把target下面所有的lun全扫出来
+	- 以lun为单位触发scsi进行scan。它会扫描特定lun
+	- 通过/proc/scsi/scsi触发特定的target或lun的scan
+	- 通过host对应user空间设备的属性”scan”节点触发特定的target或lun的scan
+
+	各种scan入口:
+	- 以host为单位进行scan:scsi_scan_host
+	- 以target为单位触发scsi进行scan:scsi_scan_target
+	- 以lun为单位触发scsi进行scan:scsi_add_device或者__scsi_add_device
+	- 通过/proc/scsi/scsi:scsi_scan_host_selected
+	- 通过host对应user空间设备的属性`scan`节点:scsi_scan_host_selected
+
+1. 通路建立：建立子设备驱动和device之间的连接，对于scsi而言就是公版外设驱动和lundevice之间的通路。Scsi子系统是借助block通用块设备层完成这部分工作
+
+	Scsi注册block层有两个方式，一种是single q，另一种是multi q方式，这里介绍multi q的方式.
+
+	注册multi q，需要做两件事情:
+	1. 通过blk_mq_alloc_tag_set注册一个blk_mq_tag_set。注册时我们要提供一堆钩子函数给通用块设备层，处理block发下来的request请求。
+	1. 通过blk_mq_init_queue并以blk_mq_tag_set为参数为每个能独立处理block请求的实体申请一个request_queue。这样所有的request_queue都和tag_set关联起来了。
+
+	通过上述操作后，所有发送到request_queue中的request都会汇集到tag_set中做处理.
+
+	通过ioctl对sda或者sg设备的命令request都会进入到其对应lun的request_queue, 最终都会走到tag_set的queue_rq钩子函数, 也就是走到了scsi_queue_rq->scsi_dispatch_cmd->host->hostt->queuecommand函数，其中queuecommand是底层驱动注册上来的钩子函数，scsi子系统把request请求发送到这一步之后，剩下的工作就交给底层, 比如sata驱动去处理了.
+1. 休眠唤醒：对于scsi而言，休眠过程是lun->target->host，唤醒过程是反过来。这个决定了host是爷爷辈设备，targe是父设备，lun是子设备，所有的公版驱动都是子设备驱动
+
+	休眠唤醒是驱动的一部分，包括PM(suspendresume)，runtime PM，也有shutdown，remove等。以休眠为例：在”scsi” bus上那些公版driver实现了子设备的休眠唤醒操作. 这个级别的驱动操作的都是lun设备，因此这个级别的驱动是基于scsi命令对设备进行操作。那些更底层的操作例如断开link，给外设断电等是更底层的父设备们去完成的
+
+	- sd_suspend_common: 硬盘驱动sd.c在休眠的时候，给lun发送了scsiSYNCHRONIZE_CACHE命令，要求lun把缓存数据回写到硬盘防止断电丢失，并发送了start_stop命令要求lun进入低功耗状态
+
+	Linux设备驱动模型会保证子设备suspend之后，才会是父设备的suspend，向底层一级一级父辈驱动的suspend调用.
+
+	Scsi里面的父设备target是有channel和id虚拟出来的，没有任何休眠唤醒动作.
+
 scsi低层驱动是面向主机适配器的，低层驱动被加载时，需要添加主机适配器. 主机适配器添加有两种方式：1.在PCI子系统扫描挂载驱动时添加；2.手动方式添加. 所有基于硬件PCI接口的主机适配器都采用第一种方式. 添加主机适配器包括两个步骤：
 1. 分别主机适配器数据结构scsi_host_alloc
 2. 将主机适配器添加到系统scsi_add_host
 
 可参考aha1542适配器的代码[aha1542_hw_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/aha1542.c#L729).
+
+#### 底层驱动注册
+没有纯粹的scsi控制器, 实际的控制器可能是sata，它把scsi封装在自定义的通讯结构中的控制器. 因此linux scsi提供一套用于scsi和各种实际控制器驱动交互的钩子函数模板scsi_host_template, 比如[aha1542的scsi_host_template](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/aha1542.c#L740).
+
+这些钩子函数由scsi主动调用，scsi并不关注这些钩子的实现，例如aha1542_queuecommand，用于接收scsi发下来的请求，并把scsi命令封装到upiu中并发送给硬件host控制。scsi不关心aha1542驱动如何封装scsi命令，如何触发硬件发送命令.
+
+Host驱动在申请scsi_host时会定义该驱动支持多少个channel和每个channel支持多少个id, 比如sata驱动[ata_scsi_add_hosts](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/ata/libata-scsi.c#L4374)支持2个channel，16个id，每个id下面就1个lun.
+
+在driver/scsi目录下搜索max_channel和channel，可以看到各种各样的用法，这些在scsi这层没有规定，完全取决于host驱动根据自身的情况来选择合适的用法.
+
+#### 驱动
+- [sd.c](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c) : 操作的是硬盘，ssd等以sect为单位进行读取写入的存储设备
+
+	“sd”会针对每个匹配上的sdev_gendev，做blk_alloc_disk/blk_mq_alloc_disk和device_add_disk操作, 也就是说在user空间创建对应的块设备节点，例如sda，sdb这些节点.
+	“sd”也会在”scsi_disk”class上创建和sdev_gendev同名的device，会有对应group attr和其对应做一些操作.
+
+	Sd设备驱动本身是块设备驱动，它需要使用block相关的request_queue来发送块设备相关请求给lun，而lun和host之间的沟通是通过block层来完成的，每个lun有自己独有的request_queue，因此sd驱动直接把这个request_queue拿来用之，把这个request_queue和本地申请的gendisk进行绑定。sda，sdb这些块设备就可以直接通过request_queue给lun发送请求
+- sg.c
+
+	sg.c比较特殊，不是对某个类型的设备驱动. 它不管三七二一，对所有挂到“scsi_device”class上的device，都创建一个char类型的设备节点到user空间. 由于所有被扫描出来的lun会有一个sdev_dev在”scsi_device”上，因此sg实际上是给每个lun创建了char设备节点.
+
+	它也会创建一个同名的sg device挂在自定义的”scsi_generic” class上（没有什么特别作用）.
+
+	sg作用：
+	1. Sg存在的唯一目的，是使用ioctl命令，例如rpmb的操作，FFU固件升级等操作，都是通过ioctl方式完成
+	1. 由于无论sg还是sd，还是别的什么scsi外设驱动创建出来用户态设备节点，最终都是通过lun对应的request_queue来完成发送scsi命令，所以sg能做的事情，其它节点也能做，因此有的平台没有打开sg编译开关
+
+	![scsi子系统 ioctl调用关系图](https://imgconvert.csdnimg.cn/aHR0cHM6Ly9tbWJpei5xcGljLmNuL21tYml6X3BuZy9kNGhvWUpseE9qUGE4TEsxR1RhUXpWQnJRWGpiaWJROXRpY0JLMWYyS254VHdUY0ZHRGpmUWJnZlcxMmZ1NzNUdzZmdVpkaWNYNTh5QVUyTzQ5dUllTmpwdy82NDA?x-oss-process=image/format,png)

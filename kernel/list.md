@@ -1,0 +1,9 @@
+# kernel
+## ref
+- [linux_kernel_wiki](https://github.com/0voice/linux_kernel_wiki)
+- [Linux内核5.0版本五大模块及内核书籍推荐](https://github.com/0voice/linux_kernel_wiki)
+- [linux-insides](https://0xax.gitbooks.io/linux-insides/content/index.html)
+- [Linux Kernel Programming by Kaiwan N Billimoria v2]()
+
+## module
+- [The Linux Kernel Module Programming Guide](https://github.com/sysprog21/lkmpg)

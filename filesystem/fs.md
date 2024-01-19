@@ -218,7 +218,15 @@ udev是在用户空间管理设备的工具. 它利用了sysfs提供的信息来
 ref:
 - [sysfs、udev 和 它们背后的 Linux 统一设备模型](https://www.binss.me/blog/sysfs-udev-and-Linux-Unified-Device-Model/)
 
-`/sys`是一种在内存中的虚拟文件系统sysfs的mount point, 提供了有关系统上可用设备, 设备的配置及其状态的信息. sysfs的指定原则之一是`/sys`里的每个文件都只表示下层设备的一个属性.
+`/sys`是一种在内存中的虚拟文件系统sysfs的mount point, 提供了有关系统上可用设备, 设备的配置及其状态的信息. sysfS的目录层次严格对应于内核的抽象组织层次,其用户态的文件形式分别对应于
+内核中相应的抽象.
+
+sysfs 文件形式和内核抽象的对应关系:
+- 目录, 内核对象, 目录的包含关系决定了内核对象的从属关系
+- 文件, 对象属性, 属性说明了内核对象的能力, 如LED的闪烁
+
+	sysfs的指定原则之一是`/sys`里的每个文件都只表示下层设备的一个属性.
+- 链接, 对象关系
 
 可通过`udevadm`查询设备信息, 触发事件, 控制vdevd守护进程, 以及监视udev和内核的事件, 比如查看ssd信息`udevadm info -a -n nvme0n1`.
 

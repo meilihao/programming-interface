@@ -190,6 +190,7 @@
 
 ## 资源
 - [www.IPv6Plus.net/resources](https://github.com/IPv6Plus/IPv6Plus.github.io)
+- [跟着百哥学网络](https://www.bilibili.com/video/BV1bu4y1J76W)
 
 ## 产品
 - [分布式存储 ZBS 的自主研发之旅｜接入协议之 NVMe-oF](https://www.smartx.com/blog/2023/02/zbs-nvmeof/)

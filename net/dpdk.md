@@ -33,6 +33,8 @@ Intel DPDK全称Intel Data Plane Development Kit，是intel提供的数据平面
 
 	如果BIOS开启了UEFI，就无法使用UIO
 
+	推荐: 在计算机设备支持IOMMU的情况下, DPDK优先推荐使用更为安全可靠的VFIO.
+
 ## FAQ
 ### Run to Completion 和 Pipeline 两种报文处理模式的区别
 DPDK 支持 Run to Completion 和 Pipeline 两种报文处理模式，用户可
