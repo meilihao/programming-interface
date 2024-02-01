@@ -5,6 +5,7 @@
 - [sysfs-block属性](https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-block)
 - [Linux设备模型初始化——SCSI上层sd驱动分析](https://blog.csdn.net/u014104588/article/details/104712051)
 - [linux驱动移植-linux块设备驱动基础](https://www.cnblogs.com/zyly/p/16659955.html)
+- [BLOCK层代码分析（4）IO下发之BIO的切分和合并](https://blog.csdn.net/flyingnosky/article/details/121385772)
 
 virtio-scsi是一种新的半虚拟化SCSI控制器设备, 它是替代virtio-blk并改进其功能的KVM Virtualization存储堆栈的替代存储实现的基础.
 

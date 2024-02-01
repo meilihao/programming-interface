@@ -1,6 +1,751 @@
 # driver
 参考:
 - [Linux Platform驱动模型(二) _驱动方法](https://www.cnblogs.com/xiaojiang1025/p/6367910.html)
+- [**Linux设备驱动模型**](https://mshrimp.github.io/2020/05/10/Linux%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/)
+
+	有demo代码
+- [Linux的设备模型](https://doc.embedfire.com/linux/stm32mp1/driver/zh/latest/linux_driver/base_linux_device_model.html)
+- [Linux设备驱动模型简述](https://hughesxu.github.io/posts/Linux_device_and_driver_model/)
+
+	有注册后的数据结构展示
+
+设备的创建就是在Linux内核中维护一些数据结构来对硬件设备进行描述.
+
+![](/misc/img/driver/1771657-20201229232507268-1330517277.png)
+
+linux驱动模型: kernel基于kobject将系统中的总线, 设备和驱动用`bus_type`, `device`和`device_driver`等对象将其组织成一个层次结构的系统, 统一管理各种类别(class)的设备及其接口(class_interface), 同时借助sysfs将内核所见的设备系统展示给用户空间.
+
+总线是处理器与设备之间的通道, 在设备模型中，所有的设备都通过总线相连；总线作为Linux设备驱动模型的核心架构，系统中的设备和驱动都挂接在相应的总线上，来完成各自的工作.
+
+每个子系统有自己的总线类型, 它有一条驱动链表和一条设备链表, 用来链接已加载的驱动和已发现的设备, 驱动加载和设备发现的顺序是任意的. 每个设备至多绑定一个驱动
+
+> 每个设备至多绑定一个驱动: 这个限制在某些情况下, 过于严苛. linux引入类和接口, 每个设备还可以唯一属于某个类, 设备被链入到类的设备链表中. 在设备被发现, 或接口被添加时, 无论何种顺序, 只要它们属于同一个类, 那么接口注册的回调函数都会被作用在设备之上.
+
+> kset是具有相同类型的kobject构成的对象集.
+
+> buses_init()函数在sysfs文件系统的根目录下建立一个bus目录，即/sys/bus，是系统中后续注册总线的连接点. Linux系统在启动时的初始化阶段，通过在driver_init()中调用[buses_init()](https://elixir.bootlin.com/linux/v6.6.13/source/drivers/base/bus.c#L1374)函数，完成所有总线的最初操作，创建出bus的祖先.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L64
+struct kobject {
+	const char		*name; // 名称
+	struct list_head	entry; // 将kobject链接到kset的连接件
+	struct kobject		*parent; //指向包含它的kset的内嵌kobject/其他kobject/NULl
+	struct kset		*kset; // 如果kobject已经链接到kset, 则指向它
+	const struct kobj_type	*ktype; // 类型
+	struct kernfs_node	*sd; /* sysfs directory entry */
+	struct kref		kref; // kobject的引用计数
+
+	unsigned int state_initialized:1; // 1: 已被初始化过
+	unsigned int state_in_sysfs:1; // 已被添加到内核关系树中
+	unsigned int state_add_uevent_sent:1; // 已发送过添加事件到用户空间
+	unsigned int state_remove_uevent_sent:1; // 已发送删除事件到用户空间
+	unsigned int uevent_suppress:1; // 抑制发送事件到用户空间
+
+#ifdef CONFIG_DEBUG_KOBJECT_RELEASE
+	struct delayed_work	release;
+#endif
+};
+
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L116
+struct kobj_type {
+	void (*release)(struct kobject *kobj); // 销毁方法. 不同类型的对象的release方法不同, 同一类型的则相同
+	const struct sysfs_ops *sysfs_ops;
+	const struct attribute_group **default_groups;
+	const struct kobj_ns_type_operations *(*child_ns_type)(const struct kobject *kobj);
+	const void *(*namespace)(const struct kobject *kobj);
+	void (*get_ownership)(const struct kobject *kobj, kuid_t *uid, kgid_t *gid);
+};
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L168
+/**
+ * struct kset - a set of kobjects of a specific type, belonging to a specific subsystem.
+ *
+ * A kset defines a group of kobjects.  They can be individually
+ * different "types" but overall these kobjects all want to be grouped
+ * together and operated on in the same manner.  ksets are used to
+ * define the attribute callbacks and other common events that happen to
+ * a kobject.
+ *
+ * @list: the list of all kobjects for this kset
+ * @list_lock: a lock for iterating over the kobjects
+ * @kobj: the embedded kobject for this kset (recursion, isn't it fun...)
+ * @uevent_ops: the set of uevent operations for this kset.  These are
+ * called whenever a kobject has something happen to it so that the kset
+ * can add new environment variables, or filter out the uevents if so
+ * desired.
+ */
+struct kset {
+	struct list_head list; // 保存在该kset里的所有kobject的链表
+	spinlock_t list_lock; // 用于遍历这个kset的所有kobject的自旋锁
+	struct kobject kobj; // 内嵌kobject
+	const struct kset_uevent_ops *uevent_ops; // uevent操作集合
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L133
+struct kset_uevent_ops {
+	int (* const filter)(const struct kobject *kobj); // 过滤回调函数, 返回0表示不需要向用户空间报告该事件
+	const char *(* const name)(const struct kobject *kobj); // 名称回调函数, 返回子系统名称, 即环境变量SUBSYSTEM的值
+	int (* const uevent)(const struct kobject *kobj, struct kobj_uevent_env *env); // uevent回调函数, 添加子系统特定的环境变量
+};
+```
+
+> kernel会以环境数据的格式(kobj_uevent_env, k=v+`\0`分隔)向用户空间(systemd-udevd.service by netlink机制/user_helper机制)报告内核对象变化. 环境数据是支持设备热插拔的关键组件, 因为该操作需要kernel和用户空间配合完成.
+
+kset作用:
+1. 作为包含一组对象的容器, 可用来追踪资源, 比如所有的块设备或者所有pci设备驱动
+1. 作为目录级别的"粘合剂", 将设备模型中的kobject和sysfs粘在一起, 构建设备模型层次
+1. 支持kobject的热插拔, 影响热插拔事件被报告给用户空间的方式
+
+热插拔事件是一个从内核空间发送到用户空间的通知, 表示系统配置已改变, 无论kobject被创建或删除, 都会产生这种事件. 热插拔事件会导致对/sbin/hotplug的调用, 它通过加载驱动, 创建设备节点, 挂载分区或者其他响应动作. 热插拔事件通常是由总线驱动程序产生的.
+
+kobject的创建和初始化分别是kobject_create和kobject_init. kobject_add是向sysfs注册它.
+
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>类型</th>
+<th>对应的数据结构</th>
+<th>代码文件</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>总线</td>
+<td>bus</td>
+<td>struct bus_type+struct subsys_private</td>
+<td>drivers/base/bus.c</td>
+</tr>
+<tr>
+<td>设备</td>
+<td>device</td>
+<td>struct device+device_private</td>
+<td>drivers/base/core.c</td>
+</tr>
+<tr>
+<td>驱动</td>
+<td>driver</td>
+<td>struct device_driver(include/linux/device.h)+driver_private</td>
+<td>drivers/base/driver.c</td>
+</tr>
+<tr>
+<td>类/接口</td>
+<td></td>
+<td>class+class_interface(https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/device/class.h#L52)</td>
+<td></td>
+</tr>
+</tbody></table>
+
+platform总线作为Linux的基础总线，在内核启动阶段便完成了注册，注册的入口函数为platform_bus_init(), 它对platform总线的注册主要分为两步：
+1. device_register(&platform_bus)
+
+	1. device_initialize()：对struct device中基本成员进行初始化，包括kobject、struct device_private、struct mutex等。
+	1. device_add(dev)：将platform总线也作为一个设备platform_bus注册到驱动模型中，重要的函数包括device_create_file()、device_add_class_symlinks()、bus_add_device()、bus_probe_device()等. device_add(&platform_bus)主要功能是完成/sys/devices/platform目录的建立
+1. bus_register(&platform_bus_type)
+
+	bus_register(&platform_bus_type)将总线platform注册到Linux的总线系统中，主要完成了subsystem的注册，对struct subsys_private结构进行了初始化，具体包括：
+
+	1. platform_bus_type->p->drivers_autoprobe = 1
+	1. 对struct kset类型成员subsys进行初始化，作为子系统中kobject对象的parent。kset本身也包含kobject对象，在sysfs中也表现为一个目录，即/sys/bus/platform。
+	1. 建立struct kset类型的drivers_kset和devices_kset，作为总线下挂载的所有驱动和设备的集合，sysfs中表现为/sys/bus/platform/drivers和/sys/bus/platform/devices。
+	1. 初始化链表klist_drivers和klist_devices，将总线下的驱动和设备分别链接在一起。
+	1. 增加probe文件，对应/sys/bus/platform目录的文件drivers_autoprobe和drivers_probe
+
+Linux内核中对依赖于platform总线的驱动定义了platform_driver结构体，内部封装了struct device_driver, 以驱动globalfifo_driver为实例. globalfifo_driver注册的入口函数为platform_driver_register(&globalfifo_driver)，具体实现为__platform_driver_register(&globalfifo_driver, THIS_MODULE)。
+该函数会对struct device_driver的bus、probe、remove等回调函数进行初始化，紧接着调用driver_register(&globalfifo_driver->driver).
+
+总线用struct subsys_private结构体来管理总线中设备和驱动的关系:
+```c
+// https://elixir.bootlin.com/linux/v6.6.13/source/drivers/base/base.h#L42
+/**
+ * struct subsys_private - structure to hold the private to the driver core portions of the bus_type/class structure.
+ *
+ * @subsys - the struct kset that defines this subsystem
+ * @devices_kset - the subsystem's 'devices' directory
+ * @interfaces - list of subsystem interfaces associated
+ * @mutex - protect the devices, and interfaces lists.
+ *
+ * @drivers_kset - the list of drivers associated
+ * @klist_devices - the klist to iterate over the @devices_kset
+ * @klist_drivers - the klist to iterate over the @drivers_kset
+ * @bus_notifier - the bus notifier list for anything that cares about things
+ *                 on this bus.
+ * @bus - pointer back to the struct bus_type that this structure is associated
+ *        with.
+ * @dev_root: Default device to use as the parent.
+ *
+ * @glue_dirs - "glue" directory to put in-between the parent device to
+ *              avoid namespace conflicts
+ * @class - pointer back to the struct class that this structure is associated
+ *          with.
+ * @lock_key:	Lock class key for use by the lock validator
+ *
+ * This structure is the one that is the actual kobject allowing struct
+ * bus_type/class to be statically allocated safely.  Nothing outside of the
+ * driver core should ever touch these fields.
+ */
+struct subsys_private {
+	struct kset subsys; // bus所在的子系统
+	struct kset *devices_kset; // bus上所有设备的集合
+	struct list_head interfaces;
+	struct mutex mutex;
+
+	struct kset *drivers_kset; // bus上所有驱动的集合
+	struct klist klist_devices; // 该总线上所有设备的链表
+	struct klist klist_drivers; // 该总线上所有驱动的链表
+	struct blocking_notifier_head bus_notifier; // 总线类型变化通知链表的表头. 在总线类型某些变化时将通知这个链表中的元素, 各个元素注册的回调函数将会被调用以便对变化进行相应的处理, 比如添加/删除/绑定/解绑设备
+	unsigned int drivers_autoprobe:1; // 向系统总线中注册设备或驱动时，是否进行设备和驱动的绑定操作
+	const struct bus_type *bus; // 指向相关联的bus_type的指针
+	struct device *dev_root;
+
+	struct kset glue_dirs;
+	const struct class *class;
+
+	struct lock_class_key lock_key;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/device/bus.h#L80
+/**
+ * struct bus_type - The bus type of the device
+ *
+ * @name:	The name of the bus.
+ * @dev_name:	Used for subsystems to enumerate devices like ("foo%u", dev->id).
+ * @bus_groups:	Default attributes of the bus.
+ * @dev_groups:	Default attributes of the devices on the bus.
+ * @drv_groups: Default attributes of the device drivers on the bus.
+ * @match:	Called, perhaps multiple times, whenever a new device or driver
+ *		is added for this bus. It should return a positive value if the
+ *		given device can be handled by the given driver and zero
+ *		otherwise. It may also return error code if determining that
+ *		the driver supports the device is not possible. In case of
+ *		-EPROBE_DEFER it will queue the device for deferred probing.
+ * @uevent:	Called when a device is added, removed, or a few other things
+ *		that generate uevents to add the environment variables.
+ * @probe:	Called when a new device or driver add to this bus, and callback
+ *		the specific driver's probe to initial the matched device.
+ * @sync_state:	Called to sync device state to software state after all the
+ *		state tracking consumers linked to this device (present at
+ *		the time of late_initcall) have successfully bound to a
+ *		driver. If the device has no consumers, this function will
+ *		be called at late_initcall_sync level. If the device has
+ *		consumers that are never bound to a driver, this function
+ *		will never get called until they do.
+ * @remove:	Called when a device removed from this bus.
+ * @shutdown:	Called at shut-down time to quiesce the device.
+ *
+ * @online:	Called to put the device back online (after offlining it).
+ * @offline:	Called to put the device offline for hot-removal. May fail.
+ *
+ * @suspend:	Called when a device on this bus wants to go to sleep mode.
+ * @resume:	Called to bring a device on this bus out of sleep mode.
+ * @num_vf:	Called to find out how many virtual functions a device on this
+ *		bus supports.
+ * @dma_configure:	Called to setup DMA configuration on a device on
+ *			this bus.
+ * @dma_cleanup:	Called to cleanup DMA configuration on a device on
+ *			this bus.
+ * @pm:		Power management operations of this bus, callback the specific
+ *		device driver's pm-ops.
+ * @iommu_ops:  IOMMU specific operations for this bus, used to attach IOMMU
+ *              driver implementations to a bus and allow the driver to do
+ *              bus-specific setup
+ * @need_parent_lock:	When probing or removing a device on this bus, the
+ *			device core should lock the device's parent.
+ *
+ * A bus is a channel between the processor and one or more devices. For the
+ * purposes of the device model, all devices are connected via a bus, even if
+ * it is an internal, virtual, "platform" bus. Buses can plug into each other.
+ * A USB controller is usually a PCI device, for example. The device model
+ * represents the actual connections between buses and the devices they control.
+ * A bus is represented by the bus_type structure. It contains the name, the
+ * default attributes, the bus' methods, PM operations, and the driver core's
+ * private data.
+ */
+struct bus_type {
+	const char		*name;
+	const char		*dev_name;
+	const struct attribute_group **bus_groups;
+	const struct attribute_group **dev_groups;
+	const struct attribute_group **drv_groups;
+
+	int (*match)(struct device *dev, struct device_driver *drv); // 检查给定的驱动是否可以和设备绑定
+	int (*uevent)(const struct device *dev, struct kobj_uevent_env *env); // 添加总线类型特定的环境变量
+	int (*probe)(struct device *dev); // 如果设备可以被绑定到驱动, 则用来对设备进行初始化
+	void (*sync_state)(struct device *dev);
+	void (*remove)(struct device *dev); // 将设备从驱动解绑时调用的回调函数
+	void (*shutdown)(struct device *dev); // 在设备被断电时调用的回调函数
+
+	int (*online)(struct device *dev);
+	int (*offline)(struct device *dev);
+
+	int (*suspend)(struct device *dev, pm_message_t state); // 在该总线类型的设备进入到节能状态时调用的方法, 保存硬件上下文状态, 并改变设备的电影级别
+	int (*resume)(struct device *dev); // 在该总线类型的设备恢复到正常状态时调用的方法, 改变设备的电源级别, 并回复硬件上下文状态
+
+	int (*num_vf)(struct device *dev);
+
+	int (*dma_configure)(struct device *dev);
+	void (*dma_cleanup)(struct device *dev);
+
+	const struct dev_pm_ops *pm; // 指向总线类型的电源管理操作表的指针
+
+	const struct iommu_ops *iommu_ops;
+
+	bool need_parent_lock;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/device.h#L705
+/**
+ * struct device - The basic device structure
+ * @parent:	The device's "parent" device, the device to which it is attached.
+ * 		In most cases, a parent device is some sort of bus or host
+ * 		controller. If parent is NULL, the device, is a top-level device,
+ * 		which is not usually what you want.
+ * @p:		Holds the private data of the driver core portions of the device.
+ * 		See the comment of the struct device_private for detail.
+ * @kobj:	A top-level, abstract class from which other classes are derived.
+ * @init_name:	Initial name of the device.
+ * @type:	The type of device.
+ * 		This identifies the device type and carries type-specific
+ * 		information.
+ * @mutex:	Mutex to synchronize calls to its driver.
+ * @bus:	Type of bus device is on.
+ * @driver:	Which driver has allocated this
+ * @platform_data: Platform data specific to the device.
+ * 		Example: For devices on custom boards, as typical of embedded
+ * 		and SOC based hardware, Linux often uses platform_data to point
+ * 		to board-specific structures describing devices and how they
+ * 		are wired.  That can include what ports are available, chip
+ * 		variants, which GPIO pins act in what additional roles, and so
+ * 		on.  This shrinks the "Board Support Packages" (BSPs) and
+ * 		minimizes board-specific #ifdefs in drivers.
+ * @driver_data: Private pointer for driver specific info.
+ * @links:	Links to suppliers and consumers of this device.
+ * @power:	For device power management.
+ *		See Documentation/driver-api/pm/devices.rst for details.
+ * @pm_domain:	Provide callbacks that are executed during system suspend,
+ * 		hibernation, system resume and during runtime PM transitions
+ * 		along with subsystem-level and driver-level callbacks.
+ * @em_pd:	device's energy model performance domain
+ * @pins:	For device pin management.
+ *		See Documentation/driver-api/pin-control.rst for details.
+ * @msi:	MSI related data
+ * @numa_node:	NUMA node this device is close to.
+ * @dma_ops:    DMA mapping operations for this device.
+ * @dma_mask:	Dma mask (if dma'ble device).
+ * @coherent_dma_mask: Like dma_mask, but for alloc_coherent mapping as not all
+ * 		hardware supports 64-bit addresses for consistent allocations
+ * 		such descriptors.
+ * @bus_dma_limit: Limit of an upstream bridge or bus which imposes a smaller
+ *		DMA limit than the device itself supports.
+ * @dma_range_map: map for DMA memory ranges relative to that of RAM
+ * @dma_parms:	A low level driver may set these to teach IOMMU code about
+ * 		segment limitations.
+ * @dma_pools:	Dma pools (if dma'ble device).
+ * @dma_mem:	Internal for coherent mem override.
+ * @cma_area:	Contiguous memory area for dma allocations
+ * @dma_io_tlb_mem: Software IO TLB allocator.  Not for driver use.
+ * @dma_io_tlb_pools:	List of transient swiotlb memory pools.
+ * @dma_io_tlb_lock:	Protects changes to the list of active pools.
+ * @dma_uses_io_tlb: %true if device has used the software IO TLB.
+ * @archdata:	For arch-specific additions.
+ * @of_node:	Associated device tree node.
+ * @fwnode:	Associated device node supplied by platform firmware.
+ * @devt:	For creating the sysfs "dev".
+ * @id:		device instance
+ * @devres_lock: Spinlock to protect the resource of the device.
+ * @devres_head: The resources list of the device.
+ * @knode_class: The node used to add the device to the class list.
+ * @class:	The class of the device.
+ * @groups:	Optional attribute groups.
+ * @release:	Callback to free the device after all references have
+ * 		gone away. This should be set by the allocator of the
+ * 		device (i.e. the bus driver that discovered the device).
+ * @iommu_group: IOMMU group the device belongs to.
+ * @iommu:	Per device generic IOMMU runtime data
+ * @physical_location: Describes physical location of the device connection
+ *		point in the system housing.
+ * @removable:  Whether the device can be removed from the system. This
+ *              should be set by the subsystem / bus driver that discovered
+ *              the device.
+ *
+ * @offline_disabled: If set, the device is permanently online.
+ * @offline:	Set after successful invocation of bus type's .offline().
+ * @of_node_reused: Set if the device-tree node is shared with an ancestor
+ *              device.
+ * @state_synced: The hardware state of this device has been synced to match
+ *		  the software state of this device by calling the driver/bus
+ *		  sync_state() callback.
+ * @can_match:	The device has matched with a driver at least once or it is in
+ *		a bus (like AMBA) which can't check for matching drivers until
+ *		other devices probe successfully.
+ * @dma_coherent: this particular device is dma coherent, even if the
+ *		architecture supports non-coherent devices.
+ * @dma_ops_bypass: If set to %true then the dma_ops are bypassed for the
+ *		streaming DMA operations (->map_* / ->unmap_* / ->sync_*),
+ *		and optionall (if the coherent mask is large enough) also
+ *		for dma allocations.  This flag is managed by the dma ops
+ *		instance from ->dma_supported.
+ *
+ * At the lowest level, every device in a Linux system is represented by an
+ * instance of struct device. The device structure contains the information
+ * that the device model core needs to model the system. Most subsystems,
+ * however, track additional information about the devices they host. As a
+ * result, it is rare for devices to be represented by bare device structures;
+ * instead, that structure, like kobject structures, is usually embedded within
+ * a higher-level representation of the device.
+ */
+struct device {
+	struct kobject kobj;
+	struct device		*parent; // 指向父设备
+
+	struct device_private	*p; // 执行设备私有数据
+
+	const char		*init_name; /* initial name of the device */
+	const struct device_type *type; // 指向所属设备类型的指针, 其中包含该类型设备公共的方法和成员
+
+	const struct bus_type	*bus;	/* type of bus device is on */ // 指向所属总线类型
+	struct device_driver *driver;	/* which driver has allocated this // 指向所绑定的驱动
+					   device */
+	void		*platform_data;	/* Platform specific data, device
+					   core doesn't touch it */ // 指向平台专有数据
+	void		*driver_data;	/* Driver data, set and get with
+					   dev_set_drvdata/dev_get_drvdata */
+	struct mutex		mutex;	/* mutex to synchronize calls to
+					 * its driver.
+					 */
+
+	struct dev_links_info	links;
+	struct dev_pm_info	power; // 设备的电源管理信息
+	struct dev_pm_domain	*pm_domain;
+
+#ifdef CONFIG_ENERGY_MODEL
+	struct em_perf_domain	*em_pd;
+#endif
+
+#ifdef CONFIG_PINCTRL
+	struct dev_pin_info	*pins;
+#endif
+	struct dev_msi_info	msi;
+#ifdef CONFIG_DMA_OPS
+	const struct dma_map_ops *dma_ops;
+#endif
+	u64		*dma_mask;	/* dma mask (if dma'able device) */ // dma掩码指针
+	u64		coherent_dma_mask;/* Like dma_mask, but for
+					     alloc_coherent mappings as
+					     not all hardware supports
+					     64 bit addresses for consistent
+					     allocations such descriptors. */ // 同dma_mask, 但用于coherent DMA映射
+	u64		bus_dma_limit;	/* upstream dma constraint */
+	const struct bus_dma_region *dma_range_map;
+
+	struct device_dma_parameters *dma_parms; // 设备DMA参数
+
+	struct list_head	dma_pools;	/* dma pools (if dma'ble) */ // 这个设备为进行DMA而创建的consistent memory block链表的表头
+
+#ifdef CONFIG_DMA_DECLARE_COHERENT
+	struct dma_coherent_mem	*dma_mem; /* internal for coherent mem
+					     override */ // 用于相干内存覆写
+#endif
+#ifdef CONFIG_DMA_CMA
+	struct cma *cma_area;		/* contiguous memory area for dma
+					   allocations */
+#endif
+#ifdef CONFIG_SWIOTLB
+	struct io_tlb_mem *dma_io_tlb_mem;
+#endif
+#ifdef CONFIG_SWIOTLB_DYNAMIC
+	struct list_head dma_io_tlb_pools;
+	spinlock_t dma_io_tlb_lock;
+	bool dma_uses_io_tlb;
+#endif
+	/* arch specific additions */
+	struct dev_archdata	archdata; // 架构特定数据
+
+	struct device_node	*of_node; /* associated device tree node */
+	struct fwnode_handle	*fwnode; /* firmware device node */
+
+#ifdef CONFIG_NUMA
+	int		numa_node;	/* NUMA node this device is close to */
+#endif
+	dev_t			devt;	/* dev_t, creates the sysfs "dev" */ // 该设备的设备编号
+	u32			id;	/* device instance */
+
+	spinlock_t		devres_lock; // 用于保护设备资源链表的自旋锁
+	struct list_head	devres_head; // 本设备的设备资源链表的表头. 为简化程序开发, 便于驱动卸载或探测失败路径处理, 将设备申请过的资源保存在此链表中, 以便最后统一释放
+
+	const struct class	*class; // 指向所属类
+	const struct attribute_group **groups;	/* optional groups */ // 这个设备独有的属性组
+
+	void	(*release)(struct device *dev);
+	struct iommu_group	*iommu_group;
+	struct dev_iommu	*iommu;
+
+	struct device_physical_location *physical_location;
+
+	enum device_removable	removable;
+
+	bool			offline_disabled:1;
+	bool			offline:1;
+	bool			of_node_reused:1;
+	bool			state_synced:1;
+	bool			can_match:1;
+#if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU_ALL)
+	bool			dma_coherent:1;
+#endif
+#ifdef CONFIG_DMA_OPS_BYPASS
+	bool			dma_ops_bypass : 1;
+#endif
+};
+
+// https://elixir.bootlin.com/linux/v6.6.13/source/drivers/base/base.h#L108
+/**
+ * struct device_private - structure to hold the private to the driver core portions of the device structure.
+ *
+ * @klist_children - klist containing all children of this device
+ * @knode_parent - node in sibling list
+ * @knode_driver - node in driver list
+ * @knode_bus - node in bus list
+ * @knode_class - node in class list
+ * @deferred_probe - entry in deferred_probe_list which is used to retry the
+ *	binding of drivers which were unable to get all the resources needed by
+ *	the device; typically because it depends on another driver getting
+ *	probed first.
+ * @async_driver - pointer to device driver awaiting probe via async_probe
+ * @device - pointer back to the struct device that this structure is
+ * associated with.
+ * @dead - This device is currently either in the process of or has been
+ *	removed from the system. Any asynchronous events scheduled for this
+ *	device should exit without taking any action.
+ *
+ * Nothing outside of the driver core should ever touch these fields.
+ */
+struct device_private {
+	struct klist klist_children; // 本设备的孩子链表的表头
+	struct klist_node knode_parent; // 链接到所属父设备的孩子链表的连接件
+	struct klist_node knode_driver; // 链接到所绑定驱动的设备链表的连接件
+	struct klist_node knode_bus; // 链接到所属父总线类型的设备链表的连接件
+	struct klist_node knode_class;
+	struct list_head deferred_probe;
+	struct device_driver *async_driver;
+	char *deferred_probe_reason;
+	struct device *device; // 指向相关联的device
+	u8 dead:1;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.14/source/include/linux/device.h#L89
+/*
+ * The type of device, "struct device" is embedded in. A class
+ * or bus can contain devices of different types
+ * like "partitions" and "disks", "mouse" and "event".
+ * This identifies the device type and carries type-specific
+ * information, equivalent to the kobj_type of a kobject.
+ * If "name" is specified, the uevent will contain it in
+ * the DEVTYPE variable.
+ */
+struct device_type {
+	const char *name;
+	const struct attribute_group **groups; // 这一类型的属性公有的属性组
+	int (*uevent)(const struct device *dev, struct kobj_uevent_env *env); //添加设备类型特定的环境变量
+	char *(*devnode)(const struct device *dev, umode_t *mode,
+			 kuid_t *uid, kgid_t *gid); // 在为这种设备创建设备节点时, 提供名字线索
+	void (*release)(struct device *dev); // 用于释放属于该类型的设备的回调函数
+
+	const struct dev_pm_ops *pm; // 指向设备类型的电源管理操作表
+};
+
+// https://elixir.bootlin.com/linux/v6.6.14/source/include/linux/device/driver.h#L51
+/**
+ * struct device_driver - The basic device driver structure
+ * @name:	Name of the device driver.
+ * @bus:	The bus which the device of this driver belongs to.
+ * @owner:	The module owner.
+ * @mod_name:	Used for built-in modules.
+ * @suppress_bind_attrs: Disables bind/unbind via sysfs.
+ * @probe_type:	Type of the probe (synchronous or asynchronous) to use.
+ * @of_match_table: The open firmware table.
+ * @acpi_match_table: The ACPI match table.
+ * @probe:	Called to query the existence of a specific device,
+ *		whether this driver can work with it, and bind the driver
+ *		to a specific device.
+ * @sync_state:	Called to sync device state to software state after all the
+ *		state tracking consumers linked to this device (present at
+ *		the time of late_initcall) have successfully bound to a
+ *		driver. If the device has no consumers, this function will
+ *		be called at late_initcall_sync level. If the device has
+ *		consumers that are never bound to a driver, this function
+ *		will never get called until they do.
+ * @remove:	Called when the device is removed from the system to
+ *		unbind a device from this driver.
+ * @shutdown:	Called at shut-down time to quiesce the device.
+ * @suspend:	Called to put the device to sleep mode. Usually to a
+ *		low power state.
+ * @resume:	Called to bring a device from sleep mode.
+ * @groups:	Default attributes that get created by the driver core
+ *		automatically.
+ * @dev_groups:	Additional attributes attached to device instance once
+ *		it is bound to the driver.
+ * @pm:		Power management operations of the device which matched
+ *		this driver.
+ * @coredump:	Called when sysfs entry is written to. The device driver
+ *		is expected to call the dev_coredump API resulting in a
+ *		uevent.
+ * @p:		Driver core's private data, no one other than the driver
+ *		core can touch this.
+ *
+ * The device driver-model tracks all of the drivers known to the system.
+ * The main reason for this tracking is to enable the driver core to match
+ * up drivers with new devices. Once drivers are known objects within the
+ * system, however, a number of other things become possible. Device drivers
+ * can export information and configuration variables that are independent
+ * of any specific device.
+ */
+struct device_driver {
+	const char		*name; // 驱动名称
+	const struct bus_type	*bus; // 指向所属总线类型
+
+	struct module		*owner; // 指向实现了这个设备驱动的模块
+	const char		*mod_name;	/* used for built-in modules */ // 编译进内核的模块需要根据模块名找对对应的module_kobject, 不能使用上面的`struct module`
+
+	bool suppress_bind_attrs;	/* disables bind/unbind via sysfs */ //1: 禁止通过sysfs进行绑定/解绑
+	enum probe_type probe_type;
+
+	const struct of_device_id	*of_match_table;
+	const struct acpi_device_id	*acpi_match_table;
+
+	int (*probe) (struct device *dev); // 设备可用绑定到驱动, 则用来对设备进行初始化
+	void (*sync_state)(struct device *dev);
+	int (*remove) (struct device *dev); // 将设备从驱动解绑时被调用的回调函数
+	void (*shutdown) (struct device *dev); // 设备被断电时调用的回调函数
+	int (*suspend) (struct device *dev, pm_message_t state); // 设备进入到节能状态时调用的方法
+	int (*resume) (struct device *dev); // 设备恢复到正常状态时调用的方法
+	const struct attribute_group **groups; // 驱动独有的属性组
+	const struct attribute_group **dev_groups;
+
+	const struct dev_pm_ops *pm; // 指向设备的电源管理操作表
+	void (*coredump) (struct device *dev);
+
+	struct driver_private *p; // 指向驱动私有数据
+};
+
+// https://elixir.bootlin.com/linux/v6.6.14/source/drivers/base/base.h#L78
+struct driver_private {
+	struct kobject kobj;
+	struct klist klist_devices; // 这个驱动支持的设备链表的表头
+	struct klist_node knode_bus; // 链接到所属总线类型的驱动链表的连接件
+	struct module_kobject *mkobj; // 指向这个驱动对应的module_kobject
+	struct device_driver *driver; // 指向相关联的device_driver
+};
+#define to_driver(obj) container_of(obj, struct driver_private, kobj)
+
+// https://elixir.bootlin.com/linux/v6.6.14/source/include/linux/device/class.h#L52
+/**
+ * struct class - device classes
+ * @name:	Name of the class.
+ * @class_groups: Default attributes of this class.
+ * @dev_groups:	Default attributes of the devices that belong to the class.
+ * @dev_uevent:	Called when a device is added, removed from this class, or a
+ *		few other things that generate uevents to add the environment
+ *		variables.
+ * @devnode:	Callback to provide the devtmpfs.
+ * @class_release: Called to release this class.
+ * @dev_release: Called to release the device.
+ * @shutdown_pre: Called at shut-down time before driver shutdown.
+ * @ns_type:	Callbacks so sysfs can detemine namespaces.
+ * @namespace:	Namespace of the device belongs to this class.
+ * @get_ownership: Allows class to specify uid/gid of the sysfs directories
+ *		for the devices belonging to the class. Usually tied to
+ *		device's namespace.
+ * @pm:		The default device power management operations of this class.
+ * @p:		The private data of the driver core, no one other than the
+ *		driver core can touch this.
+ *
+ * A class is a higher-level view of a device that abstracts out low-level
+ * implementation details. Drivers may see a SCSI disk or an ATA disk, but,
+ * at the class level, they are all simply disks. Classes allow user space
+ * to work with devices based on what they do, rather than how they are
+ * connected or how they work.
+ */
+struct class {
+	const char		*name;
+
+	const struct attribute_group	**class_groups;
+	const struct attribute_group	**dev_groups;
+
+	int (*dev_uevent)(const struct device *dev, struct kobj_uevent_env *env); // 添加类特定的环境变量
+	char *(*devnode)(const struct device *dev, umode_t *mode); // 可以在为属于该类的设备的创建设备节点时, 提供名字线索
+
+	void (*class_release)(const struct class *class); // 释放该类的回调函数
+	void (*dev_release)(struct device *dev); // 释放属于该类的设备的回调函数
+
+	int (*shutdown_pre)(struct device *dev);
+
+	const struct kobj_ns_type_operations *ns_type;
+	const void *(*namespace)(const struct device *dev);
+
+	void (*get_ownership)(const struct device *dev, kuid_t *uid, kgid_t *gid);
+
+	const struct dev_pm_ops *pm; // 指向类的电源管理操作表
+};
+
+// https://elixir.bootlin.com/linux/v6.6.14/source/include/linux/device/class.h#L219
+struct class_interface {
+	struct list_head	node; // 链入所属类的接口链表的连接件
+	const struct class	*class; // 指向所属类
+
+	int (*add_dev)		(struct device *dev); // 在接口被注册到类, 或者设备被添加到接口所在的类是, 调用该函数向接口添加设备
+	void (*remove_dev)	(struct device *dev); // 在接口被销毁, 或者从设备所在类删除该设备时, 调用该函数从接口删除设备
+};
+```
+> 几乎所有的类都显示在/sys/class中, 但/sys/block因为历史原因除外.
+
+bus_register()函数用来注册一个bus总线子系统，可能会失败，必须检查返回值；注册成功后，可以在/sys/bus/目录下看到该总线；之后就可以向总线中添加设备了.
+
+bus_type的match方法：当总线上添加新设备或新驱动程序时，会多次调用match方法，将device和device_driver进行匹配，如果匹配成功，说明指定的驱动程序能够处理指定的设备，match方法返回非零值
+
+device_register()函数用来注册设备，可能会失败，必须检查返回值；注册成功后，可以在/sys/devices目录下看到该设备；以后添加到改总线上的任何设备都可以在/sys/devices/ldd目录下显示.
+
+> device_register->device_add->bus_probe_device
+
+driver_register()函数用来注册驱动. driver_register(&(globalfifo_driver.driver))主要的工作包括：
+1. 确认驱动依附的总线platform_bus已经被注册并初始化（必要条件）。
+1. 对probe、remove、shutdown等回调函数初始化进行判断，保证总线和驱动上相应的函数只能存在一个。
+1. driver_find()查找总线上是否已存在当前驱动的同名驱动。
+1. bus_add_driver(&(globalfifo_driver.driver))，将驱动注册到总线上
+1. 发起KOBJ_ADD类型uevent，指示驱动已经添加完成
+
+> driver_register->bus_add_driver->driver_attach(尝试让驱动去绑定所有可能的设备)-> `__driver_attach`
+
+class_register: 类注册
+
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>属性数据结构</th>
+<th>设置属性方法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>bus</td>
+<td>bus_attribute(include/linux/device.h)</td>
+<td>BUS_ATTR()</td>
+</tr>
+<tr>
+<td>device</td>
+<td>device_attribute(include/linux/device.h)</td>
+<td>DEVICE_ATTR()</td>
+</tr>
+<tr>
+<td>driver</td>
+<td>driver_attribute( include/linux/device.h)</td>
+<td>手动设置driver_attribute</td>
+</tr>
+</tbody></table>
+
+BUS_ATTR()宏，定义一个以bus_attr_开头的总线属性，生成总线属性文件需要使用bus_create_file()函数来完成.
 
 驱动本质上只做了两件事：向上提供接口，向下控制硬件:
 
@@ -9,6 +754,9 @@
 1. 确定驱动对象：内核中的一个驱动/设备就是一个对象，1.定义，2.初始化，3.注册，4.注销
 1. 向上提供接口：根据业务需要确定提供cdev/proc/sysfs哪种接口
 1. 向下控制硬件：1.查看原理图确定引脚和控制逻辑，2.查看芯片手册确定寄存器配置方式，3.进行内存映射，4.实现控制逻辑
+
+## 引用计数
+[kref](https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kref.h#L19)
 
 ## 地址
 物理地址: CPU地址总线使用的地址, 由硬件电路控制其具体含义. 物理地址中很大一部分是留给内存的, 但也常被映射到其他存储器上（如显存、BIOS等）. 在程序指令中的虚拟地址经过段映射和页面映射后, 就生成了物理地址.
@@ -155,6 +903,64 @@ ARM设备种类数不胜数, 配置信息各不相同, 把硬件配置硬编码�
 设备树源码文件的扩展名为.dts. 在Linux内核项目源码里, 可以在平台相关代码目录中找到大量设备树源码文件. `.dts`源码文件可以编译生成二进制文件, 其扩展名为`.dtb`. 在启动过程中, os内核读取dtb二进制文件以获取设备信息.
 
 Linux内核根据设备树注册各节点所表示的设备, 根据compatible属性后接的字符串内容识别设备并匹配对应的驱动代码, 进而实现对设备的管理.
+
+PCIe Host的设备树内容:
+```
+pcie: pcie@fd0e0000 {
+	compatible = "xlnx,nwl-pcie-2.11";
+	status = "disabled";
+	#address-cells = <3>;
+	#size-cells = <2>;
+	#interrupt-cells = <1>;
+	msi-controller;
+	device_type = "pci";
+    
+	interrupt-parent = <&gic>;
+	interrupts = <0 118 4>,
+		     <0 117 4>,
+		     <0 116 4>,
+		     <0 115 4>,	/* MSI_1 [63...32] */
+		     <0 114 4>;	/* MSI_0 [31...0] */
+	interrupt-names = "misc", "dummy", "intx", "msi1", "msi0";
+	msi-parent = <&pcie>;
+    
+	reg = <0x0 0xfd0e0000 0x0 0x1000>,
+	      <0x0 0xfd480000 0x0 0x1000>,
+	      <0x80 0x00000000 0x0 0x1000000>;
+	reg-names = "breg", "pcireg", "cfg";
+	ranges = <0x02000000 0x00000000 0xe0000000 0x00000000 0xe0000000 0x00000000 0x10000000	/* non-prefetchable memory */
+		  0x43000000 0x00000006 0x00000000 0x00000006 0x00000000 0x00000002 0x00000000>;/* prefetchable memory */
+	bus-range = <0x00 0xff>;
+    
+	interrupt-map-mask = <0x0 0x0 0x0 0x7>;
+	interrupt-map =     <0x0 0x0 0x0 0x1 &pcie_intc 0x1>,
+			    <0x0 0x0 0x0 0x2 &pcie_intc 0x2>,
+			    <0x0 0x0 0x0 0x3 &pcie_intc 0x3>,
+			    <0x0 0x0 0x0 0x4 &pcie_intc 0x4>;
+    
+	pcie_intc: legacy-interrupt-controller {
+		interrupt-controller;
+		#address-cells = <0>;
+		#interrupt-cells = <1>;
+	};
+};
+```
+字段说明:
+- compatible：用于匹配PCIe Host驱动；
+- msi-controller：表示是一个MSI（Message Signaled Interrupt）控制器节点，这里需要注意的是，有的SoC中断控制器使用的是GICv2版本，而GICv2并不支持MSI，所以会导致该功能的缺失；
+- device-type：必须是"pci"；
+- interrupts：包含NWL PCIe控制器的中断号；
+- interrupts-name：msi1, msi0用于MSI中断，intx用于旧式中断，与interrupts中的中断号对应；
+- reg：包含用于访问PCIe控制器操作的寄存器物理地址和大小；
+- reg-name：分别表示Bridge registers，PCIe Controller registers， Configuration space region，与reg中的值对应；
+- ranges：PCIe地址空间转换到CPU的地址空间中的范围；
+- bus-range：PCIe总线的起始范围；
+- interrupt-map-mask和interrupt-map：标准PCI属性，用于定义PCI接口到中断号的映射；
+- legacy-interrupt-controller：旧式的中断控制器
+
+probe流程
+1. 系统会根据dtb文件创建对应的platform_device并进行注册；
+1. 当驱动与设备通过compatible字段匹配上后，会调用probe函数，也就是nwl_pcie_probe
 
 ### ACPI
 这是x86架构计算机上的标准设备识别方案. ACPI可以理解为设备和操作系统之间的一层抽象, 该层抽象统一地向os汇报硬件设备的情况, 同时提供管理设备的接口和方法.
@@ -306,6 +1112,11 @@ Linux设备驱动模型提供了设备资源管理（device resource management�
 
 由于Ljnux的快速迭代, 以及设备类型和数量的持续增多, 基于DDE模拟Linux设备驱动模型环境的维护成本愈来愈高. 后来L4采取了借助虚拟化复用二进制驱动程序的路线, 将自己化身为虚拟机监控器, 用L4微内核的接口将Linux运行在用户态上, L4Linux作为L4在用户态的服务器, 为L4系统上的其他应用提供驱动服务.
 
+## sysfs
+通过[sysfs_init](https://elixir.bootlin.com/linux/v6.6.13/source/fs/sysfs/mount.c#L97)初始化. 它由vfs初始化代码调用.
+
+对sysfs文件的读写会转换为对属性的[show和store](https://elixir.bootlin.com/linux/v6.6.13/source/fs/sysfs/file.c#L219), 见sysfs_add_file_mode_ns.
+
 ## Linux的用户态驱动框架—用户空间I/O和虚拟空间I/O
 UIO有一个明显的缺点, 它缺乏在用户态空间动态创建DMA区域的能力, 这也限制了一些驱动在UIO上的移植.
 
@@ -314,3 +1125,14 @@ VFIO借助IOMMU限制了用户空间驱动代码的内存访问能力, 从而允
 和UIO类似, VFIO也在devfs下暴露了`/dev/vfio/<Group>`接口, 用于和用户态驱动进行交互. 这里的group是VFIO使用的基本隔离粒度, 表示一组和系统内其他设备相隔离的设备. group是确保安全访问的基本隔离粒度, 但不一定是VFIO控制设备的基本粒度. 出于性能考虑, VFIO允许在不同group之间共享同一虚拟地址空间. 为此, VFIO又引人了container类型, 容纳多个彼此间共享页表的group, 可以将container视为VFIO的基本操作单位.
 
 打开`/dev/vfio/<vfio>字符设备`就代表创建了一个container, 但是container本身提供的接口很少, 用户需要将和设备相关的group加入container中才能进一步操作设备.
+
+## 固件
+固件子系统使用 sysfs 和热插拔机制工作. 当调用 request_firmware时, 函数将在 /sys/class/firmware 下创建一个以设备名为目录名的新目录，其中包含 3 个属性:
+- loading ：这个属性应当被加载固件的用户空间进程设置为 1。当加载完毕, 它将被设为 0。被设为 -1 时，将中止固件加载。
+- data ：一个用来接收固件数据的二进制属性。在设置 loading 为1后, 用户空间进程将固件写入这个属性。
+- device ：一个链接到 /sys/devices 下相关入口项的符号链接。
+
+一旦创建了 sysfs 入口, 内核将为设备产生一个热插拔事件，并传递包括变量 FIRMWARE 的环境变量给处理热插拔的用户空间程序. FIRMWARE 被设置为提供给 request_firmware 的固件文件名.
+用户空间程序定位固件文件, 并将其拷贝到内核提供的二进制属性；若无法定位文件, 用户空间程序设置 loading 属性为 -1. 若固件请求在 10 秒内没有被服务, 内核就放弃并返回一个失败状态给驱动, 超时时间可通过 sysfs 属性 /sys/class/firmware/timeout 属性修改.
+
+request_firmware 接口允许使用驱动发布设备固件. 当正确地集成进热插拔机制后, 固件加载子系统允许设备不受干扰地工作.
