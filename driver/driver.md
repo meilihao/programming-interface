@@ -1,5 +1,6 @@
 # driver
 参考:
+- [+**Linux驱动之设备驱动模型**](https://carlyleliu.github.io/2020/Linux%E9%A9%B1%E5%8A%A8%E4%B9%8B%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/)
 - [Linux Platform驱动模型(二) _驱动方法](https://www.cnblogs.com/xiaojiang1025/p/6367910.html)
 - [**Linux设备驱动模型**](https://mshrimp.github.io/2020/05/10/Linux%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/)
 

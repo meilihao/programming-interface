@@ -7,7 +7,43 @@
 - [linux驱动移植-linux块设备驱动基础](https://www.cnblogs.com/zyly/p/16659955.html)
 - [BLOCK层代码分析（4）IO下发之BIO的切分和合并](https://blog.csdn.net/flyingnosky/article/details/121385772)
 
+块设备(block device)是以固定长度的块为单位进行读写数据的存储设备.
+
 virtio-scsi是一种新的半虚拟化SCSI控制器设备, 它是替代virtio-blk并改进其功能的KVM Virtualization存储堆栈的替代存储实现的基础.
+
+块I/O子系统，也被称为Linux块层. 块I/O子系统可以被分为三层:
+1. 通用块层（Generic Block Layer）: 为各种类型的块设备建立了一个统一的模型
+
+	通用块层的主要工作是：接收上层发出的磁盘请求, 并最终发出I/O请求. 该层隐藏了底层硬件块设备的特性, 为块设备提供了一个通用的抽象视图. 
+
+1. I/O调度层：接收通用块层发出的I/O请求，缓存请求并试图合并相邻的请求（如果这两个请求的数据在磁盘上是相邻的），并根据设置好的调度算法，回调驱动层提供的请求处理函数，以处理具体的I/O请求.
+
+	为了优化寻址操作，内核既不会简单地按请求接收次序，也不会立即将其提交给磁盘。相反，它会在提交前，先执行名为“合并与排序”的预操作，这种预操作可以极大地提高系统的整体性能.
+
+1. 块设备驱动层：具体I/O的处理交给块设备驱动层来完成, 视块设备类型不同.
+
+	对于大多数逻辑块设备，块设备驱动可能是一个纯粹的软件层，并不需要和硬件直接打交道，只是机械地重定向I/O. 对于SCSI块设备，其块设备驱动即SCSI磁盘驱动，为SCSI子系统的高层驱动，从而将块I/O子系统和SCSI子系统联系了起来.
+
+块I/O子系统的一般I/O处理流程是：上层调用通用块层提供的接口向块I/O子系统提交I/O请求，这些请求首先被放入I/O调度层的调度队列，经过合并和排序，最终将转换后的I/O请求派发到具体块设备的等待队列，由后者的驱动进一步处理. 这个过程涉及两种形式的I/O请求:
+1. 一种是通用块层I/O请求，即上层提交的I/O请求, 在Linux内核中以bio结构描述
+2. 另一种是块设备驱动层I/O请求, 即经I/O调度层转换后的I/O请求, 在Linux内核中以request描述
+
+为提升系统性能，块I/O子系统采用了聚散I/O（scatter/gather I/O）这样一种机制:
+1. 分散读（scatter-read）:在单次操作中，从磁盘的连续扇区中的数据读取到几个物理上不连续的内存缓冲区
+
+	用片段来描述缓冲区, 即使一个缓冲区分散在内存的多个位置上
+2. 聚集写（gather-write）:将几个物理上不连续的内存缓冲区中的数据写到磁盘上的连续扇区
+
+块I/O子系统的代码主要位于block/目录下. 块I/O子系统的主要功能是：
+1. 在内存中构建通用磁盘、分区和块设备之间的关系
+2. 向上层提供I/O请求API，并实现I/O调度，将请求派发到具体块设备的请求队列执行
+3. 提供请求完成的下半部处理API，直至最终调用上层的请求完成回调函数结束I/O
+
+磁盘和分区都对应一个块设备, 在对分区进行I/O操作时, 其偏移量会转换为相对于磁盘的偏移量.
+
+bio表示上层发给通用块层的请求，称为通用块层请求，它关注的是请求的应用层面，即读取（或写入）哪个块设备，读取（或写入）多少字节的数据，读取（或写入）到哪个目标缓冲区等. request表示通用块层为底层块设备驱动准备的请求，称作块设备驱动层IO请求，或块设备驱动请求，它关注的是请求的实施层面，即构造哪种类型的SCSI命令.
+
+块IO子系统涉及不同的请求队列，包括IO调度队列和派发队列. IO调度队列是块IO子系统用于对通用块层请求进行合并和排序的队列. 派发队列是针对块设备驱动的，即块IO子系统严格按照队列顺序提交块设备驱动层请求给块设备驱动处理. 一般来说，每个块设备都有一个派发队列，IO子系统又为它内部维护了一个IO调度队列，不同的块设备可以采用不同的IO调度算法.
 
 ## block层
 > freeBSD废弃了块设备的抽象, 理由是块设备提供的缓存机制让系统和程序的运行变得不可靠, 程序无法追踪到底是哪次I/O出现了问题. 它将磁盘等设备当作裸设备（raw device）直接暴露给应用程序, 并将裸设备和字符设备统称为字符设备.
@@ -239,32 +275,38 @@ block 子系统提供了`blk_alloc_disk/blk_mq_alloc_disk`([旧版是alloc_disk]
 
 > blk/blk_mq_alloc_disk和device_add_disk会将标准的设备注册函数device_register中的device_initialize和device_add函数分开在各自中分别执行.
 
+> blk_add_partition: 扫描磁盘分区, 以前是rescan_partitions by [block: refactor rescan_partitions](https://patchwork.kernel.org/project/linux-block/patch/20191114143438.14681-2-hch@lst.de/). 系统支持不同的分区表, 实现代码在全局数组[check_part](https://elixir.bootlin.com/linux/v6.6.15/source/block/partitions/core.c#L15)中.
+
+磁盘及其分区加入系统后, 会在sysfs创建对应的目录(取决于磁盘类型), 分区会在该磁盘目录下. scsi在scsi设备所对应的目录下, 此外在/sys/block会创建符号链接指向磁盘目录. 对于分区, 则没有这样的符号链接.
+
 ```c
-// https://elixir.bootlin.com/linux/v6.6.12/source/include/linux/blkdev.h#L128
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blkdev.h#L128
+// 通用磁盘描述符: 磁盘通用的部分信息
+// 每个gendisk通常与一个特定磁盘类型设备相对应
 struct gendisk {
 	/*
 	 * major/first_minor/minors should not be set by any new driver, the
 	 * block core will take care of allocating them automatically.
 	 */
-	int major;
-	int first_minor;
-	int minors;
+	int major; // 主设备号
+	int first_minor; // 和本磁盘关联的第一个次设备号即磁盘的次设备号
+	int minors; // 和本磁盘管理的次设备号数目. 1, 磁盘不支持分区
 
-	char disk_name[DISK_NAME_LEN];	/* name of major driver */
+	char disk_name[DISK_NAME_LEN];	/* name of major driver */ // 磁盘名
 
 	unsigned short events;		/* supported events */
 	unsigned short event_flags;	/* flags related to event processing */
 
-	struct xarray part_tbl;
-	struct block_device *part0;
+	struct xarray part_tbl; // 指向磁盘分区表
+	struct block_device *part0; // 磁盘的分区0(将整个磁盘也作为一个分区, 分区号是0). block_device取代了hd_struct(5.0.21存在, 5.19.17不存在). 磁盘就通过这个链入block_class的设备链表
 
-	const struct block_device_operations *fops;
-	struct request_queue *queue;
-	void *private_data;
+	const struct block_device_operations *fops; // 指向块设备方法表
+	struct request_queue *queue; // 指向磁盘的请求队列. 对于scsi磁盘是scsi_device的request_queue; md是mddev_t的queue; Device Mapper是mapped_device的queue
+	void *private_data; // 特定磁盘类型的私有数据. 对于scsi是scsi_disk的driver; raid是mddev_t, 对于device mapper是mapped_device
 
 	struct bio_set bio_split;
 
-	int flags;
+	int flags; // 磁盘标志. GENED_FL_REMOVABLE, 可移除设备; GENHD_FL_CD, cdrom设备
 	unsigned long state;
 #define GD_NEED_PART_SCAN		0
 #define GD_READ_ONLY			1
@@ -279,12 +321,12 @@ struct gendisk {
 
 	struct backing_dev_info	*bdi;
 	struct kobject queue_kobj;	/* the queue/ directory */
-	struct kobject *slave_dir;
+	struct kobject *slave_dir; // 指向sysfs中这个磁盘下slaves目录对应kobject
 #ifdef CONFIG_BLOCK_HOLDER_DEPRECATED
 	struct list_head slave_bdevs;
 #endif
-	struct timer_rand_state *random;
-	atomic_t sync_io;		/* RAID */
+	struct timer_rand_state *random; // 被内核用来帮助产生随机数
+	atomic_t sync_io;		/* RAID */ // 写入磁盘扇区的计数器, 仅用于RAID
 	struct disk_events *ev;
 
 #ifdef CONFIG_BLK_DEV_ZONED
@@ -312,7 +354,7 @@ struct gendisk {
 #if IS_ENABLED(CONFIG_CDROM)
 	struct cdrom_device_info *cdi;
 #endif
-	int node_id;
+	int node_id; // 记录分配该磁盘描述符的node id, 以后在扩展磁盘分区表时, 尽量在同一个node上进行
 	struct badblocks *bb;
 	struct lockdep_map lockdep_map;
 	u64 diskseq;
@@ -325,7 +367,419 @@ struct gendisk {
 	struct blk_independent_access_ranges *ia_ranges;
 };
 
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blk_types.h#L40
+// 磁盘和分区都对应一个块设备
+struct block_device {
+	sector_t		bd_start_sect; // 分区在磁盘内的起始扇区编号
+	sector_t		bd_nr_sectors; // 分区的长度(扇区数)
+	struct gendisk *	bd_disk; // 指向这个块设备所在磁盘的gendisk
+	struct request_queue *	bd_queue;
+	struct disk_stats __percpu *bd_stats;
+	unsigned long		bd_stamp;
+	bool			bd_read_only;	/* read-only policy */
+	u8			bd_partno;
+	bool			bd_write_holder;
+	bool			bd_has_submit_bio;
+	dev_t			bd_dev; // 设备号
+	atomic_t		bd_openers; // 被打开的次数
+	spinlock_t		bd_size_lock; /* for bd_inode->i_size updates */ // 逻辑块长度(字节), 在512~PAGE_SIZE之间
+	struct inode *		bd_inode;	/* will die */ // 实际使用的是bdev_inode的inode
+	void *			bd_claiming;
+	void *			bd_holder; // 当前holder. 通过它实现排它式或共享式打开
+	const struct blk_holder_ops *bd_holder_ops;
+	struct mutex		bd_holder_lock;
+	/* The counter of freeze processes */
+	int			bd_fsfreeze_count; // "冻结"计数器. 在freeze_bdev中递增, 在thaw_bdev中递减. 减到0即解冻
+	int			bd_holders; // 多次设置holder的计数器
+	struct kobject		*bd_holder_dir; // 指向这个分区下holders目录对应kobject
+
+	/* Mutex for freeze */
+	struct mutex		bd_fsfreeze_mutex; // 用于保护的互斥量
+	struct super_block	*bd_fsfreeze_sb;
+
+	struct partition_meta_info *bd_meta_info;
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+	bool			bd_make_it_fail;
+#endif
+	bool			bd_ro_warned;
+	/*
+	 * keep this out-of-line as it's both big and not needed in the fast
+	 * path
+	 */
+	struct device		bd_device; // 链入block_class的设备链表
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/block/bdev.c#L33
+// block_device是块I/O和fs直接的纽带, 是因为它与inode的关系即bdev_inode
+struct bdev_inode {
+	struct block_device bdev;
+	struct inode vfs_inode;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blkdev.h#L128
+// 块设备层的请求队列
+struct request_queue {
+	struct request		*last_merge; // 记录上次合并了bio的请求, 新bio到来时首先尝试合并到这个请求
+	struct elevator_queue	*elevator; // 指向I/O调度器
+
+	struct percpu_ref	q_usage_counter;
+
+	struct blk_queue_stats	*stats;
+	struct rq_qos		*rq_qos;
+	struct mutex		rq_qos_mutex;
+
+	const struct blk_mq_ops	*mq_ops;
+
+	/* sw queues */
+	struct blk_mq_ctx __percpu	*queue_ctx;
+
+	unsigned int		queue_depth;
+
+	/* hw dispatch queues */
+	struct xarray		hctx_table;
+	unsigned int		nr_hw_queues;
+
+	/*
+	 * The queue owner gets to use this for whatever they like.
+	 * ll_rw_blk doesn't touch it.
+	 */
+	void			*queuedata;
+
+	/*
+	 * various queue flags, see QUEUE_* below
+	 */
+	unsigned long		queue_flags;
+	/*
+	 * Number of contexts that have called blk_set_pm_only(). If this
+	 * counter is above zero then only RQF_PM requests are processed.
+	 */
+	atomic_t		pm_only;
+
+	/*
+	 * ida allocated id for this queue.  Used to index queues from
+	 * ioctx.
+	 */
+	int			id;
+
+	spinlock_t		queue_lock;
+
+	struct gendisk		*disk;
+
+	refcount_t		refs;
+
+	/*
+	 * mq queue kobject
+	 */
+	struct kobject *mq_kobj;
+
+#ifdef  CONFIG_BLK_DEV_INTEGRITY
+	struct blk_integrity integrity;
+#endif	/* CONFIG_BLK_DEV_INTEGRITY */
+
+#ifdef CONFIG_PM
+	struct device		*dev;
+	enum rpm_status		rpm_status;
+#endif
+
+	/*
+	 * queue settings
+	 */
+	unsigned long		nr_requests;	/* Max # of requests */
+
+	unsigned int		dma_pad_mask;
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct blk_crypto_profile *crypto_profile;
+	struct kobject *crypto_kobject;
+#endif
+
+	unsigned int		rq_timeout;
+
+	struct timer_list	timeout; // 用于监视请求的定时器
+	struct work_struct	timeout_work;
+
+	atomic_t		nr_active_requests_shared_tags;
+
+	struct blk_mq_tags	*sched_shared_tags;
+
+	struct list_head	icq_list;
+#ifdef CONFIG_BLK_CGROUP
+	DECLARE_BITMAP		(blkcg_pols, BLKCG_MAX_POLS);
+	struct blkcg_gq		*root_blkg;
+	struct list_head	blkg_list;
+	struct mutex		blkcg_mutex;
+#endif
+
+	struct queue_limits	limits; // 队列的参数限制
+
+	unsigned int		required_elevator_features;
+
+	int			node;
+#ifdef CONFIG_BLK_DEV_IO_TRACE
+	struct blk_trace __rcu	*blk_trace;
+#endif
+	/*
+	 * for flush operations
+	 */
+	struct blk_flush_queue	*fq;
+	struct list_head	flush_list;
+
+	struct list_head	requeue_list;
+	spinlock_t		requeue_lock;
+	struct delayed_work	requeue_work;
+
+	struct mutex		sysfs_lock; // 用于同步清理请求队列及对sysfs属性访问的互斥量
+	struct mutex		sysfs_dir_lock;
+
+	/*
+	 * for reusing dead hctx instance in case of updating
+	 * nr_hw_queues
+	 */
+	struct list_head	unused_hctx_list;
+	spinlock_t		unused_hctx_lock;
+
+	int			mq_freeze_depth;
+
+#ifdef CONFIG_BLK_DEV_THROTTLING
+	/* Throttle data */
+	struct throtl_data *td;
+#endif
+	struct rcu_head		rcu_head;
+	wait_queue_head_t	mq_freeze_wq;
+	/*
+	 * Protect concurrent access to q_usage_counter by
+	 * percpu_ref_kill() and percpu_ref_reinit().
+	 */
+	struct mutex		mq_freeze_lock;
+
+	int			quiesce_depth;
+
+	struct blk_mq_tag_set	*tag_set;
+	struct list_head	tag_set_list;
+
+	struct dentry		*debugfs_dir;
+	struct dentry		*sched_debugfs_dir;
+	struct dentry		*rqos_debugfs_dir;
+	/*
+	 * Serializes all debugfs metadata operations using the above dentries.
+	 */
+	struct mutex		debugfs_mutex;
+
+	bool			mq_sysfs_init_done;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blk-mq.h#L80
+// 块设备驱动层请求, 表示对一段连续扇区的访问
+/*
+ * Try to put the fields that are referenced together in the same cacheline.
+ *
+ * If you modify this structure, make sure to update blk_rq_init() and
+ * especially blk_mq_rq_ctx_init() to take care of the added fields.
+ */
+struct request {
+	struct request_queue *q;
+	struct blk_mq_ctx *mq_ctx;
+	struct blk_mq_hw_ctx *mq_hctx;
+
+	blk_opf_t cmd_flags;		/* op and common flags */ // 请求标志
+	req_flags_t rq_flags;
+
+	int tag;
+	int internal_tag;
+
+	unsigned int timeout;
+
+	/* the following two fields are internal, NEVER access directly */
+	unsigned int __data_len;	/* total data len */ // 请求的数据长度(B)
+	sector_t __sector;		/* sector cursor */ // 请求的起始扇区编号
+
+	struct bio *bio; // 还没有完成传输的第一个bio
+	struct bio *biotail; // 最后一个bio
+
+	union {
+		struct list_head queuelist; // 用于将该request链入请求派发队列或I/O调度队列的连接件
+		struct request *rq_next;
+	};
+
+	struct block_device *part;
+#ifdef CONFIG_BLK_RQ_ALLOC_TIME
+	/* Time that the first bio started allocating this request. */
+	u64 alloc_time_ns;
+#endif
+	/* Time that this request was allocated for this IO. */
+	u64 start_time_ns;
+	/* Time that I/O was submitted to the device. */
+	u64 io_start_time_ns;
+
+#ifdef CONFIG_BLK_WBT
+	unsigned short wbt_flags;
+#endif
+	/*
+	 * rq sectors used for blk stats. It has the same value
+	 * with blk_rq_sectors(rq), except that it never be zeroed
+	 * by completion.
+	 */
+	unsigned short stats_sectors;
+
+	/*
+	 * Number of scatter-gather DMA addr+len pairs after
+	 * physical address coalescing is performed.
+	 */
+	unsigned short nr_phys_segments;
+
+#ifdef CONFIG_BLK_DEV_INTEGRITY
+	unsigned short nr_integrity_segments;
+#endif
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct bio_crypt_ctx *crypt_ctx;
+	struct blk_crypto_keyslot *crypt_keyslot;
+#endif
+
+	unsigned short ioprio; // 请求的优先级
+
+	enum mq_rq_state state;
+	atomic_t ref;
+
+	unsigned long deadline;
+
+	/*
+	 * The hash is used inside the scheduler, and killed once the
+	 * request reaches the dispatch list. The ipi_list is only used
+	 * to queue the request for softirq completion, which is long
+	 * after the request has been unhashed (and even removed from
+	 * the dispatch list).
+	 */
+	union {
+		struct hlist_node hash;	/* merge hash */
+		struct llist_node ipi_list;
+	};
+
+	/*
+	 * The rb_node is only used inside the io scheduler, requests
+	 * are pruned when moved to the dispatch queue. special_vec must
+	 * only be used if RQF_SPECIAL_PAYLOAD is set, and those cannot be
+	 * insert into an IO scheduler.
+	 */
+	union {
+		struct rb_node rb_node;	/* sort/lookup */
+		struct bio_vec special_vec;
+	};
+
+	/*
+	 * Three pointers are available for the IO schedulers, if they need
+	 * more they have to dynamically allocate it.
+	 */
+	struct {
+		struct io_cq		*icq;
+		void			*priv[2];
+	} elv;
+
+	struct {
+		unsigned int		seq;
+		rq_end_io_fn		*saved_end_io;
+	} flush;
+
+	u64 fifo_time;
+
+	/*
+	 * completion callback.
+	 */
+	rq_end_io_fn *end_io;
+	void *end_io_data;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blk_types.h#L265
+// 通用块层请求
+/*
+ * main unit of I/O for the block layer and lower layers (ie drivers and
+ * stacking drivers)
+ */
+struct bio {
+	struct bio		*bi_next;	/* request queue link */ // 块I/O操作在磁盘上的起始扇区编号
+	struct block_device	*bi_bdev; // 指向块设备
+	blk_opf_t		bi_opf;		/* bottom bits REQ_OP, top bits
+						 * req_flags.
+						 */
+	unsigned short		bi_flags;	/* BIO_* below */ // 状态, 命令等
+	unsigned short		bi_ioprio;
+	blk_status_t		bi_status;
+	atomic_t		__bi_remaining;
+
+	struct bvec_iter	bi_iter;
+
+	blk_qc_t		bi_cookie;
+	bio_end_io_t		*bi_end_io;
+	void			*bi_private;
+#ifdef CONFIG_BLK_CGROUP
+	/*
+	 * Represents the association of the css and request_queue for the bio.
+	 * If a bio goes direct to device, it will not have a blkg as it will
+	 * not have a request_queue associated with it.  The reference is put
+	 * on release of the bio.
+	 */
+	struct blkcg_gq		*bi_blkg;
+	struct bio_issue	bi_issue;
+#ifdef CONFIG_BLK_CGROUP_IOCOST
+	u64			bi_iocost_cost;
+#endif
+#endif
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct bio_crypt_ctx	*bi_crypt_context;
+#endif
+
+	union {
+#if defined(CONFIG_BLK_DEV_INTEGRITY)
+		struct bio_integrity_payload *bi_integrity; /* data integrity */
+#endif
+	};
+
+	unsigned short		bi_vcnt;	/* how many bio_vec's */ // 在这个bio的bio_Ve数组中包含的segment的数目
+
+	/*
+	 * Everything starting with bi_max_vecs will be preserved by bio_reset()
+	 */
+
+	unsigned short		bi_max_vecs;	/* max bvl_vecs we can hold */ // bio的bio_Ve数据的最大项数, 即最多允许的segment数目
+
+	atomic_t		__bi_cnt;	/* pin count */
+
+	struct bio_vec		*bi_io_vec;	/* the actual vec list */
+
+	struct bio_set		*bi_pool;
+
+	/*
+	 * We can inline a number of vecs at the end of the bio, to avoid
+	 * double allocations for a small number of bio_vecs. This member
+	 * MUST obviously be kept at the very end of the bio.
+	 */
+	struct bio_vec		bi_inline_vecs[]; // 少量的内嵌bio_vec, 当数目超过时, 需要另外分配
+};
+
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/bvec.h#L31
+// 请求段
+/**
+ * struct bio_vec - a contiguous range of physical memory addresses
+ * @bv_page:   First page associated with the address range.
+ * @bv_len:    Number of bytes in the address range.
+ * @bv_offset: Start of the address range relative to the start of @bv_page.
+ *
+ * The following holds for a bvec if n * PAGE_SIZE < bv_offset + bv_len:
+ *
+ *   nth_page(@bv_page, n) == @bv_page + n
+ *
+ * This holds because page_is_mergeable() checks the above property.
+ */
+struct bio_vec {
+	struct page	*bv_page; // 指向该segment对应的page
+	unsigned int	bv_len; // segment的长度(B)
+	unsigned int	bv_offset; // segment的数据在page中的偏移
+};
+
 // https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L1325
+// 分配gendisk
 struct gendisk *__alloc_disk_node(struct request_queue *q, int node_id,
 		struct lock_class_key *lkclass)
 {
@@ -359,7 +813,7 @@ struct gendisk *__alloc_disk_node(struct request_queue *q, int node_id,
 		goto out_erase_part0;
 
 	rand_initialize_disk(disk);
-	disk_to_dev(disk)->class = &block_class;
+	disk_to_dev(disk)->class = &block_class;// 开始的3行是linux驱动模型设备初始化的标准方法
 	disk_to_dev(disk)->type = &disk_type;
 	device_initialize(disk_to_dev(disk));
 	inc_diskseq(disk);
@@ -452,7 +906,7 @@ struct gendisk *__blk_mq_alloc_disk(struct blk_mq_tag_set *set, void *queuedata,
 }
 EXPORT_SYMBOL(__blk_mq_alloc_disk);
 
-// https://elixir.bootlin.com/linux/v6.6.12/source/block/genhd.c#L396
+// https://elixir.bootlin.com/linux/v6.6.15/source/block/genhd.c#L396
 /**
  * device_add_disk - add disk information to kernel list
  * @parent: parent device for the disk
@@ -834,6 +1288,91 @@ disk和partition的区别：
 
 在实际使用中, 选择使用哪个函数取决于需求(blk-mq 在 Linux 内核的4.13版本引入). 如果应用场景简单，不需要多队列支持，那么 blk_alloc_disk 可能更适合. 如果需要更高的并发性和性能，特别是在多核系统中，那么考虑使用 blk_mq_alloc_disk.
 
+## 请求处理流程
+1. submit_bio: 上层构建bio后, 调用它提交给通用块层
+1. 构造, 排序或合并请求
+1. ...
+1. [scsi_dispatch_cmd](https://elixir.bootlin.com/linux/v6.6.15/source/drivers/scsi/scsi_lib.c#L1459) : 派发scsi命令到底层驱动
+1. scsi_done
+
+	完成后触发软中断
+1. blk_done_softirq
+1. scsi_finish_command
+1. scsi_io_completion
+1. scsi_end_request
+1. `__blk_mq_end_request`
+1. ...
+1. req_bio_endio : 调用上层的完成回调函数
+1. bio_endio
+
+内存块设备(Ram backed block device)的实现在driver/block/brd.c
+
+> [remove per-queue plugging](https://lore.kernel.org/lkml/1295659049-2688-6-git-send-email-jaxboe@fusionio.com/), 删除了plugging和unplugging的代码
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/scatterlist.h#L11
+// scsi数据缓存区是聚散列表的形式
+struct scatterlist {
+	unsigned long	page_link; // 最后两位决定了这个scatterlist的解释. 0x01是连接件; 0x02是结束项
+	unsigned int	offset; // 对于连接件的项, 为0; 否则是在映射页面内的偏移
+	unsigned int	length; // 对于连接件的项, 为0; 否则是在映射页面内的长度
+	dma_addr_t	dma_address; // dma地址
+#ifdef CONFIG_NEED_SG_DMA_LENGTH
+	unsigned int	dma_length; // dma长度
+#endif
+#ifdef CONFIG_NEED_SG_DMA_FLAGS
+	unsigned int    dma_flags;
+#endif
+};
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/scatterlist.h#L39
+struct sg_table {
+	struct scatterlist *sgl;	/* the list */ // 指向scatterlist数组链表
+	unsigned int nents;		/* number of mapped entries */ // 已经映射的项数
+	unsigned int orig_nents;	/* original size of list */ // 最初分配的项数
+};
+```
+
+## 屏障I/O处理
+## 完整性保护
+hba驱动向块I/O层表明保护的能力: scsi_host_set_prot
+给块设备驱动注册完整性profile:  blk_integrity_register
+
+对于write, submit_bio时自动生成完整性元数据(在[bio_integrity_prep](https://elixir.bootlin.com/linux/v6.6.15/source/block/bio-integrity.c#L212)); 对于read, 块层在请求完成后自动校验I/O完整性(在[bio_integrity_endio](https://elixir.bootlin.com/linux/v6.6.15/source/block/bio.c#L1578)).
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blkdev.h#L107
+// 提供完整性profile
+struct blk_integrity {
+	const struct blk_integrity_profile	*profile;
+	unsigned char				flags;
+	unsigned char				tuple_size;
+	unsigned char				interval_exp;
+	unsigned char				tag_size;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blk-integrity.h#L30
+struct blk_integrity_profile {
+	integrity_processing_fn		*generate_fn; // 为bio生成完整性元数据
+	integrity_processing_fn		*verify_fn; // 为bio验证完整性元数据
+	integrity_prepare_fn		*prepare_fn;
+	integrity_complete_fn		*complete_fn;
+	const char			*name; // sysfs显示的名称
+};
+```
+
+### DIF(Data Interity Field)
+scsi特性, 允许在控制器和磁盘之间交换额外的保护信息, 需要磁盘和HBA支持, 从而在host到磁盘的I/O路径上提供保护.
+
+DIF三元组(8B):
+- Guard Tag(护卫标签): 16位, 为扇区数据的校验和
+- Application Tag(应用程序标签): 16位, 可以被os使用
+- Reference(基准标签): 32位, 用于确保各个扇区按正确次序写入, 并且写入到了正确的物理扇区
+
+### DIX(Data Integrity Extension)
+需要主机适配器支持, 在应用程序到hba的I/O路径上提供保护
+
+
 ## 用设备控制器屏蔽设备差异
 计算机系统里, CPU 并不直接和设备打交道，而是通过设备控制器（Device Control Unit）的组件中转.
 
@@ -922,7 +1461,26 @@ lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com
 
 [lp_init_module](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c#L1080) -> [lp_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/char/lp.c#L1019) -> [register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/fs.h#L2690) -> [__register_chrdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/char_dev.c#L268)->[cdev_add](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/char_dev.c#L479)
 
-字符设备驱动的内核模块加载的时候，最重要的一件事情就是，注册这个字符设备. 注册的方式是调用 __register_chrdev_region，注册字符设备的主次设备号和名称，然后分配一个 struct cdev 结构，将 cdev 的 ops 成员变量指向这个模块声明的 file_operations. 然后，cdev_add 会将这个字符设备添加到内核中一个叫作 struct kobj_map *cdev_map 的结构，来统一管理所有字符设备. 
+字符设备驱动的内核模块加载的时候，最重要的一件事情就是，注册这个字符设备. 注册的方式是调用 `__register_chrdev_region`，注册字符设备的主次设备号和名称，然后分配一个 struct cdev 结构，将 cdev 的 ops 成员变量指向这个模块声明的 file_operations. 然后，cdev_add 会将这个字符设备添加到内核中一个叫作 `struct kobj_map *cdev_map` 的结构，来统一管理所有字符设备.
+
+kobj_map是设备号映射机制, 建立了设备号和内核对象的映射关系.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.15/source/drivers/base/map.c#L19
+// 内核有两个映射域: bdev_map(块设备, genhd_device_init)和cdev_map(字符设备)
+struct kobj_map {
+	struct probe {
+		struct probe *next; // 指向链表下一项
+		dev_t dev; // 起始设备编号
+		unsigned long range; // 设备编号范围
+		struct module *owner; // 指向实现了这个设备对象的模块
+		kobj_probe_t *get; // 用于获得内核对象的方法
+		int (*lock)(dev_t, void *); // 用于锁定内核对象, 以免被释放的方法
+		void *data; // 设备对象的私有数据
+	} *probes[255];
+	struct mutex *lock;
+};
+```
 
 其中，MKDEV(cd->major, baseminor) 表示将主设备号和次设备号生成一个 dev_t 的整数，然后将这个整数 dev_t 和 cdev 关联起来.
 
@@ -2133,6 +2691,37 @@ elevator的目的: 进一步合并request.
 
 电梯调度器框架所包含的接口由内核源码下的[elevator.h中的struct elevator_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/elevator.h#L29)结构体定义，每个调度器根据自己的特性只需要实现其中部分接口即可.
 
+```c
+// https://elixir.bootlin.com/linux/v6.6.15/source/block/elevator.h#L64
+/*
+ * identifies an elevator type, such as AS or deadline
+ */
+struct elevator_type
+{
+	/* managed by elevator core */
+	struct kmem_cache *icq_cache;
+
+	/* fields provided by elevator implementation */
+	struct elevator_mq_ops ops; // 调度算法的操作表
+
+	size_t icq_size;	/* see iocontext.h */
+	size_t icq_align;	/* ditto */
+	struct elv_fs_entry *elevator_attrs; // 公共属性及其操作方法
+	const char *elevator_name; // 电梯算法类型的名称
+	const char *elevator_alias;
+	const unsigned int elevator_features;
+	struct module *elevator_owner; // 指向实现了该电梯算法的模块
+#ifdef CONFIG_BLK_DEBUG_FS
+	const struct blk_mq_debugfs_attr *queue_debugfs_attrs;
+	const struct blk_mq_debugfs_attr *hctx_debugfs_attrs;
+#endif
+
+	/* managed by elevator core */
+	char icq_cache_name[ELV_NAME_MAX + 6];	/* elvname + "_io_cq" */
+	struct list_head list;
+};
+```
+
 elevator有很多种类型，定义为 [elevator_type](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/elevator.h#L66). 下面来逐一说一下:
 1. [(struct request_queue).elevator == NULL none](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/elevator.c#L787) : 调度算法是最简单的 IO 调度算法
 
@@ -2225,173 +2814,3 @@ make_request_fn 执行完毕后，可以想象 bio_list_on_stack[0]可能又多�
 [scsi_add_host](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/scsi/scsi_host.h#L746)->[scsi_add_host_with_dma](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/hosts.c#L208)->[scsi_mq_setup_tags](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1872)设置了`tag_set->ops = &scsi_mq_ops/&scsi_mq_ops_no_commit`.
 
 因此`q->mq_ops->queue_rq`<=>[struct blk_mq_ops scsi_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1842).queue_rq即[scsi_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1622)封装更加底层的指令，给设备控制器下指令，实施真正的 I/O 操作.
-
-### scsi
-ref:
-- [Linux Scsi子系统框架介绍](https://www.cnblogs.com/Linux-tech/p/13873882.html)
-
-scsi硬件拓扑:
-- host: 有scsi功能(发送和接收scsi命令)的控制器
-
-	host编号是linux scsi子系统管理
-
-	scsi子系统内部针对每个host控制器对应了Scsi_Host, 其内部有两个structdevice结构体：shost_gendev, shost_dev.
-- device: host连接着scsi设备
-- 每个device内部有若干个channel，每个channel下面有若干个id，每个id下面有若干个lun
-
-	这些lun就是可以接受scsi命令的实体, 例如可以是硬盘, cdrom, 磁带等等, 也可以是一些可以接收特殊scsi命令的wlun
-
-	lun是能够接收scsi命令的主体, 例如可以是一个物理硬盘，一个光驱等; 也有一些lun不是物理实体但是能接收scsi命令，也被看作为lun
-
-channel和id对scsi而言没有实质意义, 它们的编号是底层驱动自行管理的, 应该是驱动灵活性一个体现. 因此linux scsi子系统创造了一个targe=host编号+channel编号+id编号的概念. 引入target概念后，每个device内部可以看成被分为被多个target，每个target下面接着多个lun.
-
-主要bus和class:
-- `scsi` bus：所有host，target，lun都有对应的struct device放在这上面
-
-	通用的scsi的磁盘驱动`sd`，光盘驱动`sr`，磁带驱动`osst`等驱动也在这个bus上面, 这些驱动通过struct device被激活
-
-	shost_gendev在其上. 其scsi_bus_match不允许target不有driver，所以目前只有一些attribute可以在用户空间使用函数中的`if (dev->type != &scsi_dev_type)`不允许shost_gendev有driver对应, 所以目前只有一些attribute可以在用户空间使用
-
-	在scsi内部针对每个target创建了一个名字为`targetk:m:n`的device结构体(其中k是host编号，m是channel编号，n是id编号), 它也在其上, 同样scsi_bus_match不允许target不有driver，所以目前只有一些attribute可以在用户空间使用
-
-	sdev_gendev挂在`scsi` bus上，它会触发bus驱动，驱动会通过sdev_gendev->type字段，来判断该device是否和自己匹配. hdd的device会触发名为`sd`的驱动. sd驱动会给匹配上的lun，在用户空间创建对应的block设备节点，类似于sda，sdb这些（sda1,sda2是sda上GPT或者MBR搞出来的逻辑分区，不属于scsi内容）.
-
-	在`scsi bus上挂着很多驱动, 比如sd, sr. 这些驱动都通过scsi_register_driver注册到`scsi` bus上. 这些公版驱动有针对硬盘的，磁带的，光驱的，扫描仪，ROM等等各种设备的驱动. 基本上这些驱动都会在自己的probe里面去查看sdev_gendev->type字段，判断该device是否和自己匹配, 比如[sd_probe](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c#L3623), 只有符合指定类型的设备，才会触发对应的驱动程序.
-- `scsi_host` class: host有对应的device即shost_dev寄存在这上面，通过host的struct device的attr(group,type)获取到控制器的属性. 例如可以通过这上面的scan触发系统做对整个host做scan动作
-- `scsi_device` class:所有lun的对应的struct device寄存在这上面. 操作它们的驱动是sg.c
-
-	struct scsi_device有两个device对象，分别是sdev_gendev和sdev_dev. 它们的名字都是k:m:n:lunN，其中k是host编号，m是channel编号，n是id编号，lunN是lun编号.
-
-	sdev_dev是挂在名为`scsi_device`的class上，用作它用. 其中比较重要的sg.c驱动，它在这个class上注册了interface(callback), 当有device挂在这个class上时, interface会被调用，从而间接的创建对应的char设备. sg比较特殊，它会不加区分的给所有进来的lun创建一个对应的字符设备到用户空间, 类似于sg0，sg1.
-
-
-linux驱动子系统, 一般包含下面几个内容:
-1. 子系统初始化：驱动bus的建立，子设备驱动的挂载
-
-	- [init_scsi](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/scsi.c)
-
-		```c
-		// https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/scsi.c
-		static int __init init_scsi(void)
-		{
-			int error;
-
-			error = scsi_init_procfs(); // 创建一个/proc/scsi/scsi的文件节点. 这个节点会显示当前系统注册了哪些scsi设备，包括这些设备的channel编号,id编号 lun编号等信息. 这些信息都是实时变化的；如果有写入动作，也会触发子系统的scan动作
-			if (error)
-				goto cleanup_queue;
-			error = scsi_init_devinfo(); // 创建/proc/scsi/device_info节点
-			if (error)
-				goto cleanup_procfs;
-			error = scsi_init_hosts();
-			if (error)
-				goto cleanup_devlist;
-			error = scsi_init_sysctl(); // 创建一个/proc/sys/dev/scsi/logging_level节点，这个节点控制着scsi子系统debug打印的log等级，值越小，打印越少
-			if (error)
-				goto cleanup_hosts;
-			error = scsi_sysfs_register(); // scsi_init_hosts和scsi_sysfs_register创建了scsi子系统最关键的bus和class（scsi, scsi_host和scsi_device）
-			if (error)
-				goto cleanup_sysctl;
-
-			scsi_netlink_init();
-
-			printk(KERN_NOTICE "SCSI subsystem initialized\n");
-			return 0;
-
-		cleanup_sysctl:
-			scsi_exit_sysctl();
-		cleanup_hosts:
-			scsi_exit_hosts();
-		cleanup_devlist:
-			scsi_exit_devinfo();
-		cleanup_procfs:
-			scsi_exit_procfs();
-		cleanup_queue:
-			scsi_exit_queue();
-			printk(KERN_ERR "SCSI subsystem failed to initialize, error = %d\n",
-			       -error);
-			return error;
-		}
-		```
-
-		子设备驱动加载一般比较简单，而且单独以module形式，耦合性很小. 它们一般在module初始化时注册到`scsi` bus总线上，然后一直等待有对应的子设备sdev_devgen挂到`scsi` bus上来, 比如[init_sd](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c#L4022)
-1. 外设扫描：对于scsi而言就是把device侧的所有lun扫描出来
-
-	Scsi扫描过程定义： 是识别每个host，每个targe和每个lun，给其创建对应的device结构，并将device挂载到相应的bus或class上.
-
-	设备扫描的方式很多：
-	- 以host为单位进行scan。它会把host对应的device下面所有的target和lun全扫描出来
-
-		由于host控制器各个芯片平台不一样，它的扫描过程是host device的父设备所在驱动完成的，它的父设备驱动可以是platform总线，也可以是pcie设备对应的pci_driver.
-
-		比如通过`lspci -v -s 00:13.0`查到是ahci, `00:13.0`是来自`/sys/bus/scsi/devices/`的路径片段
-
-		无论哪种当上一级驱动找到host后，会通过:
-		1. scsi_host_alloc：创建shost_gendev和shost_dev
-		1. scsi_add_host: 把shost_gendev和shost_dev挂靠到各自的bus或class上
-
-	- 以target为单位触发scsi进行scan。它会把target下面所有的lun全扫出来
-	- 以lun为单位触发scsi进行scan。它会扫描特定lun
-	- 通过/proc/scsi/scsi触发特定的target或lun的scan
-	- 通过host对应user空间设备的属性”scan”节点触发特定的target或lun的scan
-
-	各种scan入口:
-	- 以host为单位进行scan:scsi_scan_host
-	- 以target为单位触发scsi进行scan:scsi_scan_target
-	- 以lun为单位触发scsi进行scan:scsi_add_device或者__scsi_add_device
-	- 通过/proc/scsi/scsi:scsi_scan_host_selected
-	- 通过host对应user空间设备的属性`scan`节点:scsi_scan_host_selected
-
-1. 通路建立：建立子设备驱动和device之间的连接，对于scsi而言就是公版外设驱动和lundevice之间的通路。Scsi子系统是借助block通用块设备层完成这部分工作
-
-	Scsi注册block层有两个方式，一种是single q，另一种是multi q方式，这里介绍multi q的方式.
-
-	注册multi q，需要做两件事情:
-	1. 通过blk_mq_alloc_tag_set注册一个blk_mq_tag_set。注册时我们要提供一堆钩子函数给通用块设备层，处理block发下来的request请求。
-	1. 通过blk_mq_init_queue并以blk_mq_tag_set为参数为每个能独立处理block请求的实体申请一个request_queue。这样所有的request_queue都和tag_set关联起来了。
-
-	通过上述操作后，所有发送到request_queue中的request都会汇集到tag_set中做处理.
-
-	通过ioctl对sda或者sg设备的命令request都会进入到其对应lun的request_queue, 最终都会走到tag_set的queue_rq钩子函数, 也就是走到了scsi_queue_rq->scsi_dispatch_cmd->host->hostt->queuecommand函数，其中queuecommand是底层驱动注册上来的钩子函数，scsi子系统把request请求发送到这一步之后，剩下的工作就交给底层, 比如sata驱动去处理了.
-1. 休眠唤醒：对于scsi而言，休眠过程是lun->target->host，唤醒过程是反过来。这个决定了host是爷爷辈设备，targe是父设备，lun是子设备，所有的公版驱动都是子设备驱动
-
-	休眠唤醒是驱动的一部分，包括PM(suspendresume)，runtime PM，也有shutdown，remove等。以休眠为例：在”scsi” bus上那些公版driver实现了子设备的休眠唤醒操作. 这个级别的驱动操作的都是lun设备，因此这个级别的驱动是基于scsi命令对设备进行操作。那些更底层的操作例如断开link，给外设断电等是更底层的父设备们去完成的
-
-	- sd_suspend_common: 硬盘驱动sd.c在休眠的时候，给lun发送了scsiSYNCHRONIZE_CACHE命令，要求lun把缓存数据回写到硬盘防止断电丢失，并发送了start_stop命令要求lun进入低功耗状态
-
-	Linux设备驱动模型会保证子设备suspend之后，才会是父设备的suspend，向底层一级一级父辈驱动的suspend调用.
-
-	Scsi里面的父设备target是有channel和id虚拟出来的，没有任何休眠唤醒动作.
-
-scsi低层驱动是面向主机适配器的，低层驱动被加载时，需要添加主机适配器. 主机适配器添加有两种方式：1.在PCI子系统扫描挂载驱动时添加；2.手动方式添加. 所有基于硬件PCI接口的主机适配器都采用第一种方式. 添加主机适配器包括两个步骤：
-1. 分别主机适配器数据结构scsi_host_alloc
-2. 将主机适配器添加到系统scsi_add_host
-
-可参考aha1542适配器的代码[aha1542_hw_init](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/aha1542.c#L729).
-
-#### 底层驱动注册
-没有纯粹的scsi控制器, 实际的控制器可能是sata，它把scsi封装在自定义的通讯结构中的控制器. 因此linux scsi提供一套用于scsi和各种实际控制器驱动交互的钩子函数模板scsi_host_template, 比如[aha1542的scsi_host_template](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/aha1542.c#L740).
-
-这些钩子函数由scsi主动调用，scsi并不关注这些钩子的实现，例如aha1542_queuecommand，用于接收scsi发下来的请求，并把scsi命令封装到upiu中并发送给硬件host控制。scsi不关心aha1542驱动如何封装scsi命令，如何触发硬件发送命令.
-
-Host驱动在申请scsi_host时会定义该驱动支持多少个channel和每个channel支持多少个id, 比如sata驱动[ata_scsi_add_hosts](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/ata/libata-scsi.c#L4374)支持2个channel，16个id，每个id下面就1个lun.
-
-在driver/scsi目录下搜索max_channel和channel，可以看到各种各样的用法，这些在scsi这层没有规定，完全取决于host驱动根据自身的情况来选择合适的用法.
-
-#### 驱动
-- [sd.c](https://elixir.bootlin.com/linux/v6.6.12/source/drivers/scsi/sd.c) : 操作的是硬盘，ssd等以sect为单位进行读取写入的存储设备
-
-	“sd”会针对每个匹配上的sdev_gendev，做blk_alloc_disk/blk_mq_alloc_disk和device_add_disk操作, 也就是说在user空间创建对应的块设备节点，例如sda，sdb这些节点.
-	“sd”也会在”scsi_disk”class上创建和sdev_gendev同名的device，会有对应group attr和其对应做一些操作.
-
-	Sd设备驱动本身是块设备驱动，它需要使用block相关的request_queue来发送块设备相关请求给lun，而lun和host之间的沟通是通过block层来完成的，每个lun有自己独有的request_queue，因此sd驱动直接把这个request_queue拿来用之，把这个request_queue和本地申请的gendisk进行绑定。sda，sdb这些块设备就可以直接通过request_queue给lun发送请求
-- sg.c
-
-	sg.c比较特殊，不是对某个类型的设备驱动. 它不管三七二一，对所有挂到“scsi_device”class上的device，都创建一个char类型的设备节点到user空间. 由于所有被扫描出来的lun会有一个sdev_dev在”scsi_device”上，因此sg实际上是给每个lun创建了char设备节点.
-
-	它也会创建一个同名的sg device挂在自定义的”scsi_generic” class上（没有什么特别作用）.
-
-	sg作用：
-	1. Sg存在的唯一目的，是使用ioctl命令，例如rpmb的操作，FFU固件升级等操作，都是通过ioctl方式完成
-	1. 由于无论sg还是sd，还是别的什么scsi外设驱动创建出来用户态设备节点，最终都是通过lun对应的request_queue来完成发送scsi命令，所以sg能做的事情，其它节点也能做，因此有的平台没有打开sg编译开关
-
-	![scsi子系统 ioctl调用关系图](https://imgconvert.csdnimg.cn/aHR0cHM6Ly9tbWJpei5xcGljLmNuL21tYml6X3BuZy9kNGhvWUpseE9qUGE4TEsxR1RhUXpWQnJRWGpiaWJROXRpY0JLMWYyS254VHdUY0ZHRGpmUWJnZlcxMmZ1NzNUdzZmdVpkaWNYNTh5QVUyTzQ5dUllTmpwdy82NDA?x-oss-process=image/format,png)

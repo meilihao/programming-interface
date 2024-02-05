@@ -447,6 +447,9 @@ struct pci_driver {
 ```
 
 
+pci工作模式: pci核心注册pci总线类型, 扫描pci总线得到所有的pci设备. pci hba驱动注册pci设备驱动, 逐个和pci设备根据设备ID匹配.
+
+
 - 顶层的结构为pci_host_bridge，这个结构一般由**Host驱动**负责来初始化创建. pci_host_bridge指向root bus，也就是编号为0的总线，在该总线下，可以挂接各种外设或物理slot，也可以通过PCI桥去扩展总线
 - struct pci_dev描述PCI设备，以及PCI-to-PCI桥设备
 
