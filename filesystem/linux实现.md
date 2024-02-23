@@ -2,6 +2,8 @@
 参考:
 - [一口气搞懂「文件系统」，就靠这 25 张图了](https://www.tuicool.com/articles/63qam22)
 
+代码在`include/linux/`和`fs/`
+
 ## vfs
 文件系统的种类众多，而操作系统希望 对用户提供一个统一的接口，于是在用户层与文件系统层引入了中间层，这个中间层就称为 虚拟文件系统(Virtual File System，VFS, 只存在内存中), 是驻留在用户进程和各种类型的linux 文件系统之间的一个抽象接口层, 对用户进程隐藏了实现每个文件系统的差异.
 
@@ -13,29 +15,31 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	fs中所有的inode都会链接到super_block的链表头.
 
 	```c
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1154
+	// https://elixir.bootlin.com/linux/v6.6.17/source/include/linux/fs.h#L1188
+	// v6.5.2->v6.6.17无变化
+	// s_dev和s_bdev是磁盘fs特有的
 	struct super_block {
-		struct list_head	s_list;		/* Keep this first */ //超级块链表
-		dev_t			s_dev;		/* search index; _not_ kdev_t */ // 设备标识
+		struct list_head	s_list;		/* Keep this first */ //链入到所有超级块链表super_blocks(循环双向链表)的连接件
+		dev_t			s_dev;		/* search index; _not_ kdev_t */ // 存储超级块的设备标识
 		unsigned char		s_blocksize_bits; //以bit为单位的块大小
 		unsigned long		s_blocksize; //以B为单位的块大小
-		loff_t			s_maxbytes;	/* Max file size */ //一个文件最大字节树
-		struct file_system_type	*s_type; //文件系统类型
+		loff_t			s_maxbytes;	/* Max file size */ //一个文件最大字节数
+		struct file_system_type	*s_type; //指向文件系统类型
 		const struct super_operations	*s_op; //操作超级块的函数集合
-		const struct dquot_operations	*dq_op; //磁盘限额函数集合
-		const struct quotactl_ops	*s_qcop;
-		const struct export_operations *s_export_op; // 支持s_export_op接口的文件系统都是存储设备文件系统，如ext3/4、ubifs等.
+		const struct dquot_operations	*dq_op; //磁盘配额函数集合
+		const struct quotactl_ops	*s_qcop; // 磁盘配额管理函数集合
+		const struct export_operations *s_export_op; // 指向导出操作表. 支持s_export_op接口的文件系统都是存储设备文件系统，如ext3/4、ubifs等.
 		unsigned long		s_flags; // 挂载标志
 		unsigned long		s_iflags;	/* internal SB_I_* flags */
 		unsigned long		s_magic; // fs magic number
 		struct dentry		*s_root; // 挂载目录, 指向fs root dentry的指针
-		struct rw_semaphore	s_umount; // 卸载信号量
-		int			s_count; // 引用计数
-		atomic_t		s_active; // 活动计数
+		struct rw_semaphore	s_umount; // 用于卸载的信号量
+		int			s_count; // 引用计数, 可表示superblock能否被释放
+		atomic_t		s_active; // 活动计数, 被mount了多少次
 	#ifdef CONFIG_SECURITY
 		void                    *s_security;
 	#endif
-		const struct xattr_handler **s_xattr;
+		const struct xattr_handler **s_xattr; // 指向superblock扩展属性结构
 	#ifdef CONFIG_FS_ENCRYPTION
 		const struct fscrypt_operations	*s_cop;
 		struct fscrypt_keyring	*s_master_keys; /* master crypto keys in use */
@@ -49,12 +53,12 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	#endif
 		struct hlist_bl_head	s_roots;	/* alternate root dentries for NFS */
 		struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
-		struct block_device	*s_bdev; // 指向fs存在的块设备指针
-		struct backing_dev_info *s_bdi;
-		struct mtd_info		*s_mtd;
-		struct hlist_node	s_instances;
+		struct block_device	*s_bdev; // 对于磁盘fs, 指向fs存在的块设备指针; 否则为NULL
+		struct backing_dev_info *s_bdi; // 指向后备设备信息描述符. 对于某些磁盘fs, 指向块设备请求队列的内嵌后备设备信息; 某些网络fs会定义自己的后备设备信息, 而其他fs可能使用空操作
+		struct mtd_info		*s_mtd; // 对于基于MTD的超级块, 指向MTD信息结构
+		struct hlist_node	s_instances; // 链入file_system_type.fs_supers的连接件
 		unsigned int		s_quota_types;	/* Bitmask of supported quota types */
-		struct quota_info	s_dquot;	/* Diskquota specific options */
+		struct quota_info	s_dquot;	/* Diskquota specific options */ // 指向磁盘配额信息
 
 		struct sb_writers	s_writers;
 
@@ -63,7 +67,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * s_fsnotify_marks together for cache efficiency. They are frequently
 		 * accessed and rarely modified.
 		 */
-		void			*s_fs_info;	/* Filesystem private info */ //fs info
+		void			*s_fs_info;	/* Filesystem private info */ //fs info, 指向具体fs自定义的超级块对象
 
 		/* Granularity of c/m/atime in ns (cannot be worse than a second) */
 		u32			s_time_gran;
@@ -75,7 +79,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct fsnotify_mark_connector __rcu	*s_fsnotify_marks;
 	#endif
 
-		char			s_id[32];	/* Informational name */ //标志名称
+		char			s_id[32];	/* Informational name */ //标志名称. 对于磁盘fs, 为块设备名; 否则为fs类型名
 		uuid_t			s_uuid;		/* UUID */ //fs uuid
 
 		unsigned int		s_max_links;
@@ -90,7 +94,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * Filesystem subtype.  If non-empty the filesystem type field
 		 * in /proc/mounts will be "type.subtype"
 		 */
-		const char *s_subtype;
+		const char *s_subtype; // fs的子类型. 基于FUSE的fs会使用到. `/proc/mounts`中显示为`type.subtype`
 
 		const struct dentry_operations *s_d_op; /* default d_op for dentries */
 
@@ -127,7 +131,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * of per-node lru lists, each of which has its own spinlock.
 		 * There is no need to put them into separate cachelines.
 		 */
-		struct list_lru		s_dentry_lru; // lru方式挂载的目录
+		struct list_lru		s_dentry_lru; // fs的未使用dentry被链入的lru表头 by dentry.d_lru
 		struct list_lru		s_inode_lru; // lru方式挂载的inode
 		struct rcu_head		rcu;
 		struct work_struct	destroy_work;
@@ -141,33 +145,35 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 		/* s_inode_list_lock protects s_inodes */
 		spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
-		struct list_head	s_inodes;	/* all inodes */ // 指向fs内所有的inode, 通过它可遍历inode对象
+		struct list_head	s_inodes;	/* all inodes */ // 指向fs内所有的inode(by inode.i_sb_list), 通过它可遍历inode对象
 
 		spinlock_t		s_inode_wblist_lock; // 回写inode的锁
 		struct list_head	s_inodes_wb;	/* writeback inodes */ //挂载所有要回写的inode
 	} __randomize_layout;
 
 	// https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1912
+	// https://elixir.bootlin.com/linux/v6.6.17/source/include/linux/fs.h#L2054
+	// v6.5.2->v6.6.17仅改变freeze_super和thaw_super
 	struct super_operations {
-	   	struct inode *(*alloc_inode)(struct super_block *sb);  //分配一个新的索引结点结构
+	   	struct inode *(*alloc_inode)(struct super_block *sb);  //分配一个具体fs的inode
 		void (*destroy_inode)(struct inode *); //销毁给定的索引节点
 		void (*free_inode)(struct inode *); //释放给定的索引节点
 
-	   	void (*dirty_inode) (struct inode *, int flags); //VFS在索引节点为脏(改变)时，会调用此函数
-		int (*write_inode) (struct inode *, struct writeback_control *wbc);  //该函数用于将给定的索引节点写入磁盘
-		int (*drop_inode) (struct inode *); //在最后一个指向索引节点的引用被释放后，VFS会调用该函数
+	   	void (*dirty_inode) (struct inode *, int flags); //VFS将索引节点标记为脏(改变)时，会调用此函数
+		int (*write_inode) (struct inode *, struct writeback_control *wbc);  //该函数用于将给定的索引节点写入磁盘. writeback_control是回写控制描述符, 通常包含表明写操作是否需要同步的标志, 并非所有的fs都检查该标志. 典型fs的write_inode都不执行I/O, 而是仅标记为脏
+		int (*drop_inode) (struct inode *); //在最后一个指向索引节点的引用被释放后，VFS会调用该函数. 有些fs不想缓存inode, 则设为generic_delete_inode, 这样不论inode链接数是多少, 总能删除inode. 某些fs希望在删除前进行一些善后, 则需要实现该回调
 		void (*evict_inode) (struct inode *);
-		void (*put_super) (struct super_block *); //减少超级块计数调用
-		int (*sync_fs)(struct super_block *sb, int wait); //同步文件系统调用
-		int (*freeze_super) (struct super_block *); //释放超级块调用
-		int (*freeze_fs) (struct super_block *); //释放文件系统调用
-		int (*thaw_super) (struct super_block *);
-		int (*unfreeze_fs) (struct super_block *);
-		int (*statfs) (struct dentry *, struct kstatfs *); //VFS通过调用该函数，获取文件系统状态
+		void (*put_super) (struct super_block *); //减少超级块计数调用, umount时调用
+		int (*sync_fs)(struct super_block *sb, int wait); //同步文件系统调用. 日志fs通常需要实现它
+		int (*freeze_super) (struct super_block *, enum freeze_holder who); //释放超级块调用
+		int (*freeze_fs) (struct super_block *); // 锁住fs, 强制使它进入一致状态时调用. lvm有使用它
+		int (*thaw_super) (struct super_block *, enum freeze_holder who);
+		int (*unfreeze_fs) (struct super_block *); // 解锁fs
+		int (*statfs) (struct dentry *, struct kstatfs *); // 获取文件系统状态
 		int (*remount_fs) (struct super_block *, int *, char *); //当指定新的安装选项重新安装文件系统时，VFS会调用此函数
-		void (*umount_begin) (struct super_block *); //VFS调用该函数中断安装操作。该函数被网络文件系统使用，如NFS
+		void (*umount_begin) (struct super_block *); //卸载fs时调用. 该函数被网络文件系统使用，如NFS
 
-		int (*show_options)(struct seq_file *, struct dentry *);
+		int (*show_options)(struct seq_file *, struct dentry *); // 显示fs信息
 		int (*show_devname)(struct seq_file *, struct dentry *);
 		int (*show_path)(struct seq_file *, struct dentry *);
 		int (*show_stats)(struct seq_file *, struct dentry *);
@@ -1660,9 +1666,48 @@ struct dx_root
 ![](/misc/img/fs/3c506edf93b15341da3db658e9970773.jpeg)
 
 ### 挂载文件系统
+ref:
+- [linux多版本文件系统接口对比梳理](https://blog.csdn.net/m0_37637511/article/details/124328953)
+
 内核是不是支持某种类型的文件系统，需要先进行注册才能知道. 例如 ext4 文件系统，就需要通过 register_filesystem 注册到全局变量[file_systems](https://elixir.bootlin.com/linux/v5.12.9/source/fs/filesystems.c#L34)中，传入的参数是 ext4_fs_type，表示注册的是 ext4 类型的文件系统. 这里面最重要的一个成员变量就是 ext4_mount.
 
+
 ```c
+// https://elixir.bootlin.com/linux/v6.6.17/source/fs/filesystems.c#L34
+static struct file_system_type *file_systems; // 所有file_system_type都会加入该链表
+
+// https://elixir.bootlin.com/linux/v6.6.17/source/include/linux/fs.h#L2358
+// 与 mount 相关联的 file_system_type 中的属性达到变化: get_sb(2.6)->mount(4.9)->init_fs_context(5.10), 见erofs_fs_type, ext2_fs_type
+struct file_system_type {
+	const char *name;
+	int fs_flags; // 标志
+#define FS_REQUIRES_DEV		1 
+#define FS_BINARY_MOUNTDATA	2
+#define FS_HAS_SUBTYPE		4
+#define FS_USERNS_MOUNT		8	/* Can be mounted by userns root */
+#define FS_DISALLOW_NOTIFY_PERM	16	/* Disable fanotify permission events */
+#define FS_ALLOW_IDMAP         32      /* FS has been updated to handle vfs idmappings. */
+#define FS_RENAME_DOES_D_MOVE	32768	/* FS will handle d_move() during rename() internally. */
+	int (*init_fs_context)(struct fs_context *);
+	const struct fs_parameter_spec *parameters;
+	struct dentry *(*mount) (struct file_system_type *, int,
+		       const char *, void *);
+	void (*kill_sb) (struct super_block *); // 在该fs实例卸载时调用
+	struct module *owner; // 指向实现该fs的module
+	struct file_system_type * next; // 指向fs类型链表的下一项
+	struct hlist_head fs_supers; // 保存该fs类型的所有superblock实例链表的表头
+
+	struct lock_class_key s_lock_key; // 用于调试锁依赖性
+	struct lock_class_key s_umount_key; // 同上
+	struct lock_class_key s_vfs_rename_key; // 同上
+	struct lock_class_key s_writers_key[SB_FREEZE_LEVELS]; // 同上
+
+	struct lock_class_key i_lock_key; // 用于调试锁依赖性
+	struct lock_class_key i_mutex_key; // 同上
+	struct lock_class_key invalidate_lock_key; // 同上
+	struct lock_class_key i_mutex_dir_key; // 同上
+};
+
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/super.c#L6262
 static struct file_system_type ext4_fs_type = {
 	.owner		= THIS_MODULE,

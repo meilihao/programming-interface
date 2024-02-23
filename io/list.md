@@ -124,6 +124,7 @@
     - [华为OceanStor 6800 V5高端混合闪存存储系统技术白皮书](https://e.huawei.com/cn/material/datacenter/storage/cb4e8571742743498c1012a8190e64c3)
     - [Huawei OceanStor 18500 and 18800 V5 Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://actfornet.com/ueditor/php/upload/file/20190104/1546532119794412.pdf)
 - [【重识云原生】第三章云存储3.3节——Ceph统一存储方案](https://blog.csdn.net/junbaozi/article/details/124003270)
+- [gitee.com/explore/distributed-storage](https://gitee.com/explore/distributed-storage)
 
 ### 实现
 - [openeuler/fastblock](https://gitee.com/openeuler/fastblock)
