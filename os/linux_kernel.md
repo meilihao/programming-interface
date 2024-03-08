@@ -135,9 +135,16 @@ kernel通过组合来实现继承.
 
 模块内部定义的钩子函数是 static 的，目的是只内部可见. `__init`和`__exit`是GCC 的特性，提供回收明确表示无用代码的能力.
 
-标记为`__init`的函数会被放入`.init.text`段，这个代码段在模块加载完后会被回收节省内存, 因为不会再用到.
+标记为`__init`的函数被直接编译进kernel时会被放入`.init.text`段, 同时在`.initcall.init`保留一份函数指针, 在内核初始时会通过这些指针调用`__init`函数, 在完成初始化后会释放init段(包括`.init.text`,`.initcall.init`等)即回收节省内存, 因为不会再用到.
+
+除了函数外, 数据也可以被定义为`__initdata`, 对于只是初始化阶段需要的数据, 内核在初始化完成后, 也会释放其占用的内存.
+
+`__exit`被直接编译进内核时, 其修饰的函数会被编译器忽略, 因为内置了就无法卸载, 卸载函数也就没必要存在了. 此外退出阶段采用的数据也可用`__exitdata`修饰.
 
 缺少`MODULE_LICENSE`时, kernel加载时就会告警:`... no license`
+
+### 模块声明
+- MOUDLE_DEVICE_TABLE: 表面所支持的设备. 对于USB, PCI等设备驱动, 通常存在该声明
 
 #### vermagic
 比如`modinfo zfs`输出的"vermagic: 5.4.0-58-generic SMP mod_unload". `5.4.0-58-generic`是内核版本信息, `SMP`即编译kernel时设置了`CONFIG_SMP=y`表示支持smp, 同理`mod_unload`即设置了`CONFIG_MODULE_UNLOAD=y`表示开启卸载模块相关的功能.

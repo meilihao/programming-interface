@@ -209,7 +209,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	`dentry + inode`可表示一个文件.
 
 	```c
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L608
+	// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L639
+	// v6.5.2->v6.6.17仅改变__i_ctime
 	/*
 	 * Keep mostly read-only and often accessed (especially for
 	 * the RCU path lookup and 'stat' data) fields at the beginning
@@ -218,9 +219,9 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	struct inode {
 		umode_t			i_mode; //文件访问权限, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10)
 		unsigned short		i_opflags; // 打开file时的标志
-		kuid_t			i_uid;
-		kgid_t			i_gid;
-		unsigned int		i_flags;
+		kuid_t			i_uid; // 创建该文件的UID
+		kgid_t			i_gid; // 创建该文件的GID
+		unsigned int		i_flags; // fs装载的标志
 
 	#ifdef CONFIG_FS_POSIX_ACL
 		struct posix_acl	*i_acl;
@@ -232,11 +233,11 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct address_space	*i_mapping; //文件数据在内存中的页缓存. 缓存文件的内容 by radix tree. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
 
 	#ifdef CONFIG_SECURITY
-		void			*i_security;
+		void			*i_security; // 指向inode的安全结构
 	#endif
 
 		/* Stat data, not accessed from path walking */
-		unsigned long		i_ino; //inode
+		unsigned long		i_ino; //inode编号
 		/*
 		 * Filesystems may only read i_nlink directly.  They shall use the
 		 * following functions for modification:
@@ -245,32 +246,32 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 *    inode_(inc|dec)_link_count
 		 */
 		union {
-			const unsigned int i_nlink;
+			const unsigned int i_nlink; // inode的硬链接数
 			unsigned int __i_nlink;
 		};
-		dev_t			i_rdev; //实际设备
+		dev_t			i_rdev; //设备号, 如果该inode表示一个字符/块设备
 		loff_t			i_size; //文件大小(B)
-		struct timespec64	i_atime;
-		struct timespec64	i_mtime;
-		struct timespec64	i_ctime;
-		spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */
-		unsigned short          i_bytes; //使用的字节数
+		struct timespec64	i_atime; // 最后访问时间
+		struct timespec64	i_mtime; // 最后修改时间
+		struct timespec64	__i_ctime; /* use inode_*_ctime accessors! */ // 最后修改时间
+		spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */ // 文件的块数
+		unsigned short          i_bytes; //以512字节的块为单位, 文件最后一个块的字节数
 		u8			i_blkbits; //块大小(bit)
 		u8			i_write_hint;
-		blkcnt_t		i_blocks;
+		blkcnt_t		i_blocks; // 文件的块数
 
 	#ifdef __NEED_I_SIZE_ORDERED
-		seqcount_t		i_size_seqcount;
+		seqcount_t		i_size_seqcount; // 被SMP系统用来正确获取和设置文件长度
 	#endif
 
 		/* Misc */
-		unsigned long		i_state;
+		unsigned long		i_state; // inode状态
 		struct rw_semaphore	i_rwsem;
 
-		unsigned long		dirtied_when;	/* jiffies of first dirtying */
+		unsigned long		dirtied_when;	/* jiffies of first dirtying */ // 这个文件第一次(inode的某个page)脏的时间, 已jiffie为单位. 它被writeback用于确定是否将这个inode回写磁盘
 		unsigned long		dirtied_time_when;
 
-		struct hlist_node	i_hash;
+		struct hlist_node	i_hash; // 链入全局inode_hashtable的连接件
 		struct list_head	i_io_list;	/* backing dev IO list */
 	#ifdef CONFIG_CGROUP_WRITEBACK
 		struct bdi_writeback	*i_wb;		/* the associated cgroup wb */
@@ -281,17 +282,17 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		u16			i_wb_frn_history;
 	#endif
 		struct list_head	i_lru;		/* inode LRU list */ // 用于链接描述inode当前状态的链表. 当创建一个新的inode时i_lru要链接到inode_in_use这个链表, 表示inode处于使用中, 同时i_sb_list要链接到super_block中的s_inodes链表
-		struct list_head	i_sb_list; // 用于链接到super_block中的s_inodes链表
+		struct list_head	i_sb_list; // 用于链接到super_block中的s_inodes链表的连接件
 		struct list_head	i_wb_list;	/* backing dev writeback list */
 		union {
-			struct hlist_head	i_dentry; //一个文件可能对应多个dentry, 这些dentry都要链接到这里
+			struct hlist_head	i_dentry; //引用这个inode的dentry链表(by dentry.d_alias)的表头. 一个文件可能对应多个dentry, 这些dentry都要链接到这里
 			struct rcu_head		i_rcu;
 		};
 		atomic64_t		i_version; //版本
 		atomic64_t		i_sequence; /* see futex */
-		atomic_t		i_count; //计数
+		atomic_t		i_count; //使用计数器
 		atomic_t		i_dio_count; //直接io进程计数
-		atomic_t		i_writecount; //写进程计数
+		atomic_t		i_writecount; //用于写进程的使用计数器
 	#if defined(CONFIG_IMA) || defined(CONFIG_FILE_LOCKING)
 		atomic_t		i_readcount; /* struct files open RO */
 	#endif
@@ -301,18 +302,18 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		};
 		struct file_lock_context	*i_flctx;
 		struct address_space	i_data;
-		struct list_head	i_devices;
+		struct list_head	i_devices; // 如果inode是块设备, 则是链入块设备slave inode(block_device.bd_inodes)链表的连接件; 如果是字符设备, 是链入字符设备inode链表(cdev.list)的连接件
 		union {
-			struct pipe_inode_info	*i_pipe;
-			struct cdev		*i_cdev;
+			struct pipe_inode_info	*i_pipe; // inode表示一个管道文件, 则指向管道信息
+			struct cdev		*i_cdev; // inode表示一个字符设备, 则指向字符设备
 			char			*i_link;
 			unsigned		i_dir_seq;
 		};
 
-		__u32			i_generation;
+		__u32			i_generation; // inode版本号. 某些fs会使用
 
 	#ifdef CONFIG_FSNOTIFY
-		__u32			i_fsnotify_mask; /* all events this inode cares about */
+		__u32			i_fsnotify_mask; /* all events this inode cares about */ // 该inode关心的所有事件
 		struct fsnotify_mark_connector __rcu	*i_fsnotify_marks;
 	#endif
 
@@ -324,34 +325,35 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct fsverity_info	*i_verity_info;
 	#endif
 
-		void			*i_private; /* fs or device private pointer */ //私有数据指针
+		void			*i_private; /* fs or device private pointer */ // fs/设备驱动的私有数据指针
 	} __randomize_layout;
 
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L1826
+	//https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L1826
+	// v6.5.2->v6.6.18仅改变update_time和get_offset_ctx
 	struct inode_operations {
-		struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);  //该函数在特定目录中寻找索引节点，该索引节点要对应于dentry中给出的文件名
+		struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);  //该函数在特定目录中寻找索引节点，该索引节点要对应于dentry中给出的文件名. 只对代表目录的inode有意义
 		const char * (*get_link) (struct dentry *, struct inode *, struct delayed_call *);
 		int (*permission) (struct mnt_idmap *, struct inode *, int); //该函数用来检查给定的inode所代表的文件是否允许特定的访问模式，如果允许特定的访问模式，返回0，否则返回负值的错误码
 		struct posix_acl * (*get_inode_acl)(struct inode *, int, bool);
 
-		int (*readlink) (struct dentry *, char __user *,int); //被系统readlink()接口调用，拷贝数据到特定的缓冲buffer中。拷贝的数据来自dentry指定的符号链接
+		int (*readlink) (struct dentry *, char __user *,int); //被系统readlink()接口调用，拷贝数据到特定的缓冲buffer中. 拷贝的数据来自dentry指定的符号链接
 
 		int (*create) (struct mnt_idmap *, struct inode *,struct dentry *,
-			       umode_t, bool); //VFS通过系统create()和open()接口来调用该函数，从而为dentry对象创建一个新的索引节点
+			       umode_t, bool); //VFS通过系统create()和open()接口来调用该函数，从而为dentry对象创建一个新的索引节点. 只对代表目录的inode有意义, 用于创建常规文件
 		int (*link) (struct dentry *,struct inode *,struct dentry *); //被系统link()接口调用，用来创建硬连接。硬链接名称由dentry参数指定
 		int (*unlink) (struct inode *,struct dentry *); //被系统unlink()接口调用，删除由目录项dentry链接的索引节点对象
 		int (*symlink) (struct mnt_idmap *, struct inode *,struct dentry *,
 				const char *); //被系统symlik()接口调用，创建符号连接，该符号连接名称由symname指定，连接对象是dir目录中的dentry目录项
 		int (*mkdir) (struct mnt_idmap *, struct inode *,struct dentry *,
-			      umode_t); //被mkdir()接口调用，创建一个新目录。
+			      umode_t); //被mkdir()接口调用，创建一个子目录
 		int (*rmdir) (struct inode *,struct dentry *); //被rmdir()接口调用，删除dentry目录项代表的文件
 		int (*mknod) (struct mnt_idmap *, struct inode *,struct dentry *,
-			      umode_t,dev_t); //被mknod()接口调用，创建特殊文件(设备文件、命名管道或套接字)。
+			      umode_t,dev_t); //被mknod()接口调用，创建特殊文件(设备文件、命名管道或套接字)
 		int (*rename) (struct mnt_idmap *, struct inode *, struct dentry *,
 				struct inode *, struct dentry *, unsigned int); //VFS调用该函数来移动文件。文件源路径在old_dir目录中，源文件由old_dentry目录项所指定，目标路径在new_dir目录中，目标文件由new_dentry指定
-		int (*setattr) (struct mnt_idmap *, struct dentry *, struct iattr *); //被notify_change接口调用，在修改索引节点之后，通知发生了改变事件
+		int (*setattr) (struct mnt_idmap *, struct dentry *, struct iattr *); //设置属性
 		int (*getattr) (struct mnt_idmap *, const struct path *,
-				struct kstat *, u32, unsigned int); //在通知索引节点需要从磁盘中更新时，VFS会调用该函数
+				struct kstat *, u32, unsigned int); //获取属性
 		ssize_t (*listxattr) (struct dentry *, char *, size_t); //该函数将特定文件所有属性列表拷贝到一个缓冲列表中
 		int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
 			      u64 len);
@@ -376,7 +378,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	VFS 通过定义 inode 结构和函数集合，并让具体文件系统实现这些函数，使得 VFS 及其上层只要关注 inode 结构，底层的具体文件系统根据自己的文件信息生成相应的 inode 结构，达到了 VFS 表示一个文件的目的
 
 	kernel存在一个[inode_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/inode.c#L60), 所有的inode均会链接到这里. 与它作用类似的还有[dentry_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/dcache.c#L99).
-1. 目录项对象(dentry)：代表一个目录项，描述了文件系统的层次结构.
+1. 目录项对象(dentry)：代表一个目录项, 它和fs的目录不是同一个概念, 描述了该对象在内核所在fs树中的位置即文件系统的层次结构
 
 	目录项用来记录文件的名字、 索引节点指针 以及与其他目录项的层级关联关系. 多个目录项关联起来，就会形成目录结构，但它与索引节点不同的是，**目录项是由内核维护的一个数据结构，不存放于磁盘，而是缓存在内存**
 
@@ -385,55 +387,59 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache.
 
+	inode反映fs对象的元数据, dentry反映fs对象在fs树中的位置, dentry和inode是多对一的关系.
+
 	```c
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/dcache.h#L82
+	//https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/dcache.h#L82
+	// v6.5.2->v6.6.18无变化
 	struct dentry {
 		/* RCU lookup touched fields */
-		unsigned int d_flags;		/* protected by d_lock */ //目录标志
+		unsigned int d_flags;		/* protected by d_lock */ //dentry cache标志
 		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
 		struct hlist_bl_node d_hash;	/* lookup hash list */ //目录的hash链表, 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
-		struct dentry *d_parent;	/* parent directory */ //指向父目录
-		struct qstr d_name; //目录名称. 打开一个文件时, 会根据这个名称来查找目标文件.
+		struct dentry *d_parent;	/* parent directory */ //指向父dentry
+		struct qstr d_name; //dentry名称. 打开一个文件时, 会根据这个名称来查找目标文件.
 		struct inode *d_inode;		/* Where the name belongs to - NULL is
-						 * negative */ //指向目录文件的inode, inode与dentry共同描述了一个普通文件或目录文件
-		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */ //短目录名
+						 * negative */ //指向dentry关联的inode, inode与dentry共同描述了一个普通文件或目录文件
+		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */ //短目录名. 如果文件名超过36, 则另外分配空间
 
 		/* Ref lookup also touches following */
 		struct lockref d_lockref;	/* per-dentry lock and refcount */ //目录锁与计数
 		const struct dentry_operations *d_op; //操作目录的函数集合
-		struct super_block *d_sb;	/* The root of the dentry tree */ //指向超级块
-		unsigned long d_time;		/* used by d_revalidate */ //时间
-		void *d_fsdata;			/* fs-specific data */ //指向具体fs的数据
+		struct super_block *d_sb;	/* The root of the dentry tree */ //指向所属fs superblock
+		unsigned long d_time;		/* used by d_revalidate */ //被d_revalidate用来作为判断dentry是否还有效的依据
+		void *d_fsdata;			/* fs-specific data */ //指向具体fs的dentry
 
 		union {
-			struct list_head d_lru;		/* LRU list */
+			struct list_head d_lru;		/* LRU list */ // fs未使用的dentry被链入到一个lru(super_block.s_dentry_lru)中的连接件 
 			wait_queue_head_t *d_wait;	/* in-lookup ones only */
 		};
 		struct list_head d_child;	/* child of parent list */ //挂入父目录的链表, dentry自身的链表头, 会链接到父dentry的d_subdirs. 但移动文件时需要将一个dentry从旧的父dentry链表中脱离, 再链接到新的父dentry的d_subdirs中
-		struct list_head d_subdirs;	/* our children */ //挂载所有子目录的链表
+		struct list_head d_subdirs;	/* our children */ //挂载所有子dentry的链表
 		/*
 		 * d_alias and d_rcu can share memory
 		 */
 		union {
-			struct hlist_node d_alias;	/* inode alias list */
+			struct hlist_node d_alias;	/* inode alias list */ // 链入到所属inode的i_dentry链表的连接件. 因为dentry和inode是N:1
 			struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
 		 	struct rcu_head d_rcu;
 		} d_u;
 	} __randomize_layout;
 
 
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/dcache.h#L128
+	//https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/dcache.h#L128
+	// v6.5.2->v6.6.18无变化
 	struct dentry_operations {
-		int (*d_revalidate)(struct dentry *, unsigned int); //该函数判断目录对象是否有效
+		int (*d_revalidate)(struct dentry *, unsigned int); //在路径查找时从dentry缓存中找到目录项后, 被用来判断目录对象是否有效
 		int (*d_weak_revalidate)(struct dentry *, unsigned int);
-		int (*d_hash)(const struct dentry *, struct qstr *); //该函数为目录项生成散列值，当目录项要加入散列表中时，VFS调用该函数
+		int (*d_hash)(const struct dentry *, struct qstr *); //该函数为目录项生成散列值，当目录项要加入散列表中时，VFS调用该函数. 用于在路径查找时提高效率
 		int (*d_compare)(const struct dentry *,
 				unsigned int, const char *, const struct qstr *); //VFS调用该函数来比较name1和name2两个文件名。多数文件系统使用VFS的默认操作，仅做字符串比较。对于有些文件系统，比如FAT，简单的字符串比较不能满足其需要，因为 FAT文件系统不区分大小写
 		int (*d_delete)(const struct dentry *); //当目录项对象的计数值等于0时，VFS调用该函数
 		int (*d_init)(struct dentry *);//当分配目录时调用
-		void (*d_release)(struct dentry *); //当目录项对象要被释放时，VFS调用该函数，默认情况下，它什么也不做
+		void (*d_release)(struct dentry *); //当目录项对象要被释放时，VFS调用该函数，默认情况下，它什么也不做. 如果其d_fsdata有指向时, 应该在本函数里处理
 		void (*d_prune)(struct dentry *);
-		void (*d_iput)(struct dentry *, struct inode *); //当一个目录项对象丢失了相关索引节点时，VFS调用该函数。默认情况下VFS会调用iput()函数释放索引节点
+		void (*d_iput)(struct dentry *, struct inode *); //当一个目录项对象失去和inode的关联时，VFS调用该函数。默认情况下VFS会调用iput()函数释放索引节点
 		char *(*d_dname)(struct dentry *, char *, int); //当需要生成一个dentry的路径名时被调用
 		struct vfsmount *(*d_automount)(struct path *); //当要遍历一个自动挂载时被调用（可选），这应该创建一个新的VFS挂载记录并将该记录返回给调用者
 		int (*d_manage)(const struct path *, bool); //文件系统管理从dentry的过渡（可选）时，被调用
@@ -451,7 +457,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	当且仅当进程访问文件期间存在与内存中. 同一个文件可能对应多个文件对象, 但其对应的索引节点对象是唯一的.
 
 	```c
-	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L961
+	// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L992
+	// v6.5.2->v6.6.18无变化
 	/*
 	 * f_{lock,count,pos_lock} members can be highly contended and share
 	 * the same cacheline. f_{lock,mode} are very frequently used together
@@ -469,25 +476,25 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * Protects f_ep, f_flags.
 		 * Must not be taken from IRQ context.
 		 */
-		spinlock_t		f_lock;
+		spinlock_t		f_lock; // 用于保护的自旋锁
 		fmode_t			f_mode; //文件权限
-		atomic_long_t		f_count; //文件对象
+		atomic_long_t		f_count; // 引用计数
 		struct mutex		f_pos_lock; //文件读写位置锁
-		loff_t			f_pos; //进程读写文件的当前位置. 比如对文件读取前10字节, f_pos就指向第11B
-		unsigned int		f_flags;
-		struct fown_struct	f_owner;
+		loff_t			f_pos; //进程读写文件的偏移量. 比如对文件读取前10字节, f_pos就指向第11B
+		unsigned int		f_flags; // 打开文件时指定的标志位
+		struct fown_struct	f_owner; // 用于通过信息进行I/O事件通知的数据
 		const struct cred	*f_cred;
-		struct file_ra_state	f_ra; // 用于文件预读的位置
-		struct path		f_path; //文件路径
+		struct file_ra_state	f_ra; // 用于文件预读的状态
+		struct path		f_path; //文件路径, 包括所在fs的装载实例和该文件关联的dentry
 		struct inode		*f_inode;	/* cached value */ //对应的inode
 		const struct file_operations	*f_op; //操作文件的函数集合
 
-		u64			f_version;
+		u64			f_version; // 版本号, 在每次使用后自动递增
 	#ifdef CONFIG_SECURITY
-		void			*f_security;
+		void			*f_security; // 指向file安全结构
 	#endif
 		/* needed for tty driver, and maybe others */
-		void			*private_data;
+		void			*private_data; // 用于fs或设备驱动的私有指针
 
 	#ifdef CONFIG_EPOLL
 		/* Used by fs/eventpoll.c to link all the hooks to this file */
@@ -579,7 +586,20 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 参考:
 - [EADME - 计算机专业性文章及回答总索引#新一代VFS mount系统调用](https://zhuanlan.zhihu.com/p/67686817)
 
-当一个fs被挂载时, 它的[vfsmount](https://elixir.bootlin.com/linux/v5.12.9/source/include/linux/mount.h#L71)被链接到了kernel的一个全局链表[mount_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L70). mount_hashtable是一个数组, 它的每个成员都是一个hash链表.
+```c
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/mount.h#L70
+struct vfsmount {
+	struct dentry *mnt_root;	/* root of the mounted tree */ // 指向这个fs根目录的dentry
+	struct super_block *mnt_sb;	/* pointer to superblock */ // 指向这个fs根目录的超级块
+	int mnt_flags; // 装载标志
+	struct mnt_idmap *mnt_idmap;
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L71
+static struct hlist_head *mount_hashtable __read_mostly; // 除根vfsmount外, 所有vfsmount都会加入全局哈希表mount_hashtable, 其用于方便查找装载到特定装载点的fs
+```
+
+当一个fs被挂载时, 它的[vfsmount](https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/mount.h#L70)被链接到了kernel的一个全局链表[mount_hashtable](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L70). mount_hashtable是一个数组, 它的每个成员都是一个hash链表.
 
 当发现目录是一个挂载点时, 会从mount_hashtable中找到该fs的vfsmount, 然后挂载点目录的dentry会被替换为被挂载fs的root dentry.
 
@@ -588,7 +608,12 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 - [深入理解 Linux 文件系統之文件系統掛載](https://webcache.googleusercontent.com/search?q=cache:EX2JdZE_xJgJ:https://www.readfog.com/a/1637370894679642112+&cd=3&hl=zh-CN&ct=clnk)
 
 ```
-[mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3431)
+[mount即sys_mount](https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L3872)
+-> [do_mount](https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L3677)
+   -> [path_mount](https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L3598)
+      -> [do_new_mount](https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L3299)
+
+[mount即sys_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3431)
 -> [do_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3237)
    -> [path_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L3158)
       -> [do_new_mount](https://elixir.bootlin.com/linux/v5.12.9/source/fs/namespace.c#L2862)
@@ -933,10 +958,95 @@ struct stat {
 
 函数 stat 和 lstat 返回的是通过文件名查到的状态信息. 这两个方法区别在于，stat 没有处理符号链接（软链接）的能力. 如果一个文件是符号链接，stat 会直接返回它所指向的文件的属性，而 lstat 返回的就是这个符号链接的内容，fstat 则是通过文件描述符获取文件对应的属性.
 
+## minix
+```c
+// https://elixir.bootlin.com/linux/v6.6.18/source/fs/minix/minix.h#L28
+// 内存中的超级块
+/*
+ * minix super-block data in memory
+ */
+struct minix_sb_info {
+	unsigned long s_ninodes; // i节点数
+	unsigned long s_nzones; // 逻辑块数
+	unsigned long s_imap_blocks; // i节点位图占用块数
+	unsigned long s_zmap_blocks; // 逻辑块位图占用块数
+	unsigned long s_firstdatazone; // 数据区中第一个逻辑块号
+	unsigned long s_log_zone_size; // log2(磁盘块数/逻辑块)
+	int s_dirsize; // 目录项的长度(minix目录项包括文件名和对应inode编号)
+	int s_namelen; // 文件名的最大长度
+	struct buffer_head ** s_imap; // 指向i节点位图缓冲头指针数组的指针, 数组长度为i节点位图所占块数
+	struct buffer_head ** s_zmap; // 指向逻辑块位图缓冲头指针数组的指针, 数组长度为逻辑块位图所占块数 
+	struct buffer_head * s_sbh; // 指向超级块缓冲区
+	struct minix_super_block * s_ms; // 指向磁盘上超级块. 当使用minix 3.0fs时, 是按minix3_super_block格式读取
+	unsigned short s_mount_state;
+	unsigned short s_version; // 版本
+};
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/uapi/linux/minix_fs.h#L82
+/*
+ * V3 minix super-block data on disk
+ */
+struct minix3_super_block {
+	__u32 s_ninodes; // i节点数
+	__u16 s_pad0;
+	__u16 s_imap_blocks; // i节点位图所占块数
+	__u16 s_zmap_blocks; // 逻辑块位图所占块数 
+	__u16 s_firstdatazone; // 数据区中第一个逻辑块号
+	__u16 s_log_zone_size; // log2(磁盘块数/逻辑块)
+	__u16 s_pad1;
+	__u32 s_max_size; // 最大文件长度
+	__u32 s_zones; // 逻辑块数
+	__u16 s_magic; // fs magic
+	__u16 s_pad2;
+	__u16 s_blocksize; // 磁盘上逻辑块长度
+	__u8  s_disk_version; // no used
+};
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/fs/minix/minix.h#L17
+// 内存inode
+/*
+ * minix fs inode data in memory
+ */
+struct minix_inode_info {
+	union {
+		__u16 i1_data[16]; // 文件所占用的逻辑块数组. 针对minix2.0
+		__u32 i2_data[16]; // 文件所占用的逻辑块数组. 使用前10项, 即从minix2_inode.i_zone[10]复制
+	} u;
+	struct inode vfs_inode; // 内嵌inode
+};
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/uapi/linux/minix_fs.h#L51
+// 磁盘inode
+/*
+ * The new minix inode has all the time entries, as well as
+ * long block numbers and a third indirect block (7+1+1+1
+ * instead of 7+1+1). Also, some previously 8-bit values are
+ * now 16-bit. The inode is now 64 bytes instead of 32.
+ */
+struct minix2_inode {
+	__u16 i_mode; // fs的类型和模式
+	__u16 i_nlinks; // 链接数
+	__u16 i_uid;
+	__u16 i_gid;
+	__u32 i_size; // 文件长度(B)
+	__u32 i_atime;
+	__u32 i_mtime;
+	__u32 i_ctime;
+	__u32 i_zone[10]; // 文件所占用的逻辑块数组: 0~6是直接块号, 7是一次间接块号, 8是二次间接块号, 9是三次间接块号
+};
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/uapi/linux/minix_fs.h#L103
+// 磁盘上的dentry
+struct minix3_dir_entry {
+	__u32 inode; // i节点编号
+	char name[]; // 文件名
+};
+```
+
 ## ext4
 参考:
-- [*Ext4文件系统架构分析(一)](https://www.cnblogs.com/alantu2018/p/8461272.html)
-- [*linux io过程自顶向下分析](https://my.oschina.net/fileoptions/blog/3058792/print)
+- [*Ext4文件系统架构分析(一)*](https://www.cnblogs.com/alantu2018/p/8461272.html)
+- [*linux io过程自顶向下分析*](https://my.oschina.net/fileoptions/blog/3058792/print)
 
 > ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
 
@@ -1118,19 +1228,19 @@ static long do_sys_openat2(int dfd, const char __user *filename,
 	if (fd)
 		return fd;
 
-	tmp = getname(filename);
+	tmp = getname(filename); // 将文件路径名从用户空间复制到内核空间
 	if (IS_ERR(tmp))
 		return PTR_ERR(tmp);
 
-	fd = get_unused_fd_flags(how->flags);
+	fd = get_unused_fd_flags(how->flags); // 在当前进程的打开文件表中找到一个可用的文件句柄, 并复制给fd
 	if (fd >= 0) {
-		struct file *f = do_filp_open(dfd, tmp, &op);
+		struct file *f = do_filp_open(dfd, tmp, &op); // 打开文件
 		if (IS_ERR(f)) {
 			put_unused_fd(fd);
 			fd = PTR_ERR(f);
 		} else {
 			fsnotify_open(f);
-			fd_install(fd, f);
+			fd_install(fd, f); // 将打开文件安装到打开文件表, 即关联f和fd
 		}
 	}
 	putname(tmp);
@@ -1662,6 +1772,248 @@ struct dx_root
 
 硬链接与原始文件共用一个 inode 的，**但是 inode 是不跨文件系统的，每个文件系统都有自己的 inode 列表，因而硬链接是没有办法跨文件系统的**. 而软链接不同，软链接相当于重新创建了一个文件, 这个文件也有独立的 inode，只不过打开这个文件看里面内容的时候，内容指向另外的一个文件. 这就很灵活了, 也可以跨文件系统了，甚至目标文件被删除了，链接文件还是在的，只不过指向的文件找不到了而已.
 
+## 读文件
+```c
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L470
+/**
+ * struct address_space - Contents of a cacheable, mappable object.
+ * @host: Owner, either the inode or the block_device.
+ * @i_pages: Cached pages.
+ * @invalidate_lock: Guards coherency between page cache contents and
+ *   file offset->disk block mappings in the filesystem during invalidates.
+ *   It is also used to block modification of page cache contents through
+ *   memory mappings.
+ * @gfp_mask: Memory allocation flags to use for allocating pages.
+ * @i_mmap_writable: Number of VM_SHARED mappings.
+ * @nr_thps: Number of THPs in the pagecache (non-shmem only).
+ * @i_mmap: Tree of private and shared mappings.
+ * @i_mmap_rwsem: Protects @i_mmap and @i_mmap_writable.
+ * @nrpages: Number of page entries, protected by the i_pages lock.
+ * @writeback_index: Writeback starts here.
+ * @a_ops: Methods.
+ * @flags: Error bits and flags (AS_*).
+ * @wb_err: The most recent error which has occurred.
+ * @private_lock: For use by the owner of the address_space.
+ * @private_list: For use by the owner of the address_space.
+ * @private_data: For use by the owner of the address_space.
+ */
+struct address_space {
+	struct inode		*host; // 常规文件就是文件的inode, 块设备文件有两个address_space, 打开块设备文件时, 会将文件描述符的f_mapping指向主inode的address_space,  次inode的address_space实际没使用到
+	struct xarray		i_pages;
+	struct rw_semaphore	invalidate_lock;
+	gfp_t			gfp_mask;
+	atomic_t		i_mmap_writable; // 该地址空间中共享内存映射的数目
+#ifdef CONFIG_READ_ONLY_THP_FOR_FS
+	/* number of thp, only for non-shmem files */
+	atomic_t		nr_thps;
+#endif
+	struct rb_root_cached	i_mmap; // 为便于查找, 一个共享映射文件的所有虚拟内存区间或私有映射文件的写时复制虚拟内存空间被组织成一个radix有些查找树(priority search tree), i_mmap就是树根
+	unsigned long		nrpages; // 页面的总数
+	pgoff_t			writeback_index; // 为了不占用过多资源， kernel将地址空间中页面回写的行为分成若干轮次. writeback_index记录了上次回写操作的最后页面索引, 下一次回写操作将从该位置开始
+	const struct address_space_operations *a_ops; // address_space的操作函数
+	unsigned long		flags;
+	struct rw_semaphore	i_mmap_rwsem;
+	errseq_t		wb_err;
+	spinlock_t		private_lock; // 保护private_list
+	struct list_head	private_list; // 地址空间的私有链表, 通常用来链接为文件的中间记录块所分配的buffer_head结构
+	void			*private_data;
+} __attribute__((aligned(sizeof(long)))) __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L470
+struct address_space_operations {
+	int (*writepage)(struct page *page, struct writeback_control *wbc); // 一般用于基于磁盘的fs, 将文件在内存页中的数据更新到磁盘
+	int (*read_folio)(struct file *, struct folio *);
+
+	/* Write back some dirty pages from this mapping. */
+	int (*writepages)(struct address_space *, struct writeback_control *); // 将address_space的多个脏页写入磁盘
+
+	/* Mark a folio dirty.  Return true if this dirtied it */
+	bool (*dirty_folio)(struct address_space *, struct folio *);
+
+	void (*readahead)(struct readahead_control *);
+
+	int (*write_begin)(struct file *, struct address_space *mapping,
+				loff_t pos, unsigned len,
+				struct page **pagep, void **fsdata); // 被通用的缓冲I/O代码调用. vfs调用write_begin通知具体fs, 准备写文件的begin~end到给定页面
+	int (*write_end)(struct file *, struct address_space *mapping,
+				loff_t pos, unsigned len, unsigned copied,
+				struct page *page, void *fsdata); // 在成功调用write_begin, 并完成数据复制后, write_end必须被调用. vfs调用write_end告诉fs, 数据已复制到页面, 可以提交到磁盘了
+
+	/* Unfortunately this kludge is needed for FIBMAP. Don't use it */
+	sector_t (*bmap)(struct address_space *, sector_t); // 将文件中的逻辑块扇区编号映射为对应设备上的物理块扇区编号. 它被用于FIBMAP ioctl和swap file一起工作
+	void (*invalidate_folio) (struct folio *, size_t offset, size_t len);
+	bool (*release_folio)(struct folio *, gfp_t);
+	void (*free_folio)(struct folio *folio);
+	ssize_t (*direct_IO)(struct kiocb *, struct iov_iter *iter); // 被通用read/write调用, 指向direct io
+	/*
+	 * migrate the contents of a folio to the specified target. If
+	 * migrate_mode is MIGRATE_ASYNC, it must not block.
+	 */
+	int (*migrate_folio)(struct address_space *, struct folio *dst,
+			struct folio *src, enum migrate_mode);
+	int (*launder_folio)(struct folio *);
+	bool (*is_partially_uptodate) (struct folio *, size_t from,
+			size_t count);
+	void (*is_dirty_writeback) (struct folio *, bool *dirty, bool *wb);
+	int (*error_remove_page)(struct address_space *, struct page *);
+
+	/* swapfile support */
+	int (*swap_activate)(struct swap_info_struct *sis, struct file *file,
+				sector_t *span);
+	void (*swap_deactivate)(struct file *file);
+	int (*swap_rw)(struct kiocb *iocb, struct iov_iter *iter);
+};
+
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/mm_types.h#L74
+struct page {
+	unsigned long flags;		/* Atomic flags, some possibly
+					 * updated asynchronously */ // 原子标志, 用于某些异步更新
+	/*
+	 * Five words (20/40 bytes) are available in this union.
+	 * WARNING: bit 0 of the first word is used for PageTail(). That
+	 * means the other users of this union MUST NOT use the bit to
+	 * avoid collision and false-positive PageTail().
+	 */
+	union {
+		struct {	/* Page cache and anonymous pages */
+			/**
+			 * @lru: Pageout list, eg. active_list protected by
+			 * lruvec->lru_lock.  Sometimes used as a generic list
+			 * by the page owner.
+			 */
+			union {
+				struct list_head lru;
+
+				/* Or, for the Unevictable "LRU list" slot */
+				struct {
+					/* Always even, to negate PageTail */
+					void *__filler;
+					/* Count page's or folio's mlocks */
+					unsigned int mlock_count;
+				};
+
+				/* Or, free page */
+				struct list_head buddy_list;
+				struct list_head pcp_list;
+			};
+			/* See page-flags.h for PAGE_MAPPING_FLAGS */
+			struct address_space *mapping; // 指向所属地址空间
+			union {
+				pgoff_t index;		/* Our offset within mapping. */
+				unsigned long share;	/* share count for fsdax */
+			};
+			/**
+			 * @private: Mapping-private opaque data.
+			 * Usually used for buffer_heads if PagePrivate.
+			 * Used for swp_entry_t if PageSwapCache.
+			 * Indicates order in the buddy system if PageBuddy.
+			 */
+			unsigned long private; // 指向和页面关联的第一个缓冲头的指针
+		};
+		struct {	/* page_pool used by netstack */
+			/**
+			 * @pp_magic: magic value to avoid recycling non
+			 * page_pool allocated pages.
+			 */
+			unsigned long pp_magic;
+			struct page_pool *pp;
+			unsigned long _pp_mapping_pad;
+			unsigned long dma_addr;
+			union {
+				/**
+				 * dma_addr_upper: might require a 64-bit
+				 * value on 32-bit architectures.
+				 */
+				unsigned long dma_addr_upper;
+				/**
+				 * For frag page support, not supported in
+				 * 32-bit architectures with 64-bit DMA.
+				 */
+				atomic_long_t pp_frag_count;
+			};
+		};
+		struct {	/* Tail pages of compound page */
+			unsigned long compound_head;	/* Bit zero is set */
+		};
+		struct {	/* ZONE_DEVICE pages */
+			/** @pgmap: Points to the hosting device page map. */
+			struct dev_pagemap *pgmap;
+			void *zone_device_data;
+			/*
+			 * ZONE_DEVICE private pages are counted as being
+			 * mapped so the next 3 words hold the mapping, index,
+			 * and private fields from the source anonymous or
+			 * page cache page while the page is migrated to device
+			 * private memory.
+			 * ZONE_DEVICE MEMORY_DEVICE_FS_DAX pages also
+			 * use the mapping, index, and private fields when
+			 * pmem backed DAX files are mapped.
+			 */
+		};
+
+		/** @rcu_head: You can use this to free a page by RCU. */
+		struct rcu_head rcu_head;
+	};
+
+	union {		/* This union is 4 bytes in size. */
+		/*
+		 * If the page can be mapped to userspace, encodes the number
+		 * of times this page is referenced by a page table.
+		 */
+		atomic_t _mapcount;
+
+		/*
+		 * If the page is neither PageSlab nor mappable to userspace,
+		 * the value stored here may help determine what this page
+		 * is used for.  See page-flags.h for a list of page types
+		 * which are currently stored here.
+		 */
+		unsigned int page_type;
+	};
+
+	/* Usage count. *DO NOT USE DIRECTLY*. See page_ref.h */
+	atomic_t _refcount;
+
+#ifdef CONFIG_MEMCG
+	unsigned long memcg_data;
+#endif
+
+	/*
+	 * On machines where all RAM is mapped into kernel address space,
+	 * we can simply calculate the virtual address. On machines with
+	 * highmem some memory is mapped into kernel virtual memory
+	 * dynamically, so we need a place to store that address.
+	 * Note that this field could be 16 bits on x86 ... ;)
+	 *
+	 * Architectures with slow multiplication can define
+	 * WANT_PAGE_VIRTUAL in asm/page.h
+	 */
+#if defined(WANT_PAGE_VIRTUAL)
+	void *virtual;			/* Kernel virtual address (NULL if
+					   not kmapped, ie. highmem) */ // 内核虚拟地址
+#endif /* WANT_PAGE_VIRTUAL */
+
+#ifdef CONFIG_KMSAN
+	/*
+	 * KMSAN metadata for this page:
+	 *  - shadow page: every bit indicates whether the corresponding
+	 *    bit of the original page is initialized (0) or not (1);
+	 *  - origin page: every 4 bytes contain an id of the stack trace
+	 *    where the uninitialized value was created.
+	 */
+	struct page *kmsan_shadow;
+	struct page *kmsan_origin;
+#endif
+
+#ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
+	int _last_cpupid;
+#endif
+} _struct_page_alignment;
+```
+
+address_space表示地址空间, 其目的是将存储介质上(可能不连续的)数据连续page的方式呈现出来.
+
 ## linux io过程自顶向下分析
 ![](/misc/img/fs/3c506edf93b15341da3db658e9970773.jpeg)
 
@@ -1677,7 +2029,7 @@ ref:
 static struct file_system_type *file_systems; // 所有file_system_type都会加入该链表
 
 // https://elixir.bootlin.com/linux/v6.6.17/source/include/linux/fs.h#L2358
-// 与 mount 相关联的 file_system_type 中的属性达到变化: get_sb(2.6)->mount(4.9)->init_fs_context(5.10), 见erofs_fs_type, ext2_fs_type
+// 与 mount 相关联的 file_system_type 中的属性达到变化: get_sb(2.6)->mount(4.9)->init_fs_context(5.10), 见erofs_fs_type, ext2_fs_type, 参考[[RFC PATCH 37/68] vfs: Convert apparmorfs to use the new mount API](https://lore.kernel.org/linux-security-module/155373033460.7602.12727592550663113967.stgit@warthog.procyon.org.uk/T/)
 struct file_system_type {
 	const char *name;
 	int fs_flags; // 标志
@@ -1848,11 +2200,12 @@ out_type:
 
 vfs_create_mount 会创建 [struct mount](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/mount.h#L40) 结构，每个挂载的文件系统都对应于这样一个结构.
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/mount.h#L40
+// https://elixir.bootlin.com/linux/v6.6.18/source/fs/mount.h#L39
+// v5.8-rc3->v6.6.18无变化
 struct mount {
-	struct hlist_node mnt_hash;
-	struct mount *mnt_parent;
-	struct dentry *mnt_mountpoint;
+	struct hlist_node mnt_hash; // 链入全局已装载fs哈希表的连接件
+	struct mount *mnt_parent; // 指向被装载到的父fs
+	struct dentry *mnt_mountpoint; // 指向被装载到的装载点目录的dentry
 	struct vfsmount mnt;
 	union {
 		struct rcu_head mnt_rcu;
@@ -1864,14 +2217,14 @@ struct mount {
 	int mnt_count;
 	int mnt_writers;
 #endif
-	struct list_head mnt_mounts;	/* list of children, anchored here */
-	struct list_head mnt_child;	/* and going through their mnt_child */
+	struct list_head mnt_mounts;	/* list of children, anchored here */ // 装载到这个fs的目录上所有子fs的链表的表头
+	struct list_head mnt_child;	/* and going through their mnt_child */ // 链接到被装载到的父fs mnt_mounts链表的连接件
 	struct list_head mnt_instance;	/* mount instance on sb->s_mounts */
-	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */
-	struct list_head mnt_list;
-	struct list_head mnt_expire;	/* link in fs-specific expiry list */
-	struct list_head mnt_share;	/* circular list of shared mounts */
-	struct list_head mnt_slave_list;/* list of slave mounts */
+	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */ // 保存fs的块设备的设备名, 或特殊fs的文件系统类型名
+	struct list_head mnt_list; // 链入达到进程名字空间中已装载fs链表的连接件. 链表头是mnt_namespace.list
+	struct list_head mnt_expire;	/* link in fs-specific expiry list */ // 链入到fs专有的过期链表的连接件, 用于NFS, CIFS, AFS等网络fs
+	struct list_head mnt_share;	/* circular list of shared mounts */ // 链入到共享装载循环链表的连接件
+	struct list_head mnt_slave_list;/* list of slave mounts */ // 这个fs的slave mount链表的表头
 	struct list_head mnt_slave;	/* slave list entry */
 	struct mount *mnt_master;	/* slave is on master->mnt_slave_list */
 	struct mnt_namespace *mnt_ns;	/* containing namespace */
@@ -1885,13 +2238,17 @@ struct mount {
 	struct fsnotify_mark_connector __rcu *mnt_fsnotify_marks;
 	__u32 mnt_fsnotify_mask;
 #endif
-	int mnt_id;			/* mount identifier */
+	int mnt_id;			/* mount identifier */ // 装载标识符
 	int mnt_group_id;		/* peer group identifier */
 	int mnt_expiry_mark;		/* true if marked for expiry */
 	struct hlist_head mnt_pins;
 	struct hlist_head mnt_stuck_children;
 } __randomize_layout;
 ```
+
+同dentry, mount已存在父子关系. mount是将每个局部fs链接到全局fs树的连接件. 有了装载, fs的位置需`<mount, dentry>`共同决定文件位置的路径.
+
+> 新kernel将原先的vfsmount(v2.6.39.4)拆成了vfsmount+mount.
 
 其中，mnt_parent 是装载点所在的父文件系统，mnt_mountpoint 是装载点在父文件系统中的 dentry；struct dentry 表示目录，并和目录的 inode 关联；mnt_root 是当前文件系统根目录的 dentry，mnt_sb 是指向超级块的指针. 接下来，来看调用 mount_fs 挂载文件系统.
 
@@ -2096,16 +2453,37 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	return filp;
 }
 
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/dcache.h#L49
+// 目录项名字
+/*
+ * "quick string" -- eases parameter passing, but more importantly
+ * saves "metadata" about the string (ie length and the hash).
+ *
+ * hash comes first so it snuggles against d_parent in the
+ * dentry.
+ */
+struct qstr {
+	union {
+		struct {
+			HASH_LEN_DECLARE;
+		};
+		u64 hash_len; // 字符串长度
+	};
+	const unsigned char *name;
+};
+
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/namei.c#L502
+// 路径查找上下文
+// 作用: 1. 在查找过程中, 记录当前查找所作用的路径; 2. 在查找结束后, 记录最终的目标路径
 struct nameidata {
-	struct path	path;
-	struct qstr	last;
-	struct path	root;
+	struct path	path; // 保存已找到的路径
+	struct qstr	last; // 路径名中最后一个组件的名字(文件名或目录名, 在LOOKUP_PARENT标志位设置时使用)
+	struct path	root; // 查询的根路径. 一般使用当前进程的根目录
 	struct inode	*inode; /* path.dentry.d_inode */
-	unsigned int	flags;
+	unsigned int	flags; // 查询标志
 	unsigned	seq, m_seq, r_seq;
-	int		last_type;
-	unsigned	depth;
+	int		last_type; // 路径名最后一个组件的类型(在LOOKUP_PARENT标志位设置时使用)
+	unsigned	depth; // 当前正在查找的符号链接的嵌套深度
 	int		total_link_count;
 	struct saved {
 		struct path link;
@@ -2122,11 +2500,50 @@ struct nameidata {
 } __randomize_layout;
 
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/path.h#L8
+// 表示路径
 struct path {
 	struct vfsmount *mnt;
 	struct dentry *dentry;
 } __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fdtable.h#L27
+struct fdtable {
+	unsigned int max_fds; // 文件描述符指针数组的项数
+	struct file __rcu **fd;      /* current fd array */ // 文件描述符指针数组
+	unsigned long *close_on_exec; // 文件描述符指针数组的close_on_exec位图
+	unsigned long *open_fds; // 文件描述符指针数组的open_fds位图
+	unsigned long *full_fds_bits;
+	struct rcu_head rcu; // 用于rcu
+};
+
+// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fdtable.h#L49
+// 进程不直接使用打开文件表, 而是通过files_struct动态扩展需要的指针数组
+/*
+ * Open file table structure
+ */
+struct files_struct {
+  /*
+   * read mostly part
+   */
+	atomic_t count; // 引用计数
+	bool resize_in_progress;
+	wait_queue_head_t resize_wait;
+
+	struct fdtable __rcu *fdt; // 指向打开文件表
+	struct fdtable fdtab; // 内嵌的打开文件表
+  /*
+   * written part on a separate cache line in SMP
+   */
+	spinlock_t file_lock ____cacheline_aligned_in_smp;
+	unsigned int next_fd; // 要分配的下一个句柄的值
+	unsigned long close_on_exec_init[1]; // 内嵌的close_on_exec位图
+	unsigned long open_fds_init[1]; // 内嵌的open_fds位图
+	unsigned long full_fds_bits_init[1];
+	struct file __rcu * fd_array[NR_OPEN_DEFAULT]; // 内嵌的文件对象指针数组
+};
 ```
+
+files_struct通过fdt指向它实际使用的打开文件表. 对于大多数进程, 打开文件数据不超过32个. 这是无需另外分配空间, 此时它指向fdtab.
 
 要打开一个文件，首先要通过 get_unused_fd_flags 得到一个没有用的文件描述符. 如何获取这个文件描述符呢？在每一个进程的 task_struct 中，有一个指针 files，类型是 [files_struct](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fdtable.h#L48).
 
@@ -2202,7 +2619,7 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 			pos = *ppos;
 			ppos = &pos;
 		}
-		ret = vfs_read(f.file, buf, count, ppos);
+		ret = vfs_read(f.file, buf, count, ppos); // 指向文件读取
 		if (ret >= 0 && ppos)
 			f.file->f_pos = pos;
 		fdput_pos(f);
