@@ -276,6 +276,9 @@ O_APPEND、O_NONBLOCK、O_NOATIME、O_ASYNC 和 O_DIRECT. 系统将忽略对其�
 
 它们对多线程应用有为有用.
 
+## lseek
+`lseek(fd, -5, SEEK_CUR)` # 将文件指针从当前位置前移5个B
+
 ## preadv()和 pwritev()
 
 所执行的任务与 readv()和 writev()相同,但执行 I/O 的位置将由 offset 参数指定(类似于 pread()和 pwrite()系统调用).

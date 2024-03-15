@@ -155,3 +155,14 @@
     基于RDMA互联, 8坏7(OceanStor Dorado V6)
 
     - [构建新型数据基础设施 华为OceanStor Dorado V6重定义存储架构](https://server.zhiding.cn/server/2019/0814/3120409.shtml)
+- [OceanStor Dorado V6 Technical Deep Dive Perm.pdf](/misc/pdf/io/4_OceanStor Dorado V6 Technical Deep Dive Perm.pdf)
+- [Huawei OceanStor Dorado V3 All Flash Storage Technical White Paper](https://objects.icecat.biz/objects/mmo_39230499_1509028620_8925_7785.pdf)
+- [FusionStorage]()
+
+    fusionstorage是华为的一款分布式存储软件, 实现了一种基于primary copy的RSM(Replicated State Machine, 复制状态机), 保证多个副本间的数据一致性. 
+
+    ref:
+    - [华为云计算IE面试笔记-fusionstorage相对于传统集中式存储的优势？](https://www.cnblogs.com/LongShineW/p/15334488.html)
+
+        [FusionStorage是2/3副本机制](https://www.cnblogs.com/LongShineW/p/15334488.html), OceanStor Dorado是raid
+- [<<数据存储技术与实践>>]()

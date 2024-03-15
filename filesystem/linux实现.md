@@ -494,7 +494,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		void			*f_security; // 指向file安全结构
 	#endif
 		/* needed for tty driver, and maybe others */
-		void			*private_data; // 用于fs或设备驱动的私有指针
+		void			*private_data; // 用于fs或设备驱动的私有指针. 大多数linux驱动遵循: 将private_data指向设备结构体, 再用read/write/ioctl/llseek等函数通过private_data访问设备结构体
 
 	#ifdef CONFIG_EPOLL
 		/* Used by fs/eventpoll.c to link all the hooks to this file */
@@ -509,20 +509,20 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	//https://elixir.bootlin.com/linux/v6.5.2/source/include/linux/fs.h#L961
 	struct file_operations {
 		struct module *owner; //所在的module
-		loff_t (*llseek) (struct file *, loff_t, int); //调整读写偏移
-		ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
-		ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
+		loff_t (*llseek) (struct file *, loff_t, int); //调整读写偏移. 出错时返回负数
+		ssize_t (*read) (struct file *, char __user *, size_t, loff_t *); // 成功: 返回读到的字节数; 0: EOF; 否则返回负数. 与用户空间的read和fread对应.
+		ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *); // 成功: 返回写入的字节数; 0: EOF; 否则返回负数(未实现时返回-EINVAL). 与用户空间的write和fwrite对应.
 		ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
 		ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
 		int (*iopoll)(struct kiocb *kiocb, struct io_comp_batch *,
 				unsigned int flags);
 		int (*iterate_shared) (struct file *, struct dir_context *);
 		__poll_t (*poll) (struct file *, struct poll_table_struct *);
-		long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
+		long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long); // 设备控制相关命令的实现. 成功: 返回非负数. 与用户空间的fcntl, ioctl对应
 		long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
-		int (*mmap) (struct file *, struct vm_area_struct *);
+		int (*mmap) (struct file *, struct vm_area_struct *); // 将设备内存映射到进程的虚拟地址空间. 未实现返回-ENODEV. 对帧缓冲等设备特别有意义, 应用程序直接访问而无需在kernel和用户空间复制数据. 与用户空间的mmap对应
 		unsigned long mmap_supported_flags;
-		int (*open) (struct inode *, struct file *);
+		int (*open) (struct inode *, struct file *); // 驱动程序可以不实现这个函数, 此时设备的打开操作永远成功. 与release对应
 		int (*flush) (struct file *, fl_owner_t id);
 		int (*release) (struct inode *, struct file *);
 		int (*fsync) (struct file *, loff_t, loff_t, int datasync);

@@ -554,6 +554,83 @@ CRC是一种错误检测码，被广泛用于数字网络和存储设备中，�
 
 CRC是通过使用二进制除法（无须进位，使用XOR而不是减法）对字节数据流做除法而获得的余数. 被除数是信息数据流的二进制数表示. 除数是长度为n + 1的预定义二进制数（即生成多项式，n 为CRC位数），通常由多项式系数表示. 不同的生成多项式对应不同场景下的不同协议.
 
+### raid 2.0+
+ref:
+- [<<数据存储技术>> 第5章 RAID 2.0+技术]()
+- [OceanStor Dorado 6.0.0 基础存储业务配置指南 : 创建存储池](https://support.huawei.com/enterprise/zh/doc/EDOC1100112584/9303d640)
+- [OceanStor 2200 V3, 2600 V3, 2600F V3 配置文档](http://www.shutonginfo.com/ctdoc_18/ctdoc_18_141.html)
+- [Huawei OceanStor Mission-Critical Hybrid Flash Storage Systems Technical White Paper](https://e.huawei.com/en/material/MaterialDownload?materialid=2fcfd0c2127f424fb238d7298e4ced5f&language=tr)
+
+raid 2.0+实现了双层虚拟化:
+- 底层块虚拟化(virtual for disk)
+
+  逻辑上将物理磁盘空间切分成块, 以这些块为对象实现raid即每个逻辑块充当一个raid成员盘, 用于组建raid组
+- 上层LUN虚拟化(virtual for pool)
+
+  将这些raid组进行更细颗粒度地切分, 切分成固定大小的extend, 在用这些extend组成LUN
+
+
+抽象层次:
+1. 各种磁盘(Logical Drive, LD, 被存储系统所管理的磁盘)组成一个硬盘域(Disk Domain, DD)
+
+  一个磁盘域就是一组磁盘， 一个磁盘只能属于一个磁盘域, 一个存储系统可以存在一个或多个磁盘域. 一个硬盘域上可以创建多个pool.
+
+  硬盘域中, 不同类型的磁盘对应一个存储层级:
+  - ssd: 高性能层
+  - SAS: 性能层
+  - SATA, NL-SAS: 容量层
+
+  存储层级主要是用于管理不同性能的存储介质, 以便为不同性能要求的应用提供不同性能的存储空间.
+
+  创建存储池时, 可指定该pool从硬盘域上划分的存储层级类型, 对应的raid策略(每种层级可自由选择raid策略, 因为故障率不同)和相应存储容量.
+1. 硬盘域中相同类型的磁盘按照一定的规则划分为一个个磁盘组(DiskGroup, DG)
+
+  根据磁盘的类型和数量, 存储系统会在每个硬盘域内自动划分为一个或多个磁盘组. DG主要是起到隔离故障域的作用.
+1. 将磁盘组内硬盘空间划分为大小一致的chunk(ck)
+
+  ck大小固定是64/256M, 通常SSD/SAS是64M, SATA/NL-SAS是256M
+1. 以来自同一个磁盘组中不同磁盘上的chunk为对象, 按照传统raid技术组成raid组即chunk group(ckg)
+  
+    RAID计算在分块组（Chunk Group）内进行, 系统不再有热备盘, 而是被保留的热备块所代替.
+
+    ckg是存储池在硬盘域上分配资源的最小单位
+1. 将ckg切分为更小固定大小的extent
+
+   extent大小: 从256KB到64MB, 默认4MB
+
+   pool创建后, extent大小不可更改. 不同pool的extent可以不同, 但同一pool中的extent是相同的
+
+   extent是热点数据统计和迁移的最小单位, 也从pool中申请/释放空间的最小单位
+1. 将多个extent组成LUN
+
+  以extent组成的LUN是非精简LUN.
+
+  Grain是更细颗粒度的extent(64K, 当存储池的硬盘为全SSD时，默认值为8KB), 用于精简LUN或fs
+
+  > 由资料显示[Grain是直接从ckg上划分的](https://support.huawei.com/enterprise/zh/doc/EDOC1100112584/91e5039c)
+
+  LUN由不同存储层级的extent组成就是tiered
+
+
+优点:
+1. RAID2.0+的负载均衡更优
+
+  RAID 2.0+的负载均衡方式主要有两种:
+  1. 根据crush算法，在创建CKG的时候选择CK，保证硬盘被选中的概率与硬盘剩余容量成正比
+  2. smartmotion，主要用于数据迁移发生在DG层次。当有新盘加入硬盘域的时候，会触发smartmotion，查出待均衡的原CKG，然后给该CKG分配一个目标CKG，该CKG包含来源于新盘的CK，如果原CKG和目标CKG中对应位置的CK落在不同的盘，就会触发实现均衡。那么有数据的原CKG迁移到目标CKG中，没有数据的只需要改变CKG的映射关系即可
+1. RAID2.0+的数据重构时间短
+
+  相较传统RAID重构数据流串行写入单一热备盘的方式，RAID2.0+采用多对多的重构，重构数据流并行写入多块磁盘，极大缩短数据重构时间，1TB数据仅需30分钟
+
+  RAID2.0+的数据重构方式主要有三种:
+  1. 全盘重构，就是当一块盘故障或者被拔出之后进行数据恢复
+  1. 局部重构，就是硬盘上出现坏块，通过RAID算法将上面的数据重构到热备CK中
+  1. 恢复重构，就是在某块硬盘正常访问期间的写操作无法完成，只能处于降级写状态，会在系统上记录相关的日志并且更新校验值，待硬盘恢复后，将故障期间的数据根据RAID算法计算之后更新数据
+
+1. 提升单卷（LUN）的读写性能
+
+  RAID2.0+的热备采用的是空间的形式，每个盘上面的CK都可以作为磁盘热点，这种条块化的分割极大提升单卷（LUN）的读写IOPS
+
 ## DAS、SAN、NAS网络存储的异同
 参考:
 - [存储相关知识-DAS/SAN/NAS](https://yq.aliyun.com/articles/467199)
@@ -592,7 +669,7 @@ SAN将通道技术和网络技术引入存储环境中，提供了一种新型�
 > FC是一套网络协议, 与tcp/ip类似, 传输介质是光纤(fiber).
 > 目前我查到的FC最快是16Gb/s.
 > FC磁盘已经淘汰.
-> FCoE现基本被抛弃了, NVMe/TCP开始流行.
+> FCoE(将FC帧封装在以太网中)现基本被抛弃了, NVMe/TCP开始流行.
 > FC已被SAS和IP淘汰中.
 
 ### IP-SAN

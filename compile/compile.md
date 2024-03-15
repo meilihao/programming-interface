@@ -585,6 +585,9 @@ $1 = 0x7fffffffdee0
 0x7fffffffefcd: "b=2" # 后添加的env先入栈
 ```
 
+## 优化
+`barrier()`屏障可阻止编译器的优化, 即屏蔽前的语句和屏蔽后的不乱"串门".
+
 ## FAQ
 ### `#include <>`与`#include ""`区别
 
