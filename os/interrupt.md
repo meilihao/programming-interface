@@ -1,21 +1,43 @@
 # interrupt
+ref:
+- [Linux kernel中断子系统之（五）：驱动申请中断API](http://www.wowotech.net/irq_subsystem/request_threaded_irq.html)
+
+	包含进程/中断上下文的图
+
 概念:
 - 中断请求(irq, interrupt request)是由可编程中断控制器(PIC, programmable interrupt controller)发起的, 其目的是为了中断cpu和执行中断服务程序(isr, interrupt service routine).
 - 硬件中断: 当一个硬件设备想要告诉 CPU 某一需要处理的数据已经准备好后（例如：当键盘被按下或者一个数据包到了网络接口处），它将会发送一个中断请求（IRQ）来告诉 CPU 数据是可用的, 接下来会调用在内核启动时设备驱动注册的对应的中断服务程序（ISR）.
 - 软件中断: 当在播放一个视频时，音频和视频是同步播放是相当重要的，这样音乐的速度才不会变化. 这是由软件中断实现的，由精确的计时器系统（称为 jiffies）重复发起的. 这个计时器会使得音乐播放器同步, 软件中断也可以被特殊的指令所调用，来读取或写入数据到硬件设备. 当系统需要**实时性时（例如在工业应用中），软件中断会变得重要**. 可参考[这里](https://www.linuxfoundation.org/blog/2013/03/intro-to-real-time-linux-for-embedded-developers/).
+
+
+按中断来源分:
+1. 内部中断: 来自cpu内部(软件中断指令, 溢出, 除法错误等)
+1. 外部中断: 来自cpu外部, 由外设提供提供
+
+按是否屏蔽分:
+1. 可屏蔽中断: 可通过设置中断控制器寄存器等方法被屏蔽, 屏蔽后, 该中断不再得到响应
+1. 不可屏蔽中断(NMI): 不能被屏蔽
+
+根据中断入口跳转方法的不同, 中断分:
+1. 向量中断: 不同的中断分配不同的中断号. 由硬件提供服务程序入口地址
+1. 非向量中断: 多个中断共享一个入口, 进入该入口后, 再通过软件判断中断标志来识别具体是哪个中断. 由软件提供中断服务程序入口地址.
 
 os已注册的中断: `cat /proc/interrupts`, 从左到右各列的含义依次为：`中断向量号、每个 CPU（0~n）中断发生次数、硬件来源、硬件源通道信息、以及造成中断请求的设备名`. 在表的末尾，有一些非数字的中断, 它们是特定于体系结构的中断，如LOC(local timer interrupt, 本地计时器中断)的中断请求（IRQ）号为 236, 其中一些在 Linux 内核源树中的[Linux IRQ 向量布局](https://github.com/torvalds/linux/blob/master/arch/x86/include/asm/irq_vectors.h)中指定.
 
 中断是一种异步的事件处理机制，用来提供系统的并发处理能力, 当中断事件发生，会触发执行中断处理程序.
 
 中断处理程序分为上半部和下半部:
-- 上半部：硬中断
+- 上半部(top half)：硬中断
 
-	用来快速处理中断. 它在中断禁止模式（关闭中断响应）下运行，主要处理跟硬件紧密相关的或时间敏感的工作
-- 下半部：软中断，用来异步(延迟)处理上半部未完成的工作, 通常以内核线程的方式运行
+	用来快速处理中断, 从而可以服务更多的中断请求. 它在中断禁止模式（关闭中断响应）下运行，主要处理跟硬件紧密相关的或时间敏感的工作
+- 下半部(bottom half)：软中断，用来异步(延迟)处理上半部未完成的工作, 通常以内核线程的方式运行
 
 	每个 CPU 都对应一个软中断内核线程，名字是`ksoftirqd/<CPU编号>`
 	当软中断事件的频率过高时，内核线程也会因为 CPU 使用率过高而导致软中断处理不及时，进而引发网络收发延迟，调度缓慢等性能问题.
+
+	相比上半部, 它可以被新中断打断.
+
+	linux实现下半部的机制主要有tasklet, 工作队列, 软中断和线程化irq(threaded_irq).
 
 ## cpu识别中断
 x86处理器通过INTR和NMI 两个引脚分别接收外部中断请求信号: INTR接收可屏蔽中断, NMI接收不可屏蔽中断请求. 标志寄存器EFLAGS中的IF标志决定是否屏蔽可屏蔽中断请求.
@@ -183,6 +205,8 @@ struct irq_desc {
 
 irq_desc和irqaction都有处理中断的fn, 执行顺序是: irq_desc上的handle_irq是一定执行的, irqaction的函数一般由handle_irq调用, 并有handle_irq的策略决定调用与否.
 
+linux使用request_irq()和free_irq()来申请和释放中断. devm_request_irq()的`devm_`开通指kernel managed的资源, 一般不需要出错处理和remove()接口里显示的是否. 比如at86rf230驱动改用devm_request_irq()后就删除了free_irq().
+
 使用中断模式的设备, 在使能中断之前必须设置触发方式(电平/边沿触发等), irq号, 处理函数等信息. kernel提供了[request_irq(用于调用)](https://elixir.bootlin.com/linux/v5.10.2/source/include/linux/interrupt.h#L143)和[request_threaded_irq(用于实现)](https://elixir.bootlin.com/linux/v5.10.2/source/include/linux/interrupt.h#L128)两个函数可以方便地配置这些信息.
 
 ```c
@@ -234,3 +258,29 @@ request_irq通过将request_threaded_irq的thread_fn设为NULL来实现. 它们�
 1. 执行thread_fn线程的优先级比工作队列线程的优先级高
 
 request_threaded_irq创建新线程时, 会调用sched_setscheduler_nocheck(t, SCHED_FIFO, ...)将线程设置为实时的. 对用户体验影响比较大, 要求快速响应的设备的驱动中, 采用中断模式的情况下, 使用request_threaded_irq有利于提高用户体验; 反之, 要求不高的设备的驱动中, 使用request_irq更合适.
+
+
+### 使用和屏蔽中断
+- disable_irq()
+- disable_irq_nosync()
+
+	与disable_irq()的区别在于disable_irq_nosync()立即返回, 而disable_irq()等待目前的中断处理完成.
+
+	由于disable_irq()会等待指定的中断处理完, 因此如果在n号中断的上半部调用disable_irq(n), 会引起系统死锁, 此时只能用disable_irq_nosync().
+- enable_irq()
+``
+
+`local_`开头的方法仅作用于本cpu:
+```c
+# define local_irq_save(flags) // 与local_irq_disable区别, local_irq_save会将目前的中断状态保留在flags中, 而local_irq_disable禁止中断而不保存状态
+void local_irq_disable(void);
+// 对应
+# define local_irq_restore(flags)
+void local_irq_enable(void);
+```
+
+## 中断共享
+多个设备共享一根硬件中断线的情况在实际硬件系统中广泛存在, 使用方法:
+1. 共享中断的多个设备在申请中断时, 都使用IRQF_SHARED, 而且一个设备以IRQF_SHARED申请某中断成功的前提是该中断未被申请, 或已被申请但是之前申请该中断的所有设备也都以IRQF_SHARED申请该中断
+1. 尽管内核模块可访问的全局地址都可作为`request_irq(..., void *dev_id)`的最后一个参数dev_id, 但是设备结构体指针显然是可传入的最佳参数
+1. 在中断到来时, 会遍历执行共享此中断的所有中断处理程序, 直到某个函数返回IRQ_HANDLED. 在中断处理程序上半部中, 应根据硬件寄存器中的信息对比dev_id判断是否为本设备的中断, 若不是, 迅速返回IRQ_NONE

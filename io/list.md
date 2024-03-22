@@ -96,6 +96,12 @@
 
     头部厂商: 华为(文件存储得政府,广电和电信行业认可), 曙光, H3C新华三, 浪潮, 联想, IBM以及初创公司(XSKY星辰天合, 杉岩数据, 大道云行等以块存储和对象存储发力).
 
+## 对象
+- [helyim: 纯 Rust 实现的分布式对象存储系统](https://cloud.tencent.com/developer/article/2378906)
+- [QingStor正在抢占云原生存储技术高地](http://www.dostor.com/p/76900.html)
+
+    [hydrofs](https://github.com/hydrodata/hydrofs)最终还是没有开源出来
+
 ## cdp
 - [linux CDP（连续性数据保护）实现方案](https://blog.csdn.net/weixin_34621309/article/details/116324494)
 
@@ -131,9 +137,19 @@
 - [opencurve/curve](https://github.com/opencurve/curve)
 
     - [CURVE是网易自主设计研发的高性能、高可用、高可靠分布式存储系统](https://opencurve.github.io/)和[了解Curve](https://zhuanlan.zhihu.com/p/338343002)
+    - [curve开发者博客](http://aspirer.wang/)
+
+        [Curve开源社区将停止运营](http://aspirer.wang/?p=1775), 不知是否会影响opencurve的源码项目
+    - [hongsongwu](https://www.zhihu.com/people/wu-gen-52-4)
+    - [curve-book](github.com/aspirer/curve-book)
+
 - [FastCFS 是一款基于块存储的通用分布式文件系统，可以作为MySQL、PostgresSQL、Oracle等数据库和云平台的后端存储](https://www.oschina.net/p/fastcfs)
+
+    - [云原生分布式存储系统FastCFS安装简明教程](https://blog.csdn.net/u012855229/article/details/126479817)
 - [Open vStorage 是一个开源的虚拟机存储路由器](https://blog.csdn.net/sinat_27186785/article/details/52060441)和[openvstorage / volumedriver](https://github.com/openvstorage/volumedriver)
 - [WFS 文件存储系统 v1.0.1 发布](https://www.oschina.net/news/281930/wfs-go-1-0-1-released)
+- [go-nvme: An NVME/TCP target and client(initiator) in pure go](https://github.com/thirdmartini/go-nvme)
+- [Storage Awesome](https://wener.me/notes/service/storage/awesome)
 
 ## 多活
 - [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)

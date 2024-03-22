@@ -313,6 +313,7 @@ ext4, xfs, btrfs
 
   参考:
   - [Linux SCSI 子系统剖析](https://www.ibm.com/developerworks/cn/linux/l-scsi-subsystem/)
+  - [【协议】NVMe over RoCE |nvmeof](https://blog.csdn.net/bandaoyu/article/details/131147575)
 
   小型计算机系统接口（英语：Small Computer System Interface; 简写：SCSI），一种用于计算机和智能设备之间（硬盘、软驱、光驱、打印机、扫描仪等）系统级接口的独立处理器标准.
   它是一种智能的通用接口标准，它具备与多种类型的外设进行通信的功能. SCSI采用ASPI（高级SCSI编程接口）的标准软件接口使驱动器和计算机内部安装的SCSI适配器进行通信.
@@ -327,7 +328,7 @@ ext4, xfs, btrfs
 - NVMe : 全称Non-Volatile Memory Express，非易失性存储器标准，是使用PCI-E通道的SSD一种规范，相比与现在的AHCI标准，NVMe标准可以带来多方面的性能提升
 
 > NVMe标准定义了SSD的访问命令及操作方式，并且定义了逻辑设备接口标准；和SATA体系类比，NVMe标准替代了SATA体系中的AHCI逻辑接口以及ATA/SCSI命令规范.
-> NVMe over Fabric，有3种类型的传输方式: 使用tcp, 远程直接内存访问(RDMA)和使用光纤通道(FC-NVMe), 用以取代iSCSI和走光纤通道的SCSI. nvme-of与nvme有90%的相同, 只是在nvme transport部分进行了扩展以支持infiniband, 光纤通道等.
+> NVMe over Fabric(Fabrics 可理解为高速网络)，有3种类型的传输方式: 使用tcp, 远程直接内存访问(RDMA)和使用光纤通道(FC-NVMe), 用以取代iSCSI和走光纤通道的SCSI. nvme-of与nvme有90%的相同, 只是在nvme transport部分进行了扩展以支持infiniband, 光纤通道等, 说白了就是把本地NVMe协议扩展成了网络的NVMe，原先的主板总线PCIe变成了RDMA等高速网络，扩展了原先NVME的协议.
 > NVMe和NVMe over Fabrics之间的主要区别之一是用于发送和接收命令或响应的传输映射机制。 NVMe-oF使用基于消息的模型在主机和目标存储设备之间进行通信。NVMe将通过PCIe接口协议将命令和响应映射到主机中的共享内存.
 > NVME over TCP 对网络的要求比较低，具有更强大的兼容性，不需要单独建设无损网络，传统以太网即可支持，因此在不追求高性能的情况下，NVMe over TCP 将是未来市场的普遍选择
 > NVMe-oF三种方案相比较，基于以太网的 RoCE 比 FC 性能更高（更高的带宽、更低的时延），同时兼具 TCP 的优势（全以太化、全 IP 化），因此 NVMe over RoCE 是 NoF最优的承载网络方案，也已成为业界 NoF 的主流技术

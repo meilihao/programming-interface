@@ -1829,7 +1829,7 @@ kernel会在`/proc/${pid}/oom_score`下保存一个运行的不良分数(badness
 > oom_score的计算来源: 虚拟内存大小, 进程包括所有子进程累计的虚拟内存大小, nice值(正数得到一个较高分数), 总共运行时间(较长时间减少分数), 运行的用户(root进程得到轻微的保护), 进程可直接访问内存(减少分数).
 
 ## Translation Lookaside Buffer(TLB)/大页（Hugepage）
-TLB是特别的cpu缓存, 通过缓存进程最近使用的分页映射来加速地址转换(虚拟地址 -> 物理地址).
+TLB是特别的cpu缓存, 是MMU的核心部件, 通过缓存进程最近使用的分页映射来加速地址转换(虚拟地址 -> 物理地址), 因此被称为快表.
 
 进程使用的内存越多, 分页表就越大. 同时进程在分页表上查询一个分页映射的开销也会很大. 因此tlb可很好地解决这个问题.
 
@@ -1837,6 +1837,8 @@ TLB是特别的cpu缓存, 通过缓存进程最近使用的分页映射来加速
 
 > tlb可通过`x86info -a`查看.
 > linux通过hugepage来支持大号的分页. x86_64支持分页大小: 4K, 2M, 4M, 1G. 进程使用mmap 系统调用或shmat和shmget系统调用来请求大页.
+
+> TTW(Translation Table walk, 转换表漫游): 当TLB未命中时, 需要通过内存中的页表来将虚拟地址映射为物理地址, TTW成功后, 将结果写入TLB中.
 
 虚拟地址映射到物理地址的工作主要是TLB（Translation Lookaside Buffers）与MMU一起来完成的. 以4KB的页大小为例，虚拟地址寻址时，首先在TLB中查找，如果没有找到，则需要通过MMU加载的页表基地址进行多次寻表来找到对应的物理地址. 如果找不到，则产生缺页，这时会有相应的handler进行处理，来填充页表和更新TLB.
 
@@ -2259,3 +2261,61 @@ lsmod的信息来自/proc/modules，它显示的size包括init_size和core_size�
 
 kernel module的内存是通过vmalloc()分配的，所以它被包含在VmallocUsed中. 也就是说可以不必通过`lsmod`来统计kernel module所占的内存大小，通过/proc/vmallocinfo就行了，而且还比lsmod更准确. 因为给kernel module分配内存是以page为单位的，不足 1 page的部分也会得到整个page，此外，每个module还会分到一页额外的guard page。
 详见：`mm/vmalloc.c: __get_vm_area_node()`
+
+## 页表查询
+ref:
+- [arm PTE的页表查询](https://elixir.bootlin.com/linux/v6.6.22/source/arch/arm/lib/uaccess_with_memcpy.c#L23)
+
+	pgd_offset, pud_offset, pmdd_offset分别是一/二/三级页表的入口, 最后通过pte_offset_map_lock得到pte. 通过pmd_thp_or_huge()判断是否有巨页, 如果是巨页, 直接访问pmd
+
+	> linux支持不带MMU的处理器
+
+	> 32位内存映射见<<Linux设备驱动开发详解>>的 11.2 Linux内存管理
+
+## 内存存取
+### 用户空间
+用户空间使用malloc()和free()来申请和释放内存. malloc()是通过brk()和mmap()这两个系统调用从内核申请内存.
+
+c库的malloc()通常具备二次管理能力, free()时并不是直接还给系统, 而是还给了c库的分配算法, 进程结束或c库归还内存时才真正释放了内存.
+
+### kernel
+内核申请内存涉及的函数主要包括kmalloc(), `__get_free_pages()`, vmalloc()等. kmalloc()和`__get_free_pages()`(及其类似函数)申请的内存, 物理地址是连续的, 只是与真实物理地址有一个固定的偏移, 映射关系简单. vmalloc()在虚拟内存空间分配一块连续的内存, 实质上, 物理内存不一定连续, 没法简单映射.
+
+> kmalloc底层依赖`__get_free_pages()`, 使用GFP_KERNEL, 暂时不能满足时会睡眠进程等待页; 在中断处理函数, tasklet和内核定时器等非进程上下文中不能阻塞, 此时应使用GFP_ATOMIC, 如果不存在空闲页, 不等待, 直接返回. 还有很多申请的flag, 这里不举例了.
+
+> kmalloc申请的, 使用kfree释放.
+
+`__get_free_pages()`系列函数/宏的本质是内核最底层用于获取空闲内存的方法. 因为底层使用buddy算法以2^n页为单位管理内存, 所有它申请的内存总是以2^n页为单位.
+
+> `__get_free_pages()`系列函数/宏包括get_zeroed_page(), `__get_free_page()`和`__get_free_pages()`. 它们的申请内存flag与kmalloc一致.
+
+vmalloc()远大于__get_free_pages()的开销, 它适合分配较大的内存, 用vfree()释放.
+
+vmalloc不能用在原子上下文中, 因为它内部实现使用了GFP_KERNEL的kmalloc().
+
+vmalloc在申请内存时, 会进行内存映射, 改变页表项.
+
+### slub和内存池
+以页为单位分配和释放内存容易导致浪费, 特别是涉及大量小对象的时候, 比如inode, task_struct等.
+
+slub建立在buddy上, 它从buddy拿到2^n页面后进行二次管理. 通过`cat /proc/slabinfo`可获得slub的分配和使用情况.
+
+linux使用mempool_create创建内存池.
+
+### 内存映射和VMA
+一般情况下, 用户空间是不能也不应该直接访问设备. 但驱动可用mmap()使得用户空间能直接访问设备的物理地址. 这种能力对显示器很有用.
+
+> mmap()必须以PAGE_SIZE为单位进行映射.
+
+驱动中的mmap()的实现机制是建立页表, 并填充VMA结构体(vm_area_struct)中vm_operations_struct指针.
+
+在驱动中, 可使用remap_pfn_range()映射内存中的保留页, 设备I/O, framebuffer, camera等内存. 在remap_pfn_range基础上, 进一步封装出io_remap_pfn_range(), vm_iomap_memory()等api.
+
+> LCD驱动映射framebuffer物理地址到用户空间的范例, 见[fb_mmap](https://elixir.bootlin.com/linux/v6.6.22/source/drivers/video/fbdev/core/fb_chrdev.c#L314)
+
+通常, I/O内存被映射时需要时nocache, 即将vma->vm_page_prot设为nocache后再映射.
+
+除了remap_pfn_range(), 实现VMA的fault()可为设备提供更加灵活的内存映射途径.
+
+### IOMMU
+针对外设总线和内存地址间的转化

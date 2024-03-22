@@ -171,7 +171,11 @@ kernel使用`EXPORT SYMBOL(<func_name>);`表示导出内核符号, 之后就可�
 workqueue和tasklet都是延迟执行的机制, 不同的是.
 
 #### 1. workqueue
-Linux下的工作队列和tasklet都是一种将工作推后执行的方式. 但workqueue有自己的进程上下文, 可以被**睡眠、调度**，与内核线程表现基本一致，但使用起来又比直接使用内核线程简单，一般用来处理任务内容比较动态的任务链. 每 workqueue 都可以添加多个 work (使用 queue_work函数); 但tasklet不可睡眠.
+Linux下的工作队列和tasklet都是一种将工作推后执行的方式. 但workqueue有自己的进程上下文即执行上下文是内核线程, 因此可以被**睡眠、调度**，与内核线程表现基本一致，但使用起来又比直接使用内核线程简单，一般用来处理任务内容比较动态的任务链. 每 workqueue 都可以添加多个 work (使用 queue_work函数); 但tasklet不可睡眠.
+
+workqueue机制最小的调度单元是work_struct，即工作任务. 它由schedule_work()进行调度.
+
+workqueue早期在每个cpu上创建一个worker内核线程, 所有在这个核上调度的工作都由该worker执行, 并发性不佳. 当前使用cmwq(Concurrency-managed workqueues), 它会自动维护工作队列的线程池以提高并发性, 同时保持了API的向后兼容.
 
 kernel 提供了[create_workqueue](https://elixir.bootlin.com/linux/v5.11.1/source/include/linux/workqueue.h#L428)和[create_singlethread_workqueue](https://elixir.bootlin.com/linux/v5.11.1/source/include/linux/workqueue.h#L433)函数用于用户创建自己的工作队列和执行线程, 而不用kernel提供的工作队列.
 
@@ -184,7 +188,9 @@ Linux 中的中断分为3个层次. 最低的层次是在源代码 arch 目录�
 
 `do_IRQ`是中断系统的中层，其根据下层传来的中断号找到对应的中断处理函数，处理多 CPU 访问和中断重入问题，然后调用真实的中断处理函数，也就是中断的上层.  但是这里内核做了区别，如果内核判断中断发生了嵌套（同时发生的中断很多)或者有其他的高时间成本的需求，则将中断处理函数以内核线程的形式（软中断)运行，否则直接运行.  中断的最上层则与各个中断的具体功能相关.
 
-tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的操作都交给 tasklet在中断上下文之外调度执行，基于软中断实现, 且tasklet**不可睡眠**.  软中断被内核直接使用，但是如果用户模块想要直接使用则会非常难，因为需要考虑在不同 CPU 上的调度问题，所以软中断是锁密集型的机制. 内核线程 ksoftirqd 专门用来调度软中断，而模块开发的时候希望使用这种软中断的延时执行机制，就可以调用内核封装好的 tasklet.
+tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的操作都交给 tasklet在中断上下文之外调度执行, 执行时机通常是上半部返回的时候. 它基于软中断实现即它的执行上下文是软中断, 且tasklet**不可睡眠**.  软中断被内核直接使用，但是如果用户模块想要直接使用则会非常难，因为需要考虑在不同 CPU 上的调度问题，所以软中断是锁密集型的机制. 内核线程 ksoftirqd 专门用来调度软中断，而模块开发的时候希望使用这种软中断的延时执行机制，就可以调用内核封装好的 tasklet.
+
+tasklet通过tasklet_schedule()在适当dd时候进行调度运行.
 
 同一时刻一个tasklet只能有一个cpu执行, 不同的tasklet可以在不同的cpu上执行, 这和软中断不同, 软中断同一时刻可以在不同的cpu上并行执行, 因此软中断必须考虑重入问题.
 
@@ -193,6 +199,22 @@ tasklet一般专用于中断，因为中断不能阻塞，所以耗时较长的�
 中断系统是一个非常复杂的子系统, 除非深度的内核开发者, 例如比较细节的多CPU 中断、中断亲和度、中 断域等概念都是不太容易接触到的. 其中中断亲和度常被运维人员用于锁定应用性能.
 
 `cat /proc/irq`的每个中断号下面的文件都可以进行中断亲和度的绑定, 将特定的进程绑定到特定的中断号上, 这样进程不容易被抢占.
+
+#### 软中断(softirq)
+软中断的执行时机通常是上半部返回的时候, tasklet是基于软中断实现的, 因此它也运行于软中断上下文, 不允许睡眠.
+
+内核用softirq_action表示一个软中断, 用open_softirq注册软中断对应的处理函数, raise_softirq()可触发一个软中断.
+
+local_bh_diable()和local_bh_enable()用于禁止和使能软中断及tasklet下半部机制的函数.
+
+一般来说, 驱动不会也不宜直接使用softirq.
+
+软中断或tasklet在某段时间内大量出现的话, 内核会将后续软中断放入ksoftirqd内核线程中执行. 总的来说, 中断优先级高于软中断, 软中断又高于任一线程. 软中断适度线程化, 可以缓解高负载下系统的响应.
+
+#### 线程化irq(threaded_irq)
+内核还可以使用request_threaded_irq()和devm_request_threaded_irq(), 它们比request_irq()和devm_request_irq()多了一个thread_fn, 即申请中断时, 为相应的中断号分配一个对应的内核线程, 该线程只针对这个中断号.
+
+它们在发生中断时, 首先指向handler, 在该函数返回IRQ_WAKE_THREAD时, 内核会调度thread_fn对应的函数. 其irqflags设置IRQF_ONESHOT, 内核会自动在中断上下文屏蔽对应的中断号, 而在thread_fn执行后, 重新使能该中断号.
 
 #### 3. 自旋锁
 自旋锁用来在多处理器的环境下保护数据, 因此在单处理器且非抢占内核下, 它没有作用. 如果kernel发现数据未锁, 就会获取锁并执行; 否则就一直等待(即一直反复执行一条指令). 被自旋锁锁着的进程一直在等待而不是睡眠, 因此它可用在中断等禁止睡眠的场景.
