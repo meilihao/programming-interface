@@ -9,6 +9,9 @@
 - [Linux设备驱动模型简述](https://hughesxu.github.io/posts/Linux_device_and_driver_model/)
 
 	有注册后的数据结构展示
+- [<<Linux设备驱动开发详解>>]()
+
+	**由很多编写驱动的模板**
 
 设备的创建就是在Linux内核中维护一些数据结构来对硬件设备进行描述.
 
@@ -16,7 +19,7 @@
 
 linux驱动模型: kernel基于kobject将系统中的总线, 设备和驱动用`bus_type`, `device`和`device_driver`等对象将其组织成一个层次结构的系统, 统一管理各种类别(class)的设备及其接口(class_interface), 同时借助sysfs将内核所见的设备系统展示给用户空间.
 
-总线是处理器与设备之间的通道, 在设备模型中，所有的设备都通过总线相连；总线作为Linux设备驱动模型的核心架构，系统中的设备和驱动都挂接在相应的总线上，来完成各自的工作.
+总线是处理器与设备之间的通道, 在设备模型中，所有的设备都通过总线相连；总线作为Linux设备驱动模型的核心架构，系统中的设备和驱动都挂接在相应的总线上, 由总线将设备和驱动绑定，来完成各自的工作.
 
 每个子系统有自己的总线类型, 它有一条驱动链表和一条设备链表, 用来链接已加载的驱动和已发现的设备, 驱动加载和设备发现的顺序是任意的. 每个设备至多绑定一个驱动
 
@@ -25,6 +28,7 @@ linux驱动模型: kernel基于kobject将系统中的总线, 设备和驱动用`
 > kset是具有相同类型的kobject构成的对象集.
 
 > buses_init()函数在sysfs文件系统的根目录下建立一个bus目录，即/sys/bus，是系统中后续注册总线的连接点. Linux系统在启动时的初始化阶段，通过在driver_init()中调用[buses_init()](https://elixir.bootlin.com/linux/v6.6.13/source/drivers/base/bus.c#L1374)函数，完成所有总线的最初操作，创建出bus的祖先.
+
 
 ```c
 // https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L64
@@ -784,6 +788,8 @@ BUS_ATTR()宏，定义一个以bus_attr_开头的总线属性，生成总线属�
     bios设置的中断号从0x08开始, 但由于中断号 0x00--0x1F 属于 Intel 公司专门保留给 CPU 使用的, 为解决这个冲突Linux 操作系统不会直接使用这些 BIOS 默认设置好的中断号。在上电启动时， Linux 操作系统会在内核初始化期间又重新对 8259A 进行了设置，把所有系统硬件中断请求号全部都映射到了 0X20 及以上中断号上.
 4. 直接存储器存取方式(DMA)
 
+	> 基于DMA的硬件使用的是总线地址, 而不是物理地址. 总线地址是从设备角度上看到的内存地址, 物理地址从cpu mmu角度看的内存地址. 在pc上对ISA和PCI, 总线地址就是物理地址, 但不是每个平台都这样, 比如PRep(PowerPC Reference Platform), 此时需要virt_to_bus/bus_to_virt的转换.
+
     在中断传送方式中，虽然极大地提高了 CPU 的利用率，但通过中断方式来通知 CPU, CPU 就要通过压找来保护现场，还要执行传输指令，最后还要恢复现场. 其实还可一点都不要浪费 CPU 资源，不让 CPU参与传输，完全由数据源设备和内存直接传输. CPU 直接到内存中拿数据就好了. 这就是此方式中“直接”的意思. 不过 DMA 是由硬件实现的, 所以需要 DMA 控制器才行.
 
     DMA的发起者可以是处理器, 也可以是I/O设备. 以处理器发起DMA为例, 设备驱动首先在内存中分配一块DMA缓冲区, 随后发起DMA请求, 设备收到请求后通过DMA机制将数据传输至DMA缓冲区. DMA操作完成后, 设备触发中断通知处理器对DMA缓冲区中的数据进行处理.
@@ -799,6 +805,14 @@ BUS_ATTR()宏，定义一个以bus_attr_开头的总线属性，生成总线属�
 	另一种情况是由设备发起DMA, 设备首先通知DMA控制器, 并由DMA控制器向总线控制器申请占用总线, 此后的流程与处理器发起DMA的情况相似.
 
 	不少总线允许设备直接获取总线控制权并进行DMA操作, 而无须借助DMA控制器, 这种机制被称为第一方DMA（first-party DMA）, 也称为总线控制（bus mastering）. 此时可以理解为将DMA控制器的角色和设备的角色合二为一, 其执行过程和上述2种情况类似. 此时, 如果多个设备希望同时进行DMA, 总线控制器需要进行仲裁, 决定优先次序, 同一时间只允许一个设备进行DMA.
+
+	设备不一定能在所有的内存地址上指向DMA操作, 此时需要dma_set_mask(), 其本质是修改device结构体中的dma_mask成员.
+
+	dma_alloc_coherent()申请的DMA缓冲区可保证该缓冲区的cache一致性.
+
+	驱动申请的DMA缓冲区时, 用一致性DMA缓冲区最方便. 但有时是内核上层通过`kmalloc, __get_free_pages`申请的(网卡驱动中的网络报文, 块设备驱动中要写入设备的数据), 此时应使用流式DMA映射(使用dma_map_single()). 其操作本质上多是进行cache的使能无效或清除操作, 以解决cache一致性问题.
+
+	linux内核推荐使用dmaengine的驱动框架来编写DMA控制器的驱动, 同时外设的驱动使用标准的dmaengine API进行DMA的准备, 发起和完成时的回调工作.
 
 5. I/O 处理机传送方式
 
@@ -827,6 +841,13 @@ CPU通常以读写设备寄存器的方式与设备进行通信. 一个设备通
 	适用: 需要频繁访问外设的应用
 
 	IO内存：当寄存器或内存位于内存空间时的称呼, 可通过`cat /proc/iomem`查看.
+
+	IO内存使用流程: request_mem_region(申请IO内存) -> ioremap(映射地址)-> readb, readl, writeb, writel等(使用) ->iounmap(取消地址映射)->release_mem_region(释放IO内存)
+	- request_mem_region+ioremap: 在驱动模块加载或open()中进行
+	- 使用: 在设备驱动初始化, read(), write(), ioctl等中进行
+	- iounmap+release_mem_region: 在驱动模块卸载或release()中进行
+
+
 - io映射(i/o-mapped, 独立编址): 为外设专门实现了一个单独地地址空间, 称为`I/O地址空间或I/O端口空间`(32位X86有64K的IO空间, `cat /proc/ioport`). IO地址与内存地址分开独立编址, I/O端口地址不占用存储空间的地址范围. 此时在系统中就存在了另一种与存储地址无关的IO地址. 此时, 需要使用专用的CPU指令来访问某种特定外设, 比如x86的in/out等指令.
 
 	接口的作用是连接处理器和外部设备, 处理速度不匹配, 格式转换(模拟转数字, cpu只能处理数字信号)等情况.
@@ -842,6 +863,8 @@ CPU通常以读写设备寄存器的方式与设备进行通信. 一个设备通
 	IO端口：当寄存器或内存位于IO空间时的称呼, 可通过`cat /proc/ioports`查看.
 
 	**不过x86平台也支持内存映射（MMIO）, 该技术是PCI规范的一部分, 如果硬件支持MMIO, 就可将其IO设备端口映射到内存空间. 为了兼容一些之前开发的软件, PCIe仍然支持IO地址空间, 只是建议在新开发的软件中采用MMIO**.
+
+	IO端口使用流程: request_region(申请)-> inb/outb, ...(使用) ->release_region(释放)
 
 > 控制显卡用的是内存映射+io映射.
 
@@ -985,6 +1008,8 @@ GIC的中断类型可以分为三类:
 1. 软件生成中断（Software Generated Interrupt, SGI）: 由软件通过写GICD_SGIR系统寄存器触发, 常用于发送核间中断
 1. 私有设备中断（Private Peripheral Interrupt, PPI）:由每个处理器核上私有的设备触发, 如通用定时器（Generic Time）
 1. 共享设备中断（Shared Peripheral Interrupt, SPI）:由所有CPU核心共同连接的设备触发, 可以发送给任意核心
+
+	通过irq_set_affinity设定中断触发的cpu core, arm linux 默认情况下, 中断都是在cpu0上产生的.
 
 根据中断事件的重要程度和紧迫程度, GIC允许os为中断配置不同的中断优先级. 通常优先级的数字越小表示优先级越高. 在中断仲裁时, 高优先级的中断会先于低优先级的中断被发送给CPU处理. 当CPU在响应低优先级中断时, 如果此时有高优先级中断到来, 那么高优先级中断会抢占低优先级中断, 被CPU优先响应.
 
@@ -1137,3 +1162,182 @@ VFIO借助IOMMU限制了用户空间驱动代码的内存访问能力, 从而允
 用户空间程序定位固件文件, 并将其拷贝到内核提供的二进制属性；若无法定位文件, 用户空间程序设置 loading 属性为 -1. 若固件请求在 10 秒内没有被服务, 内核就放弃并返回一个失败状态给驱动, 超时时间可通过 sysfs 属性 /sys/class/firmware/timeout 属性修改.
 
 request_firmware 接口允许使用驱动发布设备固件. 当正确地集成进热插拔机制后, 固件加载子系统允许设备不受干扰地工作.
+
+## 等待队列
+在linux驱动中, 可以使用等待队列来实现阻塞进程的唤醒. 信号量也是基于等待队列实现的. 唤醒时, 是唤醒工作队列中的所有进程.
+
+wake_up()应和wait_event()或wait_event_timeout()成对使用, 而wake_up_interruptible()则应与wake_event_interruptible()或wait_event_interruptible_timeout()成对使用. wake_up()可唤醒处于TASK_INTERRUPTIBLE和TASK_UNINTERRUPTIBLE的进程, 而wake_up_interruptible()只能唤醒TASK_INTERRUPTIBLE的进程.
+
+sleep_on()是将进程的状态设置为TASK_UNINTERRUPTIBLE, 并定义一个等待队列成员, 然后把它挂到指定等待队列中, 直到资源可获得, 就唤醒该进程.
+
+interruptible_sleep_on()与sleep_on()类似, 区别是进程设置为TASK_UNINTERRUPTIBLE, 唤醒进程或进程收到信号.
+
+sleep_on()和wake_up成对使用; interruptible_sleep_on()和wake_up_interruptible()成对使用.
+
+## 信号
+为了使设备支持异步通知机制, 驱动程序涉及3项工作:
+1. 支持F_SETOWN命令, 能在这个控制命令处理中设置filp->f_owner为对应进程id. 该项操作已由kernel完成, 设备驱动无需处理
+1. 支持F_SETFL命令, 每当FASYNC标志改变时, 驱动程序中的fasync()函数将得以执行. 因此驱动需要实现fasync()
+1. 在设备资源可获得时, 调用kill_fasync()激发相应的信号
+
+## soc
+soc不同于pc硬件环境, 外设控制器通常是集成在soc中. 因此它使用虚拟的总线即platform总线, 相应的设备(I2C, RTC, LCD, 看门狗等)称为platform_device, 驱动是platform_driver. platform_device并不是与字符/块/网络设备并列的概念. soc中的I2C, RTC, LCD, 看门狗本身是字符设备.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.22/source/include/linux/platform_device.h#L23
+struct platform_device {
+	const char	*name;
+	int		id;
+	bool		id_auto;
+	struct device	dev;
+	u64		platform_dma_mask;
+	struct device_dma_parameters dma_parms;
+	u32		num_resources;
+	struct resource	*resource;
+
+	const struct platform_device_id	*id_entry;
+	/*
+	 * Driver name to force a match.  Do not set directly, because core
+	 * frees it.  Use driver_set_override() to set or clear it.
+	 */
+	const char *driver_override;
+
+	/* MFD cell pointer */
+	struct mfd_cell *mfd_cell;
+
+	/* arch specific additions */
+	struct pdev_archdata	archdata;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.22/source/include/linux/platform_device.h#L236
+struct platform_driver {
+	int (*probe)(struct platform_device *);
+
+	/*
+	 * Traditionally the remove callback returned an int which however is
+	 * ignored by the driver core. This led to wrong expectations by driver
+	 * authors who thought returning an error code was a valid error
+	 * handling strategy. To convert to a callback returning void, new
+	 * drivers should implement .remove_new() until the conversion it done
+	 * that eventually makes .remove() return void.
+	 */
+	int (*remove)(struct platform_device *);
+	void (*remove_new)(struct platform_device *);
+
+	void (*shutdown)(struct platform_device *);
+	int (*suspend)(struct platform_device *, pm_message_t state);
+	int (*resume)(struct platform_device *);
+	struct device_driver driver;
+	const struct platform_device_id *id_table;
+	bool prevent_deferred_probe;
+	/*
+	 * For most device drivers, no need to care about this flag as long as
+	 * all DMAs are handled through the kernel DMA API. For some special
+	 * ones, for example VFIO drivers, they know how to manage the DMA
+	 * themselves and set this flag so that the IOMMU layer will allow them
+	 * to setup and manage their own I/O address space.
+	 */
+	bool driver_managed_dma;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.22/source/drivers/base/platform.c#L1482
+struct bus_type platform_bus_type = {
+	.name		= "platform",
+	.dev_groups	= platform_dev_groups,
+	.match		= platform_match,
+	.uevent		= platform_uevent,
+	.probe		= platform_probe,
+	.remove		= platform_remove,
+	.shutdown	= platform_shutdown,
+	.dma_configure	= platform_dma_configure,
+	.dma_cleanup	= platform_dma_cleanup,
+	.pm		= &platform_dev_pm_ops,
+};
+EXPORT_SYMBOL_GPL(platform_bus_type);
+```
+
+直接使用platform_driver的suspend, resume做电源关了回调的做法已经过时, 推荐使用platform_driver.driver中的dev_pm_ops().
+
+与platform_driver地位对等的i2c_driver, spi_driver, usb_driver, pci_driver都包含了device_driver. device_driver描述了各种xxx_driver(xxx是总线名)在驱动上的一些共性.
+
+系统为platform总线定义了一个bus_type实例platform_bus_type. 其match决定了platform_device和platform_driver如何进行匹配, 里面定义了5中可能性:
+1. driver_override
+1. 基于设备数风格
+1. 基于ACPI分割
+1. 匹配ID表(platform_device设备名是否出现在platform_driver的ID表中)
+1. platform_device设备名与驱动名称
+
+对于ARM, 内核2.6时, platform_device的定义通常在BSP的板文件中定义, 将platform_device归纳为一个数组, 最终通过platform_add_devices()注册到系统中; 3.x开始倾向于根据设备树中的内容自动展开platform_device.
+
+## 输入设备驱动
+input_allocate_device/input_free_device: 分配/释放一个输入设备. 分配返回一个input_dev
+
+input_register_device/input_unregister_device: 注册/销毁输入设备
+
+input_event(): 报告指定type, code的输入事件
+input_report_key(): 报告键值
+input_report_rel(): 报告相对坐标
+input_report_abs(): 报告绝对坐标
+input_sync(): 报告同步事件
+
+input_event: 对于所有的输入事件, 内核统一用它描述.
+
+[drivers/input/keyboard/gpio_keys.c](https://elixir.bootlin.com/linux/v6.6.22/source/drivers/input/keyboard/gpio_keys.c)基于input架构实现了一个通用的GPIO按键驱动, 它基于platform_driver架构.
+
+GPIO按键驱动通过input_event()和input_sync()来汇报按键事件和同步事件. 该驱动没有file_operations的动作, 也没有各种I/O模型, 这是由于与VFS相关的全部在drivers/input/evdev.c中实现了.
+
+## RTC(实时钟)设备驱动
+RTC借助电池供电, 在系统下电的情况下依旧能正常计时. 它通常还具有产生周期性中断以及闹钟(alarm)中断的能力, 是一种字符设备.
+
+drivers/rtc/rtc-dev.c实现了RTC驱动通用的字符设备驱动层. 它导出rtc_class_ops描述底层的RTC硬件操作. 该通用层使得底层的RTC驱动不再关心RTC作为字符设备驱动的具体实现, 也无需关心一些通用的RTC控制逻辑. 例子见drivers/rtc/rtc-s3c.c
+
+## framebuffer设备驱动
+framebuffer(帧缓冲)是linux为显示设备提供的一个接口, 将显示缓冲区抽象, 屏蔽图形硬件的底层差异, 允许上层应用程序直接对显示缓冲区进行读写操作.
+
+framebuffer设备驱动提供给用户空间的file_operations由drivers/video/fbdev/core/fbmem.c中的file_operations提供. 特定帧缓冲区设备fb_info的注册, 销毁以及成员的维护, 尤其是fb_ops中成员函数的实现由对应的xxxfb.c实现. fb_ops的成员函数最终会操作LCD的硬件寄存器.
+
+多数显存的操作都是规范的, 按照像素点格式写帧缓冲区即可. 但少数LCD特殊, 此时drivers/video/fbdev/core/fbmem.c实现的fb_write()允许底层提供一个重写自身的机会.
+
+## 终端设备驱动
+终端是一种字符设备, 有很多类型, 通常使用tty来简称各种类型的终端设备. 在嵌入式中, 最常见的是UART(Universal Asynchronous Receiver/Transmitter)串口设备.
+
+linux tty层次:
+1. 核心的tty_io.c
+
+	标准的字符设备驱动, 对上有字符设备的职责, 实现file_operations成员函数
+1. tty线路规程n_tty.c(实现N_TTY线路规程):
+
+	tty线路规程的工作是以特殊的方式格式化一个用户或者硬件收到的数据, 这种格式化通常是一种协议转换
+1. tty驱动实例xxx_tty.c 
+
+	填充tty_driver的成员, 实现其中的tty_operations
+
+tty设备工作流程：
+- 发送数据: tty核心从一个用户获取将要发送给一个tty设备的数据, tty核心将数据传递给tty线路规程驱动, 接着数据被传递给tty驱动, tty驱动将数据转换为可以发送给硬件的格式
+- 接收数据: 从tty硬件接收到的数据向上给tty驱动, 接着进入tty线路规程驱动, 在进入tty核心, 再被一个用户获取
+
+鉴于串口的共性, linux在drivers/tty/serial/serial_core.c实现了UART设备的通用tty驱动层. 因此UART驱动的主要任务演变为实现serial-core.c定义的uart_xxx接口而不是tty_xxx接口.
+
+串口核心层定义了uart_driver和uart_ops, 由uart_register_driver()注册uart_driver. uart_driver本质是派生自tty_driver, 因为它内嵌了tty_driver.
+
+> tty_driver是字符设备的泛化, serial-core是tty_driver的泛化, 具体串口驱动是serial-core的泛化.
+
+## misc设备驱动
+部分没法具体划分归属类型的设备可使用miscdevice框架. miscdevice本质是字符设备.
+
+## SPI
+spi_master用于描述SPI主机控制器驱动
+
+arm 3.x启用设备树后, 倾向于在SPI控制器节点下填写子节点, 比如[`arch/arm/boot/dts/ti/omap/omap3-overo-common-lcd43.dtsi`](https://elixir.bootlin.com/linux/v6.6.22/source/arch/arm/boot/dts/ti/omap/omap3-overo-common-lcd43.dtsi#L151)的ads7846节点.
+
+## 驱动核心层
+思想:
+1. 对上提供接口
+
+	file_operations的读,写,ioctl都被中间层搞定, 各种I/O模型也被处理好了
+1. 中间层实现通用逻辑
+
+	共享代码, 避免重复实现
+1. 对下定义框架
+
+	底层驱动不用关系VFS接口和各种肯能的I/O模型, 只需处理与具体硬件相关的访问

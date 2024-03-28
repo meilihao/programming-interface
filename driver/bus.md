@@ -270,7 +270,7 @@ struct bus_type {
     const struct attribute_group **dev_groups; //总线上设备的默认属性
     const struct attribute_group **drv_groups; //总线上驱动的默认属性
 
-    int (*match)(struct device *dev, struct device_driver *drv); // 每当有新的设备或驱动程序被添加到这个总线上时调用
+    int (*match)(struct device *dev, struct device_driver *drv); // 每当有新的设备或驱动程序被添加到这个总线上时调用, 用来绑定设备和驱动. 一旦匹配成功, xxx_probe()(xxx是总线名)就被执行
     int (*uevent)(const struct device *dev, struct kobj_uevent_env *env); //当一个设备被添加、移除或其他一些事情时被调用产生uevent来添加环境变量
     int (*probe)(struct device *dev); //当一个新的设备或驱动程序添加到这个总线时被调用，并回调特定驱动程序探查函数，以初始化匹配的设备
     void (*sync_state)(struct device *dev); //将设备状态同步到软件状态时调用

@@ -32,14 +32,6 @@
 
 - [三言两语聊Kernel：从Linux到FreeBSD](http://laoar.github.io/blogs/325/)
 - [OS书籍推荐](https://www.junmajinlong.com/os/index/)
-- [Linux Kernel Programming : A comprehensive and practical guide to kernel internals, writing modules, and kernel synchronization （2ND）](https://www.kinokuniya.co.jp/f/dsg-02-9781803232225)
-
-	6.1
-
-	code:
-	- [code 6.1](https://github.com/PacktPublishing/Linux-Kernel-Programming_2E)
-	- [code 5.x](https://github.com/PacktPublishing/Linux-Kernel-Programming)
-	- [Linux Kernel Programming Part 2 - Char Device Drivers and Kernel Synchronization](https://github.com/PacktPublishing/Linux-Kernel-Programming-Part-2)
 
 ### 手写os
 - [手写操作系统](https://www.eet-china.com/mp/a163987.html) from [luban-ziya](https://gitee.com/luban-ziya/projects)

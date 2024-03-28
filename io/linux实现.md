@@ -1443,6 +1443,14 @@ os用设备驱动程序来对接各个设备控制器.
 有了文件系统接口之后，不但可以通过文件系统的命令行操作设备，也可以通过程序，调用 read、write 函数，像读写文件一样操作设备. 但是有些任务只使用读写很难完成，例如检查特定于设备的功能和属性，超出了通用文件系统的限制. 所以，对于设备来讲，还有一种接口称为 ioctl，表示输入输出控制接口，是用于配置和修改特定设备属性的通用接口.
 
 # 字符设备
+ref:
+- [globalmem](https://github.com/aggresss/LKDemo/tree/master/lddd3/ref.d/ch6)
+
+	<<Linux设备驱动开发详解>> - 第6章
+
+	其他:
+	- [globalmem](https://gitee.com/fortunely/imx6study/tree/master/source/linux_device_driver/ch6_chardev)
+
 ![](/misc/img/io/fba61fe95e0d2746235b1070eb4c18cd.jpeg)
 
 罗技鼠标, 驱动代码在 [drivers/input/mouse/logibm.c](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/input/mouse/logibm.c).
@@ -1465,7 +1473,37 @@ lp.c 里面定义了 [struct file_operations lp_fops](https://elixir.bootlin.com
 
 kobj_map是设备号映射机制, 建立了设备号和内核对象的映射关系.
 
+分配设备号(cdev_add前调用):
+- register_chrdev_region: 用于已知起始设备的设备号, 参考[pc8736x_gpio_init](https://elixir.bootlin.com/linux/v6.6.21/source/drivers/char/pc8736x_gpio.c#L308)
+- alloc_chrdev_region: 用于设备号未知, 向系统动态申请未被占用的设备号
+
+释放设备号(cdev_del后调用):
+- unregister_chrdev_region: 
+
 ```c
+// https://elixir.bootlin.com/linux/v6.6.21/source/include/linux/kdev_t.h#L10
+#define MAJOR(dev)	((unsigned int) ((dev) >> MINORBITS)) // 获取主设备号
+#define MINOR(dev)	((unsigned int) ((dev) & MINORMASK)) // 获取次设备号
+#define MKDEV(ma,mi)	(((ma) << MINORBITS) | (mi)) // 通过主/次设备号生成dev_t
+
+// https://elixir.bootlin.com/linux/v6.6.21/source/include/linux/cdev.h#L14
+struct cdev {
+	struct kobject kobj;
+	struct module *owner;
+	const struct file_operations *ops; // 文件操作集合
+	struct list_head list;
+	dev_t dev; // 设备号
+	unsigned int count;
+} __randomize_layout;
+
+// https://elixir.bootlin.com/linux/v6.6.21/source/include/linux/cdev.h#L14
+// 操作cdev
+void cdev_init(struct cdev *, const struct file_operations *); // 初始化cdev成员, 并关联cdev和file_operations
+struct cdev *cdev_alloc(void); // 动态申请一个cdev
+void cdev_put(struct cdev *p);
+int cdev_add(struct cdev *, dev_t, unsigned); // 向系统添加一个cdev. cdev_add和cdev_del通常出现在字符设备驱动模块的加载和卸载函数中.
+void cdev_del(struct cdev *); // 从系统删除一个cdev
+
 // https://elixir.bootlin.com/linux/v6.6.15/source/drivers/base/map.c#L19
 // 内核有两个映射域: bdev_map(块设备, genhd_device_init)和cdev_map(字符设备)
 struct kobj_map {
@@ -2143,6 +2181,8 @@ __handle_irq_event_percpu 里面调用了 irq_desc 里每个 hander，这些 han
 
 特殊 inode 的默认 file_operations 是 [def_blk_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/block_dev.c#L2150)，就像字符设备一样，有打开、读写这个块设备文件，但是常规操作不会这样做, 而会将这个块设备文件 mount 到一个文件夹下面.
 
+> def_blk_fops是不通过fs直接操作裸设备的file_operations, 比如`dd if=/dev/sdb1 ...`
+
 > 打开这个块设备的操作 blkdev_open, 它里面调用的是 blkdev_get 打开这个块设备.
 
 接下来，要调用 mount，将这个块设备文件挂载到一个文件夹下面. 如果这个块设备原来被格式化为一种文件系统的格式，例如 ext4，那调用的就是 ext4 `struct file_system_type [ext4_fs_type](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/ext4/super.c#L6262)`相应的 mount 操作. 这是块设备遇到的第二个文件系统，也是向这个块设备读写文件，需要基于文件系统.
@@ -2375,6 +2415,8 @@ struct hd_struct {
 ```
 
 这里 major 是主设备号，first_minor 表示第一个分区的从设备号，minors 表示分区的数目.
+
+> kernel Documents下的devices.txt描述了linux设备号的分配情况
 
 disk_name 给出了磁盘块设备的名称.
 
