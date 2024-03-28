@@ -302,7 +302,7 @@ $ sudo make install
 - block：块设备I/O层(驱动程序,I/O调度等)
 - certs : 认证相关
 - crypto：常用加密和散列算法（如AES、SHA等)，还有一些压缩和 CRC 校验算法
-- Documentation：内核各部分的通用解释和注释
+- Documentation：内核各部分的文档
 - drivers：设备驱动程序, 每个不同的驱动占用一个子目录，如 char、block、net、mtd、 i2c 等
 
     - accessibility – 可访问设备，目前里面包括盲人设备
@@ -444,13 +444,14 @@ $ sudo make install
     - watchdog
     - xen
     - zorro
+- firmware: 包含运行在芯片内的固件
 - fs：vfs和所支持的各种文件系统，如EXT、FAT、NTFS、JFFS2等
 - include：内核 API 级別头文件，与系统相关的头文件放置在 include/linux 子目录下
-- init：内核初始化代码著名的 stait_kemel() 就位于 init/main.c 文件中
+- init：内核初始化代码著名的 start_kernel() 就位于 init/main.c 文件中
 - ipc：linux支持的进程间通信的实现
-- kernel：内核最核心的部分，包括进程调度、定时器等，而和平台相关的一部分代码放在 arch/*/kemel 目录下
+- kernel：内核最核心的部分，包括进程调度、定时器等，而和平台相关的一部分代码放在 `arch/*/kernel` 目录下
 - lib：公用库文件代码, 比如红黑树和字符串操作. 因为glibc是封装kernel的syscall实现的, 因此kernel编程中没法使用它们
-- mm：内存管理代码，和平台相关的一部分代码放在arch/*/mm目录下
+- mm：内存管理代码，和平台相关的一部分代码放在`arch/*/mm`目录下
 - net：网络相关代码，实现各种常见的网络协议
 - samples : 示例代码
 - scripts：用于配置和编译内核的脚本文件, 比如运行`make menuconfig`配置kernel时, 由它们提供支持
