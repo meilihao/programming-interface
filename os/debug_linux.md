@@ -3,6 +3,19 @@
 - [Tracing the Linux kernel with ftrace](https://embeddedbits.org/tracing-the-linux-kernel-with-ftrace/)
 - ![Debugging Embedded Linux Systems: Dynamic Debug](/misc/pdf/os/Kernel-Debug-Series-Part4-dynamic-debug.pdf)
 
+## printk
+printk定义了8个消息级别, 数值越大, 消息越不重要.
+
+通过`/proc/sys/kernel/printk`可调节printk的输出级别, 它支持4项调整:
+- 控制台(一般是串口)
+- 默认dd消息日志级别
+- 最低的控制台日志级别: 允许设置的最小值
+- 默认的控制台日志级别: 默认值
+
+## DEBUG_LL和EARLY_PRINTK
+DEBUG_LL对于kernel low-level debugging
+EARLY_PRINTK对应内核中一个早期的控制台
+
 ## FAQ
 ### 禁用pr_debug输出
 参考:

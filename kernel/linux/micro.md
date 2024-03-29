@@ -43,3 +43,15 @@
 [`postcore_initcall(pcibus_class_init)`](https://elixir.bootlin.com/linux/v6.6.14/source/drivers/pci/probe.c#L108)是在`.initcall2.init`节定义一个函数指针, 具有唯一的名称, 指向放在`.init.text`节中的`pcibus_class_init`函数
 
 linux初始化过程中调用的所有函数都是用类似的机制实现. 构造好初始化布局后, kernel会依次调用parse_early_param解析`.init.setup`节的内核参数, 调用do_pre_smp_initcalls执行`.initearly.init`节的早期初始化代码, 然后调用`do_initcalls`顺序执行`.initcall#.init`(包括initcallrootfs.init)节的初始化代码. 参考[内核初始化过程中的调用顺序](https://e-mailky.github.io/2016-10-14-linux_kernel_init_seq)
+
+## BUG()
+类似内核运行时的断言, 意味着不该执行到BUG()这里, 一旦执行即抛出Oops.
+
+## BUG_ON()
+BUG_ON是BUG的变形, 只有括号中的条件成立时, 才抛出Oops.
+
+## WARN_ON()
+与BUG_ON类似, 在括号中的条件成立时, 抛出栈回溯, 而不会panic().
+
+## container_of
+container能实现对象的封装

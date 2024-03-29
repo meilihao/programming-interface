@@ -17,6 +17,11 @@ UNIX time(also POSIX time, UNIX Epoch time) 是从 UTC 1970 年 1 月 1 日 0 �
 
 一个符合 POSIX 标准的系统必须提供系统时钟，**以不小于秒的精度来记录到 epoch 的时间值**.
 
+## HZ
+系统定时器能以可编程的频率中断处理器. 频率对应着HZ, HZ越大, 进程调度更准确, 但开销和电源消耗更多, 因为更多的处理器周期消耗在定时器中断上下文.
+
+jiffies记录系统启动以来, 系统定时器触发的次数.
+
 ## NTP (Network Time Protocol)
 参考:
 - [chrony与其他NTP实现的比较](https://chrony.tuxfamily.org/comparison.html)

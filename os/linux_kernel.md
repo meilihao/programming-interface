@@ -1,5 +1,5 @@
 # kernel
-init/main.c是kernel启动的起点, 但不像普通c程序那样入口是`main()`, 而是`start_kernel()`. `start_kernel()`前的代码是`bios+bootloader`/`uefi`. 通常bios+bootloader是使用汇编语言来进行硬件初始化, 而uefi使用c.
+init/main.c是kernel启动的起点, 但不像普通c程序那样入口是`main()`, 而是`start_kernel()`, 此时已处于保护模式. `start_kernel()`前的代码是`bios+bootloader`/`uefi`. 通常bios+bootloader是使用汇编语言来进行硬件初始化, 而uefi使用c.
 
 > Linux下有3个特殊的进程，idle进程(PID = 0), init进程(PID = 1)和kthreadd(PID = 2), idle是唯一一个没有通过fork创建的进程. 在smp系统中，每个处理器单元有独立的一个运行队列，而每个运行队列上又有一个idle进程，即有多少处理器单元，就有多少idle进程.
 

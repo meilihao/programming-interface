@@ -45,6 +45,8 @@ bio表示上层发给通用块层的请求，称为通用块层请求，它关�
 
 块IO子系统涉及不同的请求队列，包括IO调度队列和派发队列. IO调度队列是块IO子系统用于对通用块层请求进行合并和排序的队列. 派发队列是针对块设备驱动的，即块IO子系统严格按照队列顺序提交块设备驱动层请求给块设备驱动处理. 一般来说，每个块设备都有一个派发队列，IO子系统又为它内部维护了一个IO调度队列，不同的块设备可以采用不同的IO调度算法.
 
+> sd卡驱动见MMC子系统`drivers/mmc`
+
 ## block层
 > freeBSD废弃了块设备的抽象, 理由是块设备提供的缓存机制让系统和程序的运行变得不可靠, 程序无法追踪到底是哪次I/O出现了问题. 它将磁盘等设备当作裸设备（raw device）直接暴露给应用程序, 并将裸设备和字符设备统称为字符设备.
 
@@ -282,7 +284,9 @@ block 子系统提供了`blk_alloc_disk/blk_mq_alloc_disk`([旧版是alloc_disk]
 ```c
 // https://elixir.bootlin.com/linux/v6.6.15/source/include/linux/blkdev.h#L128
 // 通用磁盘描述符: 磁盘通用的部分信息
-// 每个gendisk通常与一个特定磁盘类型设备相对应
+// 每个gendisk通常与一个特定磁盘类型设备或分区相对应
+// 同一个磁盘的哥哥分区共享一个主设备号, 而次设备号则不同
+// put_disk(): 操作gendisk的引用计数
 struct gendisk {
 	/*
 	 * major/first_minor/minors should not be set by any new driver, the
@@ -695,6 +699,7 @@ struct request {
  * main unit of I/O for the block layer and lower layers (ie drivers and
  * stacking drivers)
  */
+// I/O调度算法可将连续的bio合并成一个请求. 请求是bio经I/O调度进行调整后的结果. 一个request可以包含多个bio.
 struct bio {
 	struct bio		*bi_next;	/* request queue link */ // 块I/O操作在磁盘上的起始扇区编号
 	struct block_device	*bi_bdev; // 指向块设备
@@ -745,7 +750,7 @@ struct bio {
 
 	atomic_t		__bi_cnt;	/* pin count */
 
-	struct bio_vec		*bi_io_vec;	/* the actual vec list */
+	struct bio_vec		*bi_io_vec;	/* the actual vec list */ // 与这个bio请求对应的所有的内存
 
 	struct bio_set		*bi_pool;
 
@@ -2443,20 +2448,55 @@ get_gendisk 要处理的第二种情况是，block_device 是指向某个分区�
 1. 如果 partno 不为 0，也就是说打开的是分区，那就获取整个设备的 block_device，赋值给变量 struct block_device *whole，然后调用递归 __blkdev_get，打开 whole 代表的整个设备，将 bd_contains 设置为变量 whole. block_device_operations 就是在驱动层了. 例如在 drivers/scsi/sd.c 里面，也就是 MODULE_DESCRIPTION(“SCSI disk (sd) driver”) 中，就有这样的定义.
 
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/sd.c#L1834
+// https://elixir.bootlin.com/linux/v6.6.22/source/include/linux/blkdev.h#L1375
+struct block_device_operations {
+	void (*submit_bio)(struct bio *bio);
+	int (*poll_bio)(struct bio *bio, struct io_comp_batch *iob,
+			unsigned int flags);
+	int (*open)(struct gendisk *disk, blk_mode_t mode); // 打开
+	void (*release)(struct gendisk *disk); // 关闭
+	int (*ioctl)(struct block_device *bdev, blk_mode_t mode,
+			unsigned cmd, unsigned long arg); // ioctl()系统调用的实现
+	int (*compat_ioctl)(struct block_device *bdev, blk_mode_t mode,
+			unsigned cmd, unsigned long arg); // 一个64位系统内32位进程调用ioctl()时的实现
+	unsigned int (*check_events) (struct gendisk *disk,
+				      unsigned int clearing);
+	void (*unlock_native_capacity) (struct gendisk *);
+	int (*getgeo)(struct block_device *, struct hd_geometry *); // 获得驱动器信息. hd_geometry包含磁头, 扇区, 柱面等信息
+	int (*set_read_only)(struct block_device *bdev, bool ro);
+	void (*free_disk)(struct gendisk *disk);
+	/* this callback is with swap_lock and sometimes page table lock held */
+	void (*swap_slot_free_notify) (struct block_device *, unsigned long);
+	int (*report_zones)(struct gendisk *, sector_t sector,
+			unsigned int nr_zones, report_zones_cb cb, void *data);
+	char *(*devnode)(struct gendisk *disk, umode_t *mode);
+	/* returns the length of the identifier or a negative errno: */
+	int (*get_unique_id)(struct gendisk *disk, u8 id[16],
+			enum blk_unique_id id_type);
+	struct module *owner;
+	const struct pr_ops *pr_ops;
+
+	/*
+	 * Special callback for probing GPT entry at a given sector.
+	 * Needed by Android devices, used by GPT scanner and MMC blk
+	 * driver.
+	 */
+	int (*alternative_gpt_sector)(struct gendisk *disk, sector_t *sector);
+};
+
+//https://elixir.bootlin.com/linux/v6.6.22/source/drivers/scsi/sd.c#L1977
 static const struct block_device_operations sd_fops = {
 	.owner			= THIS_MODULE,
 	.open			= sd_open,
 	.release		= sd_release,
 	.ioctl			= sd_ioctl,
 	.getgeo			= sd_getgeo,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl		= sd_compat_ioctl,
-#endif
+	.compat_ioctl		= blkdev_compat_ptr_ioctl,
 	.check_events		= sd_check_events,
-	.revalidate_disk	= sd_revalidate_disk,
 	.unlock_native_capacity	= sd_unlock_native_capacity,
 	.report_zones		= sd_zbc_report_zones,
+	.get_unique_id		= sd_get_unique_id,
+	.free_disk		= scsi_disk_free_disk,
 	.pr_ops			= &sd_pr_ops,
 };
 ```
@@ -2711,6 +2751,14 @@ static blk_qc_t do_make_request(struct bio *bio)
 ### 块设备的初始化
 以 scsi 驱动为例, 在初始化设备驱动的时候，会调用 [scsi_alloc_sdev](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_scan.c#L215) -> [scsi_mq_alloc_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1860), 该函数中主要进行设备队列的初始化 -> [blk_mq_init_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2906), 根据set信息进行与该设备队列相关的信息参数初始化.
 
+> blk_mq_cleanup_rq: 清除请求队列, 一般在块设备驱动卸载时调用
+> blk_mq_alloc_request分配请求队列. 对于ramdisk, 不需要复杂的I/O调度, 可以直接绑定请求队列到制造请求的函数.
+> blk_mq_start_request: 启动请求
+> blk_mq_end_request: 终止请求
+> `__rq_for_each_bio`: 遍历一个请求的所有bio
+> bio_for_each_segment: 遍历一个bio的所有bio_vec
+> rq_for_each_segment: 遍历一个请求的所有bio中的segment
+
 **因为8cf7961dab42c9177a556b719c15f5b9449c24d1 scsi request_queue可不设置make_request_fn**.
 
 [blk_mq_init_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2906)->[blk_mq_init_queue_data](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L2884)->[blk_mq_init_allocated_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3057), 在 blk_mq_init_allocated_queue 中，会初始化 I/O 的电梯算法[`elevator_init_mq(q)`](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-mq.c#L3111).
@@ -2724,7 +2772,15 @@ static blk_qc_t do_make_request(struct bio *bio)
 > [blk_alloc_queue](https://elixir.bootlin.com/linux/v5.8-rc4/source/block/blk-core.c#L585) 可把 make_request_fn 设置为 make_request
 
 #### 电梯算法
-核心: 为i/o请求进行排序以及对邻近的i/o请求进行合并. 排序是为了减少寻道时间, 但ssd没有寻道问题, 因此排序没有意义. noop算法只做合并不排序, 适合ssd.
+核心: 为i/o请求进行排序以及对邻近的i/o请求进行合并. 排序是为了减少寻道时间, 但ssd没有寻道问题, 因此排序没有意义.
+
+调度器:
+- noop: 一个简单的调度程序, 实现了一个简单的FIFO队列, 只做最基本的合并且不排序, 适合ssd.
+- deadline: 试图将每次请求的延迟降至最低, 它重排了请求的顺序来提高性能. 它使用轮询的调度器, 提供了最小的读取延迟和尚佳的吞吐量, 适合读多的环境(比如数据库)
+- cfq: 为系统内的所有任务分配均匀的I/O带宽, 提供一个公平的环境, 在多媒体应用中, 能保证音视频及时从磁盘中读取数据
+
+查看使用的调度器: `cat /sys/block/<device>/queue/scheduler`
+设置使用的调度器: `echo <scheduler> > /sys/block/<device>/queue/scheduler`
 
 参考:
 - [如何选择IO调度器](https://blog.csdn.net/keocce/article/details/106016416)
