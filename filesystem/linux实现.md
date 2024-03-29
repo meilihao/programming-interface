@@ -217,7 +217,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	 * of the 'struct inode'
 	 */
 	struct inode {
-		umode_t			i_mode; //文件访问权限, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10)
+		umode_t			i_mode; //文件访问权限, 见[这里](https://elixir.bootlin.com/linux/v5.12.9/source/include/uapi/linux/stat.h#L10): file_type(4bit)+setuid(1bit)+setgid(1bit)+sticky(1bit)+file_mode(9bit)
 		unsigned short		i_opflags; // 打开file时的标志
 		kuid_t			i_uid; // 创建该文件的UID
 		kgid_t			i_gid; // 创建该文件的GID
@@ -285,19 +285,19 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct list_head	i_sb_list; // 用于链接到super_block中的s_inodes链表的连接件
 		struct list_head	i_wb_list;	/* backing dev writeback list */
 		union {
-			struct hlist_head	i_dentry; //引用这个inode的dentry链表(by dentry.d_alias)的表头. 一个文件可能对应多个dentry, 这些dentry都要链接到这里
+			struct hlist_head	i_dentry; //引用这个inode的dentry链表(by dentry.d_alias)的表头. **一个文件可能对应多个dentry**, 这些dentry都要链接到这里
 			struct rcu_head		i_rcu;
 		};
 		atomic64_t		i_version; //版本
 		atomic64_t		i_sequence; /* see futex */
-		atomic_t		i_count; //使用计数器
+		atomic_t		i_count; //引用计数器
 		atomic_t		i_dio_count; //直接io进程计数
 		atomic_t		i_writecount; //用于写进程的使用计数器
 	#if defined(CONFIG_IMA) || defined(CONFIG_FILE_LOCKING)
 		atomic_t		i_readcount; /* struct files open RO */
 	#endif
 		union {
-			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ //操作file的函数集合
+			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ //操作file的函数集合, 比如读写函数和异步io函数
 			void (*free_inode)(struct inode *);
 		};
 		struct file_lock_context	*i_flctx;
@@ -385,7 +385,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	一个文件可能不止一个dentry.
 	一个文件路径的各组成部分都是一个目录项对象. 比如`/home/test/test.c`, kernel为home, test和test.c都创建了目录项对象.
 
-	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache.
+	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache=[dentry_hashtable](https://elixir.bootlin.com/linux/v6.6.23/source/fs/dcache.c#L101)
 
 	inode反映fs对象的元数据, dentry反映fs对象在fs树中的位置, dentry和inode是多对一的关系.
 
@@ -394,7 +394,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	// v6.5.2->v6.6.18无变化
 	struct dentry {
 		/* RCU lookup touched fields */
-		unsigned int d_flags;		/* protected by d_lock */ //dentry cache标志
+		unsigned int d_flags;		/* protected by d_lock */ //dentry cache标志. 可判断是否mounte: [d_mountpoint](https://elixir.bootlin.com/linux/v6.6.23/source/include/linux/dcache.h#L375). __lookup_mnt用于查找挂载点, 参考[__follow_mount_rcu](https://elixir.bootlin.com/linux/v6.6.23/source/fs/namei.c#L1508)
 		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
 		struct hlist_bl_node d_hash;	/* lookup hash list */ //目录的hash链表, 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
 		struct dentry *d_parent;	/* parent directory */ //指向父dentry
@@ -1043,6 +1043,11 @@ struct minix3_dir_entry {
 };
 ```
 
+## ramfs
+ramfs是基于内存的文件系统，它与 tmpfs 类似，但它更简单、更轻量级.
+
+shmfs 是一个共享内存文件系统，它允许多个进程共享同一块内存. shmfs 通常用于 IPC（进程间通信）.
+
 ## ext4
 参考:
 - [*Ext4文件系统架构分析(一)*](https://www.cnblogs.com/alantu2018/p/8461272.html)
@@ -1256,7 +1261,7 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct file *filp;
 
 	set_nameidata(&nd, dfd, pathname); // 沿着要打开文件名的整个路径, 一层层解析路径, 最后得到文件的dentry和vfsmount, 再保存到nd中.
-	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
+	filp = path_openat(&nd, op, flags | LOOKUP_RCU); // 根据nameidata, 获得一个file
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
 	if (unlikely(filp == ERR_PTR(-ESTALE)))

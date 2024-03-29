@@ -97,6 +97,8 @@ list_head有一个类似的hlist_head/hlist_node. hlist_head比list_head少一�
 
 > 红黑树见btree.h; 基数树见radix-tree.h
 
+> radix适合稀疏的数据, 文件的页缓存就使用了radix
+
 ## [bitmap](https://elixir.bootlin.com/linux/v6.6.16/source/include/asm-generic/bitops/instrumented-atomic.h#L16)
 ref:
 - [Bit Operations](https://www.kernel.org/doc/html/latest/core-api/kernel-api.html?highlight=set_bit#bit-operations)
