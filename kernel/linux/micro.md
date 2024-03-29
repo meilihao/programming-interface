@@ -55,3 +55,50 @@ BUG_ON是BUG的变形, 只有括号中的条件成立时, 才抛出Oops.
 
 ## container_of
 container能实现对象的封装
+
+## [list_head](https://elixir.bootlin.com/linux/v6.6.16/source/include/linux/list.h)
+```c
+struct list_head {
+	struct list_head *next, *prev;
+};
+
+#define LIST_HEAD_INIT(name) { &(name), &(name) } // 初始化list
+
+#define LIST_HEAD(name) \
+	struct list_head name = LIST_HEAD_INIT(name) // 定义并初始化一个名为name的链表
+
+
+static inline void list_add(struct list_head *new, struct list_head *head) //在head后插入new
+static inline void list_add_tail(struct list_head *new, struct list_head *head)//head前插入new, 由于是循环链表，就是说添加到链表尾部
+static inline void list_del(struct list_head *entry) // 删除entry
+static inline void list_del_init(struct list_head *entry)//删除节点，并初始化被删除的结点（也就是使被删除的结点的prev和next都指向自己）
+static inline int list_empty(const struct list_head *head)//判断链表是否为空
+static inline int list_is_last(const struct list_head *list, const struct list_head *head) // list是否为最后一个元素
+static inline void list_splice(struct list_head *list, struct list_head *head)//通过两个链表的head，进行连接  
+#define list_entry(ptr, type, member) \
+	container_of(ptr, type, member)    //通过偏移值取type类型结构体的首地址. ptr是list_head的地址, type是目标结构体名, member是目标结构体中list_head对应的字段名
+#define list_first_entry(ptr, type, member) \
+	list_entry((ptr)->next, type, member) // 获得包含下一个list_head节点的type对象
+#define list_for_each(pos, head)                   //遍历链表，循环内不可调用list_del()删除节点
+#define list_for_each_entry(pos, head, member)				\
+	for (pos = list_first_entry(head, typeof(*pos), member);	\
+	     !list_entry_is_head(pos, head, member);			\
+	     pos = list_next_entry(pos, member)) // 遍历每个type对象. pos是输出, 表示当前循环中对象的地址, type实际由typeof(*pos)实现
+#define list_for_each_entry_safe(pos, n, head, member)			\
+	for (pos = list_first_entry(head, typeof(*pos), member),	\
+		n = list_next_entry(pos, member);			\
+	     !list_entry_is_head(pos, head, member); 			\
+	     pos = n, n = list_next_entry(n, member)) // n起到临时存储的作用, 其他同上, 区别在于, 如果循环中删除了当前元素, xxx_safe是安全的
+```
+
+list_del删除元素后会重置它的prev和next, 因此不带`_safe`后缀的操作在获得元素后不能删除该元素. 有`_safe`的操作是使用n临时复制当前元素的链表关系, 使用n继续遍历, 所以不存在问题.
+
+list_head有一个类似的hlist_head/hlist_node. hlist_head比list_head少一半空间即表头空间省一半.
+
+> 红黑树见btree.h; 基数树见radix-tree.h
+
+## [bitmap](https://elixir.bootlin.com/linux/v6.6.16/source/include/asm-generic/bitops/instrumented-atomic.h#L16)
+ref:
+- [Bit Operations](https://www.kernel.org/doc/html/latest/core-api/kernel-api.html?highlight=set_bit#bit-operations)
+
+每个arch定义了自己的[bitops.h](https://elixir.bootlin.com/linux/v6.6.16/A/ident/set_bit), 在`arch/<arch>/include/asm/bitops.h`, 没直接在源码里看到x86的, 应该是构建时生成的.
