@@ -118,9 +118,7 @@ TASK_TRACED表示进程被debugger(比如ptrace)等进程监视,进程执行被�
 
 **一旦一个进程要结束,先进入的是EXIT_ZOMBIE状态**,但是这个时候它的父进程还没有使用wait()等系统调用来获知它的终止信息及释放它的所有数据结构,此时进程就成了僵尸进程.
 
-EXIT_DEAD是进程的最终状态.
-
-EXIT_ZOMBIE和EXIT_DEAD也可以用于exit_state.
+退出的进程要么是EXIT_ZOMBIE, 要么是EXIT_DEAD, 因此它们也可以用于exit_state. EXIT_DEAD是进程的最终状态.
 
 state是和进程的运行、调度有关系, 还有其他的一些状态称为标志, 放在flags字段中,这些字段都被定义称为宏 ,以PF开头:
 ```c

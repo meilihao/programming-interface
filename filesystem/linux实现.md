@@ -1050,8 +1050,9 @@ shmfs 是一个共享内存文件系统，它允许多个进程共享同一块�
 
 ## ext4
 参考:
-- [*Ext4文件系统架构分析(一)*](https://www.cnblogs.com/alantu2018/p/8461272.html)
-- [*linux io过程自顶向下分析*](https://my.oschina.net/fileoptions/blog/3058792/print)
+- [**Ext4文件系统架构分析(一)**](https://www.cnblogs.com/alantu2018/p/8461272.html)
+- [**linux io过程自顶向下分析**](https://my.oschina.net/fileoptions/blog/3058792/print)
+- [ext2 - <<Linux内核探秘 深入解析文件系统和设备驱动的架构与设计>> 第13章]()
 
 > ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
 
@@ -1287,7 +1288,7 @@ static struct file *path_openat(struct nameidata *nd,
 		error = do_o_path(nd, flags, file);
 	} else {
 		const char *s = path_init(nd, flags);
-		while (!(error = link_path_walk(s, nd)) &&
+		while (!(error = link_path_walk(s, nd)) && // link_path_walk
 		       (s = open_last_lookups(nd, file, op)) != NULL)
 			;
 		if (!error)

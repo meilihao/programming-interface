@@ -7,6 +7,16 @@
 
 udev当前已与systemd合并. 嵌入式系统中, 由udev的轻量级版本mdev, 它集成在busybox中. Android使用vold, 机制与udev相同.
 
+
+> 冷插拔: 在系统启动前就已连接好设备; 热插拔: 在运行过程中往系统插入设备.
+
+> /proc/sys/kernel/hotplug已废弃, 由udevd管理热插拔的全部工作.
+
+热插拔过程:
+1. 插入设备后, 内核产生一个uevent, 可用`udevmonitor --env`查看
+1. udevd通过netlink接收uevent, 并根据内核给的alias调用modprobe
+1. modprobe在`/lib/modules/<version>/modules.alias`寻找匹配的模块, 然后inmod
+
 ## cmd
 - `udevadm test /dev`
 

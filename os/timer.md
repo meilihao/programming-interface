@@ -46,7 +46,7 @@ delayed_work基于工作队列和定时器实现.
 
 本质是忙等待, 它根据cpu频率进行一定次数的循环.
 
-内核启动时, 会运行一个延迟循环校准(Delay Loop Calibration), 计算出lpj(Loops Per Jiffy).
+内核启动时, 会运行一个延迟循环校准(Delay Loop Calibration), 计算出loops_per_jiffy. 短延时会用loops_per_jiffy来决定需要循环的次数.
 
 ### 长延时
 time_before()/time_after(), 本质是比较两次jiffies的差值
@@ -55,3 +55,34 @@ time_before()/time_after(), 本质是比较两次jiffies的差值
 睡眠延时明显比忙等待好, cpu资源可被其他资源使用. schedule_timeout()可使当前任务休眠至指定的jiffies之后被重新调度, 它的实现原理是向系统添加一个定时器, 在定时器处理函数中唤醒与参数对应的进程.
 
 msleep()/msleep_interruptible()本质是依靠包含了schedule_timeout()的schedule_timeout_uninterruptible()和schedule_timeout_interruptible()实现的. schedule_timeout_[un]interruptible()的区别是调用schedule_timeout()前设置进程状态为TASK_INTERRUPTIBLE/TASK_UNINTERRUPTIBLE.
+
+中断上下文不允许执行schedule()和睡眠. 在中断中进行短时间的忙等待是可以的, 长时间的忙等待是禁止的.
+
+## tsc
+时间戳计数器(tsc)是pentium兼容处理器中的一个计数器, 记录自启动以来处理器消耗的时钟周期. 由于TSC随处理器周期速率的比例变化而变化, 因为提供了非常高的精度.
+
+它常用于剖析和监测代码. rdtsc指令可测量某段代码的执行时间, 其精度达到微妙级.
+
+CONFIG_HIGH_RES_TIMERS是高精度定时器的选项, 开启后允许使用nanosleep()等高精度api. 在基于pentium的cpu上, 内核借助TSC实现该功能.
+
+## RTC
+api见Documentationrtc.txt,  驱动在drivers/rtc
+
+rtc用于在非易失性存储器上记录绝对时间. 在嵌入式系统中, RTC可能被集成到处理中, 或者通过I2C或SPI总线在外部连接.
+
+RTC作用:
+1. 读取, 设置绝对时间, 在时钟更新时产生中断
+1. 产生周期性中断
+1. 设置报警信号
+
+jiffies是相对于系统启动后的时间, 它不包括墙上时间. 内核会从RTC读取墙上时间到相应的变量里.
+
+do_gettimeofday用于读取墙上时间.
+
+用户空间可访问墙上时间的函数:
+1. time()
+1. localtime()
+1. mktime
+1. gettimeofday
+
+或直接通过/dev/rtc, 同一时刻只允许一个进程访问该设备.

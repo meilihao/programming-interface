@@ -39,6 +39,10 @@ os已注册的中断: `cat /proc/interrupts`, 从左到右各列的含义依次�
 
 	linux实现下半部的机制主要有tasklet, 工作队列, 软中断和线程化irq(threaded_irq).
 
+> in_interrupt()可用于判断是否处于中断上下文.
+
+> 代码在`kernel/irq`, 与arch相关的在`arch/<arch>/kernel/irq.c`. 软中断和tasklet的实现在kernel/softirq.c
+
 ## cpu识别中断
 x86处理器通过INTR和NMI 两个引脚分别接收外部中断请求信号: INTR接收可屏蔽中断, NMI接收不可屏蔽中断请求. 标志寄存器EFLAGS中的IF标志决定是否屏蔽可屏蔽中断请求.
 

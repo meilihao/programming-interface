@@ -721,7 +721,7 @@ driver_register()函数用来注册驱动. driver_register(&(globalfifo_driver.d
 1. bus_add_driver(&(globalfifo_driver.driver))，将驱动注册到总线上
 1. 发起KOBJ_ADD类型uevent，指示驱动已经添加完成
 
-> driver_register->bus_add_driver->driver_attach(尝试让驱动去绑定所有可能的设备)-> `__driver_attach`
+> driver_register->bus_add_driver->driver_attach(真正执行驱动加载, 尝试让驱动去绑定所有可能的设备)-> `__driver_attach`
 
 class_register: 类注册
 
@@ -1103,6 +1103,9 @@ linux不同中断处理方式的特点比较
 |是否能在多个处理器核心上同时运行相同实例| 是 是 否 是 是|
 |分配后是否能在不同处理器核心上迁移|否 否 否 否 是|
 
+softirq、tasklet和工作队列的对比:
+<table border="1" cellpadding="1" cellspacing="1" style="width:650px;"><thead><tr><th>&nbsp;</th><th>softirq</th><th>tasklet</th><th>工作队列</th></tr></thead><tbody><tr><td>执行上下文</td><td>延后的工作运行于中断上下文</td><td>延后的工作运行于中断上下文</td><td>延后的工作运行于进程上下文</td></tr><tr><td>可重用</td><td>可以在不同的CPU上同时运行</td><td>不能在不同的CPU上同时运行，但是不同的CPU可以在运行不同的tasklet</td><td>可以在不同的CPU上同时运行</td></tr><tr><td>睡眠</td><td>不能睡眠</td><td>不能睡眠</td><td>可以睡眠</td></tr><tr><td>抢占</td><td>不能抢占/调度</td><td>不能抢占/调度</td><td>可以抢占/调度</td></tr><tr><td>易用性</td><td>不容易使用</td><td>容易使用</td><td>容易使用</td></tr><tr><td>何时使用</td><td>如果延后的工作不会睡眠，而且有严格的可扩展性或速度要求</td><td>如果延后的工作不会睡眠</td><td>如果延后的工作会睡眠</td></tr></tbody></table>
+
 ## 设备驱动与设备驱动模型
 设备驱动（device driver）是操作系统中负责控制设备的定制化(根据设备的具体型号和相应参数进行特定配置)程序.
 
@@ -1256,7 +1259,7 @@ struct platform_driver {
 struct bus_type platform_bus_type = {
 	.name		= "platform",
 	.dev_groups	= platform_dev_groups,
-	.match		= platform_match,
+	.match		= platform_match, // 比较驱动的名称和设备名称是否相同
 	.uevent		= platform_uevent,
 	.probe		= platform_probe,
 	.remove		= platform_remove,
@@ -1282,6 +1285,8 @@ EXPORT_SYMBOL_GPL(platform_bus_type);
 对于ARM, 内核2.6时, platform_device的定义通常在BSP的板文件中定义, 将platform_device归纳为一个数组, 最终通过platform_add_devices()注册到系统中; 3.x开始倾向于根据设备树中的内容自动展开platform_device.
 
 ## 输入设备驱动
+input是一个虚拟设备, 在linux中, 键盘, 鼠标, 触摸屏和游戏杆都是由input设备统一管理, 其初始化是[input_init](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/input/input.c#L2659), 注册input设备驱动是input_register_handler, input管理的设备和驱动匹配是input_match_device.
+
 input_allocate_device/input_free_device: 分配/释放一个输入设备. 分配返回一个input_dev
 
 input_register_device/input_unregister_device: 注册/销毁输入设备
@@ -1297,6 +1302,10 @@ input_event: 对于所有的输入事件, 内核统一用它描述.
 [drivers/input/keyboard/gpio_keys.c](https://elixir.bootlin.com/linux/v6.6.22/source/drivers/input/keyboard/gpio_keys.c)基于input架构实现了一个通用的GPIO按键驱动, 它基于platform_driver架构.
 
 GPIO按键驱动通过input_event()和input_sync()来汇报按键事件和同步事件. 该驱动没有file_operations的动作, 也没有各种I/O模型, 这是由于与VFS相关的全部在drivers/input/evdev.c中实现了.
+
+[q40kbd.c](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/input/serio/q40kbd.c)是使用platform总线的键盘控制器驱动. platform总线是虚拟总线, 没要扫描设备的功能, 因此需要直接注册设备. 它没有注册自己的I/O端口和内存, 而是直接使用了默认值, 因为它是一种很古老的设备了.
+
+input作为一个设备框架, 它提供的键盘驱动在drivers/char/keyboard.c, 入口是kbd_init. 驱动的start()是kbd_start, 用于点亮键盘的LED灯, 启动键盘设备.
 
 ## RTC(实时钟)设备驱动
 RTC借助电池供电, 在系统下电的情况下依旧能正常计时. 它通常还具有产生周期性中断以及闹钟(alarm)中断的能力, 是一种字符设备.
@@ -1367,3 +1376,24 @@ arm 3.x启用设备树后, 倾向于在SPI控制器节点下填写子节点, 比
 	所以，“中断上下文”就可以理解为硬件传递过来的这些参数和内核需要保存的一些环境，主要是被中断的进程的环境
 
 进程上下文和中断上下文不可能同时发生.
+
+## 其他
+- init_special_inode: 使文件变成设备
+
+	mknod为特殊文件创建一个inode和dentry, inode的成员包含主从设备号和设备类型, 然后调用init_special_inode为设备文件的inode设置不同的函数指针.
+- def_chr_fops: 字符设备默认的fops
+- def_blk_fops: 块设备默认的fops
+- chrdev_open: 每次打开一个字符设备, 都会调用它
+
+	先根据设备号调用kobj_lookup搜索注册的字符设备对象, 如果找到就执行open(), 否则报错
+- driver_probe_device:
+
+	1. 调用总线提供的match函数. 如果检查通过, 说明该设备和驱动是匹配的, 设备所指向的驱动就要赋值为当前驱动
+	1. 探测(probe). 调用总线的probe(), 如果驱动有自己的probe, 则调用驱动的probe().
+
+		probe的目的是总线或设备进一步的探测. 比如硬盘控制器的probe()就是扫描scsi总线, 把所有加入的硬盘都扫描出来.
+- platform_device_add: 注册设备
+- device_add: 添加一个设备对象
+
+## 主从设备号
+linux通过设备号来区分不同的设备. 设备号由[主设备号](https://elixir.bootlin.com/linux/v6.6.23/source/include/uapi/linux/major.h#L10)和从设备号构成.

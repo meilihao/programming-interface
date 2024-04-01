@@ -86,6 +86,17 @@ scsi子系统代码在`drivers/scsi`下, 其主要作用:
 
 scsi_host，scsi_target和scsi_device均使用hostdata指向供低层驱动使用的资源.
 
+scsi_host_template的调用函数中, 异常处理占了很大部分. 对于一个I/O, 执行结果分为:
+1. I/O命令执行完成, 且I/O执行成功
+1. I/O命令执行完成, 但I/O未成功, 返回有错误
+
+    再次执行I/O命令或交给scsi错误处理任务处理
+1. I/O超时未返回
+
+    必须给scsi错误处理任务处理.
+
+    scsi错误处理任务通常首先abort出错的命令, 如果不行, reset硬盘设备; 还是不行, reset总线; 还是不行, reset整个芯片.   
+
 ```c
 // https://elixir.bootlin.com/linux/v6.6.14/source/include/scsi/scsi_host.h#L42 
 struct scsi_host_template {
@@ -1166,6 +1177,8 @@ linux驱动子系统, 一般包含下面几个内容:
     通过上述操作后，所有发送到request_queue中的request都会汇集到tag_set中做处理.
 
     通过ioctl对sda或者sg设备的命令request都会进入到其对应lun的request_queue, 最终都会走到tag_set的queue_rq钩子函数, 也就是走到了scsi_queue_rq->scsi_dispatch_cmd->host->hostt->queuecommand函数，其中queuecommand是底层驱动注册上来的钩子函数，scsi子系统把request请求发送到这一步之后，剩下的工作就交给底层, 比如sata驱动去处理了.
+
+    > scsi_dispatch_cmd提交scsi命令时, 提供一个scsi_done回调, 该回调由硬盘驱动的中断所调用, 同时也是I/O返回路径上的第一个函数.
 1. 休眠唤醒：对于scsi而言，休眠过程是lun->target->host，唤醒过程是反过来。这个决定了host是爷爷辈设备，targe是父设备，lun是子设备，所有的公版驱动都是子设备驱动
 
     休眠唤醒是驱动的一部分，包括PM(suspendresume)，runtime PM，也有shutdown，remove等。以休眠为例：在”scsi” bus上那些公版driver实现了子设备的休眠唤醒操作. 这个级别的驱动操作的都是lun设备，因此这个级别的驱动是基于scsi命令对设备进行操作。那些更底层的操作例如断开link，给外设断电等是更底层的父设备们去完成的

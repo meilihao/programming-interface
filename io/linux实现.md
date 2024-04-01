@@ -2510,6 +2510,8 @@ static const struct block_device_operations sd_fops = {
 ![](/msic/img/io/6290b73283063f99d6eb728c26339620.png)
 
 ### 直接 I/O 如何访问块设备
+submit_io是VFS和通用块层的衔接点.
+
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/iomap/direct-io.c#L61
 static void iomap_dio_submit_bio(struct iomap_dio *dio, struct iomap *iomap,
@@ -2912,3 +2914,32 @@ make_request_fn 执行完毕后，可以想象 bio_list_on_stack[0]可能又多�
 [scsi_add_host](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/scsi/scsi_host.h#L746)->[scsi_add_host_with_dma](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/hosts.c#L208)->[scsi_mq_setup_tags](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1872)设置了`tag_set->ops = &scsi_mq_ops/&scsi_mq_ops_no_commit`.
 
 因此`q->mq_ops->queue_rq`<=>[struct blk_mq_ops scsi_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1842).queue_rq即[scsi_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1622)封装更加底层的指令，给设备控制器下指令，实施真正的 I/O 操作.
+
+## nbd
+nbd驱动的初始化在[nbd_init](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/block/nbd.c#L2527), 添加设备在[nbd_dev_add](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/block/nbd.c#L1787).
+
+nbd_dev_add使用了add_disk()将nbd设备加入系统.
+
+linux通过块设备文件系统来管理块设备. 块设备文件系统的入口是bdev_cache_init, 它把块设备文件系统注册到内核.
+
+bdev_sops是块设备文件系统超级块的操作函数.
+
+打开块设备时实际使用的是块设备文件系统提供的blkdev_open by def_blk_fops.
+
+## 回写
+linux写操作只是写数据到page cache, 真正的写磁盘由回写控制.
+
+回写时机:
+1. FS控制
+1. 内核定时器控制
+1. 当系统申请内存失败时, 或文件系统执行sync, 内存管理模块试图释放更多内存
+
+回写参数:
+1. /proc/sys/vm/dirty_ratio : 脏页比例
+1. /proc/sys/vm/dirty_bytes : 脏页bytes
+1. /proc/sys/vm/dirty_background_ratio: 背景脏页比例
+1. /proc/sys/vm/dirty_writeback_centisecs: 写延时
+1. /proc/sys/vm/dirty_expire_centisecs: 最大I/O延迟
+1. /proc/sys/vm/dirty_expire_seconds
+
+回写入口是page_writeback_init.

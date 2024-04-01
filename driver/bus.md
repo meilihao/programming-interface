@@ -975,3 +975,10 @@ error:
 ```
 
 misc_register 函数只是负责分配设备号，以及把 miscdev 加入链表，真正的核心工作由 device_create_with_groups 函数来完成.
+
+## serio总线
+一种总线可以架构在另一种类型的总线之上, 比如serio总线就构建在platform总线之上.
+
+serio_register_port用于注册serio总线.
+
+serio总线的match是serio_bus_match, probe是serio_driver_probe, 中断是serio_interrupt.

@@ -140,7 +140,7 @@ struct pci_bus {
 	struct pci_dev	*self;		/* Bridge device as seen by parent */ // 对于根pci总线是NULL; 对于非根pci总线是指向引出这条pci总线的桥设备; 
 	struct list_head slots;		/* List of slots on this bus;
 					   protected by pci_slot_mutex */ // 这条pci总线的插槽链表的表头
-	struct resource *resource[PCI_BRIDGE_RESOURCE_NUM]; // 对于根pci总线, 指向ioport_resource或iomem_resource; 对于非根pci总线, 指向引出这条总线的桥设备的代表资源窗口的resource数组
+	struct resource *resource[PCI_BRIDGE_RESOURCE_NUM]; // 对于根pci总线, 指向ioport_resource(代表I/O端口)或iomem_resource(I/O内存); 对于非根pci总线, 指向引出这条总线的桥设备的代表资源窗口的resource数组
 	struct list_head resources;	/* Address space routed to this bus */ // 如果pci总线指向更多的资源, 则需链入以此字段为表头的链表
 	struct resource busn_res;	/* Bus numbers routed to this bus */
 
@@ -522,7 +522,9 @@ pci工作模式: pci核心注册pci总线类型, 扫描pci总线得到所有的p
 	x86_init是一个全局变量, 是基于x86 kernel初始化过程中使用的操作表的一个实例, 它的大多数回调函数取决于编译kernel的选项.
 	x86_init.pci.init指向x86_default_pci_init, x86_default_pci_init由编译选项决定.
 
-	pci_legacy_init->pcibios_scan_root
+	pci_legacy_init->pcibios_scan_root(扫描0号总线)
+
+	> pci_legacy_init是多种pci扫描方式中的传统扫描模式
 1. PCI中断路由: 建立pci硬件中断引脚和kernel中断号的关联
 
 	对x86, pci中断路由的入口是x86_init.pci.init_irq指向x86_default_pci_init_irq(比如 pcibios_irq_init)
@@ -570,9 +572,15 @@ pci设备枚举:
 
 		1. pci_scan_child_bus_extend: 扫描总线上的各类设备(PCI设备与桥设备)
 
-			1. pci_scan_slot: 扫描pci设备, 从循环也能看出来，每条总线支持32个设备，每个设备支持8个功能，扫描完设备后将设备注册进系统，pci_scan_device的过程中会去读取PCI设备的配置空间，获取到BAR的相关信息等
+			1. pci_scan_slot: 扫描pci设备, 从循环也能看出来，每条总线支持32个设备，每个设备支持8个功能，扫描完设备后将设备注册进系统，pci_scan_device(扫描设备)的过程中会去读取PCI设备的配置空间，获取到BAR的相关信息等
+
+				扫描单个设备用pci_scan_single_device
+
+				pci_scan_device只读取了制造商ID和HEADER_TYPE, pci_setup_device用于进一步读取并设置pci设备
 			1. pci_scan_bridge_extend: PCI桥设备扫描，PCI桥是用于连接上一级PCI总线和下一级PCI总线的，当发现有下一级总线时，创建子结构，并再次调用pci_scan_child_bus_extend的函数来扫描下一级的总线，从这个过程看，就是一个递归过程
 ### 配置空间
+pci_raw_ops控制配置空间的读写, 通常读函数是pci_conf1_read, 写函数是pci_conf1_write.
+
 pci_read->raw_pci_read->`raw_pci_ops->read`(访问原生pci配置空间)或`raw_pci_ext_ops->read`(访问扩展pci配置)
 
 ### platform_device
