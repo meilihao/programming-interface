@@ -19,6 +19,11 @@
 #define __init		__section(".init.text") __cold  __latent_entropy __noinitretpoline
 ```
 
+该函数仅在初始化期间使用
+
+## `__exit`
+仅用于模块卸载. 如果模块被直接编译入内核, 或内核的配置不允许卸载模块, `__exit`被简单丢弃. 因此`__exit`标记的函数只在模块卸载或系统关闭时被调用.
+
 ## `__section`
 要求编译器将这段代码放在一个独立的section中, 其名称为`section`, 目的是在一个ELF节中集中存放所有的初始化代码, 以便在初始化结束后, 释放整个节
 

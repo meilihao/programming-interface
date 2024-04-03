@@ -517,19 +517,19 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		int (*iopoll)(struct kiocb *kiocb, struct io_comp_batch *,
 				unsigned int flags);
 		int (*iterate_shared) (struct file *, struct dir_context *);
-		__poll_t (*poll) (struct file *, struct poll_table_struct *);
+		__poll_t (*poll) (struct file *, struct poll_table_struct *); // poll, epoll, select这3个系统调用的后端实现
 		long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long); // 设备控制相关命令的实现. 成功: 返回非负数. 与用户空间的fcntl, ioctl对应
 		long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
 		int (*mmap) (struct file *, struct vm_area_struct *); // 将设备内存映射到进程的虚拟地址空间. 未实现返回-ENODEV. 对帧缓冲等设备特别有意义, 应用程序直接访问而无需在kernel和用户空间复制数据. 与用户空间的mmap对应
 		unsigned long mmap_supported_flags;
 		int (*open) (struct inode *, struct file *); // 驱动程序可以不实现这个函数, 此时设备的打开操作永远成功. 与release对应
-		int (*flush) (struct file *, fl_owner_t id);
-		int (*release) (struct inode *, struct file *);
-		int (*fsync) (struct file *, loff_t, loff_t, int datasync);
-		int (*fasync) (int, struct file *, int);
-		int (*lock) (struct file *, int, struct file_lock *);
+		int (*flush) (struct file *, fl_owner_t id); // 执行并等待设备上尚未完结的操作. 不要用用户空间的fsync操作混淆. 它指用于少数几个驱动, 比如scsi 磁带驱动
+		int (*release) (struct inode *, struct file *); // file被释放时调用
+		int (*fsync) (struct file *, loff_t, loff_t, int datasync); // fsync的后端实现. 驱动未实现时返回-EINVAL.
+		int (*fasync) (int, struct file *, int); // 通知设备其FASYNC标志发生了编号. 设备不支持异步通知, 则为NULL
+		int (*lock) (struct file *, int, struct file_lock *); // 实现文件锁定. 设备驱动几乎不实现它
 		unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
-		int (*check_flags)(int);
+		int (*check_flags)(int); // 允许模块检查传递给fcntl()调用的标志
 		int (*flock) (struct file *, int, struct file_lock *);
 		ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
 		ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);

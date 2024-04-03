@@ -20,6 +20,9 @@
 - [Linux-0.12内核学习资料汇总+Linux 内核 0.12 完全注释](https://zhuanlan.zhihu.com/p/630740573)
 
 	- [code](http://www.oldlinux.org/Book-Lite/)
+	- [oldlinux-files](https://github.com/oldlinux-web/oldlinux-files/blob/master/kernel/0.1x/linux-0.12.tar.gz)
+
+		oldlinux源码
 	- [ultraji/linux-0.12 实验环境](https://github.com/ultraji/linux-0.12)
 	- [Linux-0.12](https://github.com/sky-big/Linux-0.12)
 - [linux 那些事儿系列](http://blog.csdn.net/fudan_abc/article/category/335670)

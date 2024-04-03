@@ -25,6 +25,8 @@ linux驱动模型: kernel基于kobject将系统中的总线, 设备和驱动用`
 
 > 每个设备至多绑定一个驱动: 这个限制在某些情况下, 过于严苛. linux引入类和接口, 每个设备还可以唯一属于某个类, 设备被链入到类的设备链表中. 在设备被发现, 或接口被添加时, 无论何种顺序, 只要它们属于同一个类, 那么接口注册的回调函数都会被作用在设备之上.
 
+> 驱动程序看到的是scsi磁盘和ATA磁盘, 在class层次上, 它们都是磁盘.
+
 > kset是具有相同类型的kobject构成的对象集.
 
 > buses_init()函数在sysfs文件系统的根目录下建立一个bus目录，即/sys/bus，是系统中后续注册总线的连接点. Linux系统在启动时的初始化阶段，通过在driver_init()中调用[buses_init()](https://elixir.bootlin.com/linux/v6.6.13/source/drivers/base/bus.c#L1374)函数，完成所有总线的最初操作，创建出bus的祖先.
@@ -1397,3 +1399,18 @@ arm 3.x启用设备树后, 倾向于在SPI控制器节点下填写子节点, 比
 
 ## 主从设备号
 linux通过设备号来区分不同的设备. 设备号由[主设备号](https://elixir.bootlin.com/linux/v6.6.23/source/include/uapi/linux/major.h#L10)和从设备号构成.
+
+主设备号标识设备驱动. 现代linux支持多个驱动共享主设备号, 但通常还是1:1.
+
+次设备号由内核使用, 用于正确标识设备文件所指的设备.
+
+可用宏:
+```c
+MAJOR(dev_t dev); // 提前主设备号
+MINOR(dev_t dev);
+
+MKDEV(int major, int minor); // 将主次设备号转为dev_t
+
+iminor(struct inode *inode); // 从inode中获取
+imajor(struct inode *inode);
+```
