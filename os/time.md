@@ -17,10 +17,6 @@ UNIX time(also POSIX time, UNIX Epoch time) 是从 UTC 1970 年 1 月 1 日 0 �
 
 一个符合 POSIX 标准的系统必须提供系统时钟，**以不小于秒的精度来记录到 epoch 的时间值**.
 
-## HZ
-系统定时器能以可编程的频率中断处理器. 频率对应着HZ, HZ越大, 进程调度更准确, 但开销和电源消耗更多, 因为更多的处理器周期消耗在定时器中断上下文.
-
-jiffies记录系统启动以来, 系统定时器触发的次数.
 
 ## NTP (Network Time Protocol)
 参考:
@@ -40,18 +36,20 @@ jiffies记录系统启动以来, 系统定时器触发的次数.
 - [Linux 下的时钟](https://vvl.me/2019/04/linux-clock/)
 
 pc时钟源:
-- 实时时钟RTC, Real Time Clock()也叫CMOS时钟, 它靠电池供电，即使系统断电，也可以维持日期和时间. 兼具时钟源和时钟中断两种功能, 但一般用作时钟源. 它只能产生周期性信号, 频率是2~8192Hz且必须是2的倍数(频率太低, 精度不够). 目前绝大多数计算机上都有它.
+- 实时时钟RTC, Real Time Clock()也叫CMOS时钟, 它靠电池供电，即使系统断电，也可以维持日期和时间. 兼具时钟源和时钟中断两种功能, 但一般用作时钟源. 目前绝大多数计算机上都有它. 就提供实时时间而言, 它的精度一般比其他几种设备高. 就时钟中断而言, 它只能产生周期性信号, 频率是2~8192Hz且必须是2的倍数(频率太低, 精度不够), 该功能基本被其他设备取代
 
 	更新RTC时间的hwclock是通过读写`/dev/rtc*`文件来实现的.
 - PIT(programmable interval timer) : 可编程间隔计时器, 时钟中断设备, 频率固定为1.193182MHz. 老式系统中它也作为时钟源. pit可满足周期性和单触发两种时钟中断.
-- TSC(Time Stamp Counter) : 时间戳计数器 是一个64位的寄存器, 从奔腾开始就在x86中. tsc记录处理器的时钟周期数, 程序可通过RDTSC指令读取它. tsc以其高精度, 低开销的优势成为x86_64机器的首选.
+- TSC(Time Stamp Counter) : 时间戳计数器 是一个64位的寄存器, 从奔腾开始就在x86 cpu中. tsc记录处理器的时钟周期数, 程序可通过RDTSC指令读取它. tsc以其高精度, 低开销的优势成为x86_64机器的首选.
+
+	TSC不能作为系统的watchdog, 而是被watchdog监控的时钟源
 - HPET(high precision event timer) : 高精度定时器, 兼具时钟源和时钟中断两种功能, 它有一组(3~256个不等)定时器可以同时工作. 每个定时器都可以满足周期性和单触发两种时钟中断要求, 用于替代PIT和RTC.
 - APIC(advanced programmable interrupt controller) : 高级可编程中断控制器, 作为时钟中断设备. 每个cpu都有一个local APIC. 它的精度较高, 可以满足周期性和单触发两种时钟中断要求.
 
 RTC和OS时钟之间的关系通常也被称作操作系统的时钟运作机制.
 
-> 就cs而言, PIT, TSC, HPET的clocksource->rating默认值分别是110, 300, 250.
-> 就evt而言, PIT, APIC, HPET的clock_event_device->rating默认值分别是0, 100, 50.
+就cs而言, PIT, TSC, HPET的clocksource->rating默认值分别是110, 300, 250, RTC并不在cs和evt的选项中. 因此大多数计算机会采用TSC作为时钟源.
+就evt而言, PIT, APIC, HPET的clock_event_device->rating默认值分别是0, 100, 50.
 
 OS时钟产生于PC主板上的定时/计数芯片，由操作系统控制这个芯片的工作，OS时钟的基本单位就是该芯片的计数周期，开机时操作系统取得RTC中的时间数据来初始化OS时钟，所以它只是在开机有效，由操作系统控制，已被称为软时钟或系统时钟. 操作系统通过OS时钟提供给应用程序和时间有关的服务.
 
@@ -108,7 +106,36 @@ Linux 定义了以下的时钟:
 
 ### 与系统时间相关的函数
 1. 秒级别的时间函数 time() / stime()
-1. 微秒级别的时间函数 gettimeofday() / settimeofday()
+1. 微秒级别的时间函数 [gettimeofday()](https://elixir.bootlin.com/linux/v6.6.24/source/kernel/time/time.c#L140) / settimeofday()
+
+	gettimeofday: ktime_get_real_ts64()获得timespec64表示的当前时间
+
+	```c
+	//https://elixir.bootlin.com/linux/v6.6.24/source/kernel/time/timekeeping.c#L815
+	// 当前时间是上次更新时的时间xtime_sec加上从上次更新到此刻的时间间隔
+	// 时间间隔是通过时钟源度过的时钟周期cycle_delta计算得到的
+	// 时钟源的频率不通, 因此内核有将时钟周期与纳秒互换的能力 by clocksource的mult和shift
+	void ktime_get_real_ts64(struct timespec64 *ts)
+	{
+		struct timekeeper *tk = &tk_core.timekeeper; // tk是保持时间
+		unsigned int seq;
+		u64 nsecs;
+
+		WARN_ON(timekeeping_suspended);
+
+		do {
+			seq = read_seqcount_begin(&tk_core.seq);
+
+			ts->tv_sec = tk->xtime_sec;
+			nsecs = timekeeping_get_ns(&tk->tkr_mono); // tk->tkr_mono->clock即clocksource表示当前使用的时间源
+
+		} while (read_seqcount_retry(&tk_core.seq, seq));
+
+		ts->tv_nsec = 0;
+		timespec64_add_ns(ts, nsecs);
+	}
+	EXPORT_SYMBOL(ktime_get_real_ts64);
+	```
 1. 纳秒级别的时间函数 clock_gettime() / clock_settime() / clock_getres
 1. 渐进式的时间调整函数 adjtime() / adjtimex() / clock_adjtime()
 
@@ -283,15 +310,6 @@ struct timezone {
  */
 struct timezone sys_tz;
 ```
-
-### tick_period
-ktime_t类型的全局变量, 周期性时钟中断的时间间隔. 即使采用动态时钟中断的系统, 它在运行的某些阶段依然可能周期性地触发中断. 该变量是为了计算周期性时钟中断的条件下, 下一次中断的触发时间.
-
-### tick_cpu_device
-每cpu变量, 类型是tick_device, 简称td. tick_cpu_device->evtdev指向该cpu的evt, mode字段是其工作模式, 分为TICKDEV_MODE_PERIODIC和TICKDEV_MODE_ONESHOT两种.
-
-### tick_cpu_sched
-每cpu变量, 类型是tick_sched, 简称ts, 于系统调度和更新系统时间有关.
 
 ## linux time
 参考:
@@ -469,25 +487,28 @@ static struct clocksource clocksource_tsc = {
 };
 
 
-// https://elixir.bootlin.com/linux/v5.10.2/source/include/linux/clocksource.h#L33
+// https://elixir.bootlin.com/linux/v6.6.24/source/include/linux/clocksource.h#L96
+// clocksource表示时钟源
 /**
  * struct clocksource - hardware abstraction for a free running counter
  *	Provides mostly state-free accessors to the underlying hardware.
  *	This is the structure used for system time.
  *
- * @read:		Returns a cycle value, passes clocksource as argument 读取时钟源的当前时钟数
+ * @read:		Returns a cycle value, passes clocksource as argument
  * @mask:		Bitmask for two's complement
  *			subtraction of non 64 bit counters
- * @mult:		Cycle to nanosecond multiplier = timekeeper->mult
- * @shift:		Cycle to nanosecond divisor (power of two) = timekeeper->mult
+ * @mult:		Cycle to nanosecond multiplier
+ * @shift:		Cycle to nanosecond divisor (power of two)
  * @max_idle_ns:	Maximum idle time permitted by the clocksource (nsecs)
  * @maxadj:		Maximum adjustment value to mult (~11%)
+ * @uncertainty_margin:	Maximum uncertainty in nanoseconds per half second.
+ *			Zero says to use default WATCHDOG_THRESHOLD.
  * @archdata:		Optional arch-specific data
  * @max_cycles:		Maximum safe cycle value which won't overflow on
  *			multiplication
  * @name:		Pointer to clocksource name
  * @list:		List head for registration (internal)
- * @rating:		Rating value for selection (higher is better) 等级. kernel只会选择一个时钟源作为watchdog, 也只会选择一个时钟源作为system clocksource(与全局变量tk_core.timekeeper对应), 同等条件下, rating高优先
+ * @rating:		Rating value for selection (higher is better)
  *			To avoid rating inflation the following
  *			list should give you a guide as to how
  *			to assign your clocksource a rating
@@ -502,6 +523,10 @@ static struct clocksource clocksource_tsc = {
  *			400-499: Perfect
  *				The ideal clocksource. A must-use where
  *				available.
+ * @id:			Defaults to CSID_GENERIC. The id value is captured
+ *			in certain snapshot functions to allow callers to
+ *			validate the clocksource from which the snapshot was
+ *			taken.
  * @flags:		Flags describing special properties
  * @enable:		Optional function to enable the clocksource
  * @disable:		Optional function to disable the clocksource
@@ -510,7 +535,7 @@ static struct clocksource clocksource_tsc = {
  * @mark_unstable:	Optional function to inform the clocksource driver that
  *			the watchdog marked the clocksource unstable
  * @tick_stable:        Optional function called periodically from the watchdog
- *			code to provide stable syncrhonization points
+ *			code to provide stable synchronization points
  * @wd_list:		List head to enqueue into the watchdog list (internal)
  * @cs_last:		Last clocksource value for clocksource watchdog
  * @wd_last:		Last watchdog value corresponding to @cs_last
@@ -527,19 +552,21 @@ static struct clocksource clocksource_tsc = {
  * structure.
  */
 struct clocksource {
-	u64			(*read)(struct clocksource *cs);
+	u64			(*read)(struct clocksource *cs); // 读取时钟源的当前时钟数
 	u64			mask;
-	u32			mult;
+	u32			mult; // mult/shift是与tk_read_base同名字段意义相同
 	u32			shift;
 	u64			max_idle_ns;
 	u32			maxadj;
+	u32			uncertainty_margin;
 #ifdef CONFIG_ARCH_CLOCKSOURCE_DATA
 	struct arch_clocksource_data archdata;
 #endif
 	u64			max_cycles;
 	const char		*name;
 	struct list_head	list;
-	int			rating;
+	int			rating; // cs的等级
+	enum clocksource_ids	id;
 	enum vdso_clock_mode	vdso_clock_mode;
 	unsigned long		flags;
 
@@ -560,34 +587,39 @@ struct clocksource {
 	struct module		*owner;
 };
 
+// CLOCK_SOURCE_IS_CONTINUOUS, CLOCK_SOURCE_MUST_VERIFY, CLOCK_SOURCE_SUSPEND_NONSTOP由时钟设备的驱动设置, 其他一般由内核控制
 /*
- * Clock source flags bits:: CLOCK_SOURCE_(IS_CONTINUOUS|MUST_VERIFY|SUSPEND_NONSTOP)由时钟设备的driver设置, 其他一般由kernel设置
+ * Clock source flags bits::
  */
-#define CLOCK_SOURCE_IS_CONTINUOUS		0x01 // 是连续时钟
+#define CLOCK_SOURCE_IS_CONTINUOUS		0x01 // 为连续时钟
 #define CLOCK_SOURCE_MUST_VERIFY		0x02 // 需要被监控
 
 #define CLOCK_SOURCE_WATCHDOG			0x10 // 可作为watchdog来监控其他时钟设备
-#define CLOCK_SOURCE_VALID_FOR_HRES		0x20 // 高精度模式
+#define CLOCK_SOURCE_VALID_FOR_HRES		0x20 // 可用作高精度模式
 #define CLOCK_SOURCE_UNSTABLE			0x40 // 不稳定
-#define CLOCK_SOURCE_SUSPEND_NONSTOP		0x80 // 系统suspend时, 该时钟不会停止
-#define CLOCK_SOURCE_RESELECT			0x100 // 被选做system clocksource
+#define CLOCK_SOURCE_SUSPEND_NONSTOP		0x80 // 系统为suspend时, 该时钟不会停止
+#define CLOCK_SOURCE_RESELECT			0x100 // 可选做系统时钟
+#define CLOCK_SOURCE_VERIFY_PERCPU		0x200
+/* simplify initialization of mask field */
+#define CLOCKSOURCE_MASK(bits) GENMASK_ULL((bits) - 1, 0)
 
-// https://elixir.bootlin.com/linux/v5.10.2/source/include/linux/clockchips.h#L70
+// https://elixir.bootlin.com/linux/v6.6.24/source/include/linux/clockchips.h#L100
+// 将关注时间事件的设备成为时钟中断设备(或时间事件设备). 有些设备即是时钟源, 也可是时钟中断设备
 /**
  * struct clock_event_device - clock event device descriptor
  * @event_handler:	Assigned by the framework to be called by the low
- *			level handler of the event source 时钟终端到来时, 处理中断的回调函数
- * @set_next_event:	set next event function using a clocksource delta 设置下一个时钟中断
+ *			level handler of the event source
+ * @set_next_event:	set next event function using a clocksource delta
  * @set_next_ktime:	set next event function using a direct ktime value
  * @next_event:		local storage for the next event in oneshot mode
  * @max_delta_ns:	maximum delta value in ns
  * @min_delta_ns:	minimum delta value in ns
- * @mult:		nanosecond to cycles multiplier = timekeeper->mult
- * @shift:		nanoseconds to cycles divisor (power of two) = timekeeper->shift
+ * @mult:		nanosecond to cycles multiplier
+ * @shift:		nanoseconds to cycles divisor (power of two)
  * @state_use_accessors:current state of the device, assigned by the core code
- * @features:		features 设备的特性, CLOCK_EVT_FEAT_XXX. 最常用的设备特性有PERIODIC, ONESHOT, C3STOP 三种, 其中C3STOP表示系统处于C3状态的时候设备停止
+ * @features:		features
  * @retries:		number of forced programming retries
- * @set_state_periodic:	switch state to periodic set_state_xxx, 切换当前时钟中断设备状态的回调函数, 共计4种状态: periodic, 周期性触发中断; oneshot, 单触发.
+ * @set_state_periodic:	switch state to periodic
  * @set_state_oneshot:	switch state to oneshot
  * @set_state_oneshot_stopped: switch state to oneshot_stopped
  * @set_state_shutdown:	switch state to shutdown
@@ -596,27 +628,27 @@ struct clocksource {
  * @min_delta_ticks:	minimum delta value in ticks stored for reconfiguration
  * @max_delta_ticks:	maximum delta value in ticks stored for reconfiguration
  * @name:		ptr to clock event name
- * @rating:		variable to rate clock event devices 设备的等级, rating高优先
+ * @rating:		variable to rate clock event devices
  * @irq:		IRQ number (only for non CPU local devices)
  * @bound_on:		Bound on CPU
- * @cpumask:		cpumask to indicate for which CPUs this device works 设备支持的cpu集
+ * @cpumask:		cpumask to indicate for which CPUs this device works
  * @list:		list head for the management code
  * @owner:		module reference
  */
 struct clock_event_device {
-	void			(*event_handler)(struct clock_event_device *);
-	int			(*set_next_event)(unsigned long evt, struct clock_event_device *);
+	void			(*event_handler)(struct clock_event_device *); // 时钟中断到来时, 处理中断的回调函数
+	int			(*set_next_event)(unsigned long evt, struct clock_event_device *); // 设置下一个时钟中断
 	int			(*set_next_ktime)(ktime_t expires, struct clock_event_device *);
 	ktime_t			next_event;
 	u64			max_delta_ns;
 	u64			min_delta_ns;
-	u32			mult;
+	u32			mult; // mult/shift 与tk_read_base同名字段意义相同
 	u32			shift;
 	enum clock_event_state	state_use_accessors;
-	unsigned int		features;
+	unsigned int		features; // 设备的特性, CLOCK_EVT_FEAT_XXX. 最常用的设备特性有PERIODIC, ONESHOT, C3STOP 三种, 其中C3STOP表示系统处于C3状态的时候设备停止
 	unsigned long		retries;
 
-	int			(*set_state_periodic)(struct clock_event_device *);
+	int			(*set_state_periodic)(struct clock_event_device *); // set_state_xxx, 切换当前时钟中断设备状态的回调函数, 共计4种状态: periodic, 周期性触发中断; oneshot, 单触发
 	int			(*set_state_oneshot)(struct clock_event_device *);
 	int			(*set_state_oneshot_stopped)(struct clock_event_device *);
 	int			(*set_state_shutdown)(struct clock_event_device *);
@@ -629,15 +661,15 @@ struct clock_event_device {
 	unsigned long		max_delta_ticks;
 
 	const char		*name;
-	int			rating;
+	int			rating; // 设备的等级, rating高优先
 	int			irq;
 	int			bound_on;
-	const struct cpumask	*cpumask;
+	const struct cpumask	*cpumask; // 设备支持的cpu集
 	struct list_head	list;
 	struct module		*owner;
 } ____cacheline_aligned;
 ```
-
+内核只会选择一个时钟源作为watchdog, 也只会选择一个时钟源作为系统的时钟源(与全局变量tk_core.timekeeper对应). 同等条件下, 等级越高的时钟源有更高的优先级
 kernel会选择一个不需要被监控的连续时钟源作为watchdog, 负责在程序运行时监控其他时钟源, 如果某一个时钟源的误差超过了可接受的范围, 那么, 将其设置为CLOCK_SOURCE_UNSTABLE, 并将其rate字段设为0.
 
 时钟源设备在初始化后可调用`clocksource_register_hz`等函数完成注册, kernel会在所有的时钟源中选择rating最大的作为保持时间的时钟源, 用户调用gettimeofday获取当前时间.
@@ -645,6 +677,26 @@ kernel会选择一个不需要被监控的连续时钟源作为watchdog, 负责�
 > 有的设备即可保持时间也可提供定时器功能.
 
 当前使用的时钟源: `cat /sys/devices/system/clocksource/*/current_clocksource`, 支持时钟源有:`cat /sys/devices/system/clocksource/*/available_clocksource`.
+
+## 内核常见的变量或宏
+1. HZ : 一秒内的滴答数
+	
+	系统定时器能以可编程的频率中断处理器. 频率对应着HZ, HZ越大, 进程调度更准确, 但开销和电源消耗更多, 因为更多的处理器周期消耗在定时器中断上下文.
+
+	现代内核并不一直采用周期性的滴答, 硬件允许时, 更倾向于动态(非周期)时钟中断, 但HZ作为很多模块衡量时间的基准被保留了下来.
+1. jitty : 累计的滴答数
+
+	jiffies记录系统启动以来, 系统定时器触发的次数. 内核主要存在jiffy和ktime_t两个时间单位, 后者本质是纳秒, 内核对相关计算进行优化并提供了使用jiffy的函数, 因而产生了ktime_t.
+1. tick_period
+
+	ktime_t类型的全局变量, 周期性时钟中断的时间间隔. 即使采用动态时钟中断的系统, 它在运行的某些阶段依然可能周期性地触发中断. 该变量是为了计算周期性时钟中断的条件下, 下一次中断的触发时间.
+
+1. tick_cpu_device
+	每cpu变量, 类型是tick_device, 简称td. tick_cpu_device->evtdev指向该cpu的evt, mode字段是其工作模式, 分为TICKDEV_MODE_PERIODIC和TICKDEV_MODE_ONESHOT两种.
+
+1. tick_cpu_sched:
+
+	每cpu变量, 类型是tick_sched即ts, 它与系统调用和更新系统时间有关
 
 ## 从内核的角度看时间
 内核维护了多种时间: 比如最常用的REALTIME, MONOTONIC和BOOTTIME:
@@ -655,7 +707,7 @@ kernel会选择一个不需要被监控的连续时钟源作为watchdog, 负责�
 
 	settimeofday系统调用会更新REALTIME时间, 但不会更新RTC时间, 需要`hwclock -w`同步到RTC时间.
 
-- MONOTONIC : 不是绝对时间, 是系统启动到当前所经历的**非休眠**时间, 单独递增, 系统启动时由0(timekeeping_init)开始, 不受REALTIME更新的影响.
+- MONOTONIC : 不是绝对时间, 是系统启动到当前所经历的**非休眠**时间, 单独递增, 系统启动时由0(timekeeping_init)开始, 不受REALTIME更新的影响, 也不计算系统休眠的时间即系统休眠时它不会增加.
 
 	MONOTONIC非完全单调, 会受到NTP的影响, 真正不受影响的是RAWMONOTONIC.
 
@@ -666,7 +718,7 @@ tk的xtime_sec表示REALTIME, wall_to_monotinic是由xtime计算得到MONOTONIC�
 
 从5.5开始, kt移除了total_sleep_time, 以offs_real表示MONOTONIC和REALTIME的时间差, 以offs_boot表示MONOTONIC与BOOTTIME的时间差, getboottime/getboottime64可直接使用offs_real-offs_boot得到.
 
-相关函数:
+timekeeper获取时间的相关函数:
 - getboottime : 获取系统启动时的REALTIME
 - ktime_get_boottime : 获取BOOTTIME
 - ktime_get : 获取MONOTONIC
@@ -679,19 +731,33 @@ tsc的频率是运行时计算得到的, kernel启动时会优先利用PIT得到
 
 APICTimer进入工作(set_APIC_timer)后, 由于它的rating比pit高, td的evtdev会换成apic的evt, 此时尝试切到nohz模式. kernel切到nohz后进入第二阶段.
 
-> nohz模式(也叫tickless/oneshot/动态时钟模式)是指时钟中断不完全周期性的工作模式, 在该模式下, 时钟中断的间隔可以动态调整. 它主要要求系统当前的cs要有CLOCK_SOURCE_VALID_FOR_HRES标志(timekeeping_valid_for_hres)和evt可以满足单触发模式(tick_is_oneshot_available)这两个条件. nohz分两种: 高精度模式和低精度模式, 选择模式由hrtimer_hres_enabled变量决定, 该值可通过kernel boot args设置. hrtimer_hres_enabled=0即调用tick_nohz_switch_to_nohz切换到nohz低精度模式, 否则调用hrtimer_switch_to_hres切换到高精度模式.
+nohz模式(也叫tickless/oneshot/动态时钟模式)是指时钟中断不完全周期性的工作模式, 在该模式下, 时钟中断的间隔可以动态调整. 它主要要求系统当前的cs要有CLOCK_SOURCE_VALID_FOR_HRES标志(timekeeping_valid_for_hres)和evt可以满足单触发模式(tick_is_oneshot_available)这两个条件. nohz分两种: 高精度模式和低精度模式, 选择模式由hrtimer_hres_enabled变量决定, 该值可通过kernel boot args设置. hrtimer_hres_enabled=0即调用tick_nohz_switch_to_nohz切换到nohz低精度模式, 否则调用hrtimer_switch_to_hres切换到高精度模式.
 
-低精度模式的最高频率是hz, evt->event_handler=tick_nohz_handler; 高精度模式的最高频率由时钟中断设备决定, 该特性与hrtimer完美配合, 可满足对时间间隔要求比较高的场景, 此时evt->event_handler=hrtimer_interrupt.
+低精度模式的最高频率是HZ, evt->event_handler=tick_nohz_handler; 高精度模式的最高频率由时钟中断设备决定, 该特性与hrtimer完美配合, 可满足对时间间隔要求比较高的场景, 此时evt->event_handler=hrtimer_interrupt.
 
 时钟中断发生后, 低精度的tick_nohz_handler会在函数体内完成进程时间计算, 进程调度等操作. 而hrtimer_interrupt只负责去处理到期的hrtimer, 进程时间计算, 进程调度等操作通过[tick_sched](https://elixir.bootlin.com/linux/v5.10.2/source/kernel/time/tick-sched.h#L23)的sched_timer字段表示的hrtimer完成的, tick_sched_timer函数最终负责这些操作.
 
 > hrtimer不等同于timer, 它们虽然有类似的函数, 但hrtimer可以触发对时钟中断设备编程的动作.
 
 ## 创建定时器
-- `setitimer` : 精度微妙, 对于一个进程而言, 同一时刻, 同一种setitimer定时器只能存在一个, 否则会覆盖原有定时器, 即进程全局.
+- `setitimer` : 精度微妙, 对于一个进程而言, 同一时刻, 同一种setitimer定时器只能存在一个, 否则会取消原有定时器
+
+	定时器类型:
+	1. ITIMER_REAL：以系统真实的时间来计算，它送出SIGALRM信号
+	1. ITIMER_VIRTUAL：以该进程在用户态下花费的时间来计算，它送出SIGVTALRM信号
+	1. ITIMER_PROF：以该进程在用户态下和内核态下所费的时间来计算，它送出SIGPROF信号
+
 - `timer_create` : 精度纳秒, 同一时刻, 同一种定时器可创建多个, 由id区分. 内核会维护定时器的链表, 有效的id是使用该定时器的唯一方法.
 
-	time_getoverrun: 获得定时器到期提醒的信号丢失的次数. 因为它上次到期时产生的信号还处于挂起状态, 那么本次信号可能会丢失.
+	相关函数:
+	1. timer_create()创建一个定时器，但是不会自动启动
+	1. timer_settime() 启动timer_create创建的定时器，启动是设置定时器的间隔时间和到期时间. 如果定时器已启动则覆盖
 
+		支持设置定时器到期后自动重新记时, 因为需要time_getoverrun()
+	1. timer_gettime() 返回指定定时器距离下一次到期的剩余时间
+	1. timer_delete() 删除timer_create 创建的定时器
+	1. time_getoverrun(): 获得定时器到期提醒的信号丢失的次数. 因为它上次到期时产生的信号还处于挂起状态, 那么本次信号可能会丢失.
+
+	本着够用原则, 优先使用setitimer.
 
 > `sleep()`是让出cpu~重新可执行间的时间, 重新可执行~继续执行间的时间不确定, 涉及进程调度, 比如高优先级插入, 因此sleep有误差.

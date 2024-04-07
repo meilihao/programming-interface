@@ -4,6 +4,17 @@ ref:
 
 	包含进程/中断上下文的图
 
+广义中断包括:
+1. 中断: 狭义中断/异步中断
+
+	分可屏蔽中断和不可屏蔽中断, 来自于I/O设备的信号, 总是返回到下一步指令. 举例: 所有的IRQ, 电源掉电, 存储器奇偶校验
+1. 异常: 同步中断
+
+	分:
+	- trap(陷阱): 主动的异常, 总是返回到下一步指令.  举例: 系统调用, 信号机制
+	- fault(故障): 潜在可恢复的错误, 返回到当前指令.  举例: 缺页异常
+	- abort(终止): 不可恢复的错误, 不返回. 举例: 硬件错误
+
 概念:
 - 中断请求(irq, interrupt request)是由可编程中断控制器(PIC, programmable interrupt controller)发起的, 其目的是为了中断cpu和执行中断服务程序(isr, interrupt service routine).
 - 硬件中断: 当一个硬件设备想要告诉 CPU 某一需要处理的数据已经准备好后（例如：当键盘被按下或者一个数据包到了网络接口处），它将会发送一个中断请求（IRQ）来告诉 CPU 数据是可用的, 接下来会调用在内核启动时设备驱动注册的对应的中断服务程序（ISR）.
@@ -46,6 +57,8 @@ os已注册的中断: `cat /proc/interrupts`, 从左到右各列的含义依次�
 ## cpu识别中断
 x86处理器通过INTR和NMI 两个引脚分别接收外部中断请求信号: INTR接收可屏蔽中断, NMI接收不可屏蔽中断请求. 标志寄存器EFLAGS中的IF标志决定是否屏蔽可屏蔽中断请求.
 
+传统的中断控制器是PIC(可编程中断控制器, 比如8259A), 在单核时够用了.
+
 在SMP结构中, 每个处理器都包含一个IOAPIC(高级可编程中断控制器, advanced programmable interrupt controller), 外部设备产生中断请求时, **通过该中断控制器并传递给cpu**.
 
 > 在 MP 架构下，为支持将中断传递给多个 CPU，引入了 APIC，其包含 LAPIC 和 IOAPIC. 一般来说，所有 LAPIC 都连接到一个 I/O APIC 上，形成一个一对多的结构(不排除有多 IOAPIC 的架构), 有两种工作模式：
@@ -67,7 +80,7 @@ kernel定义了多种专用的中断描述符, 多以idt_data数组的形式存�
 
 内核在中断初始化的过程中可以给`0x20~0xeb`号中断指定具体的中断处理程序, 此时由system_vectors位图来表示一个中断是否已指定, 没有指定的会被设为默认值.
 
-所有的中断处理程序必须即能正确处理中断, 有能保证处理完毕后可以返回中断前的程序继续执行. 因此, 中断处理必须完成3个任务:
+所有的中断处理程序必须即能正确处理中断, 又能保证处理完毕后可以返回中断前的程序继续执行. 因此, 中断处理必须完成3个任务:
 1. 保存现场以便恢复
 1. 调用已注册的中断服务例程(isr)处理中断
 1. 恢复现场继续原有程序
@@ -75,7 +88,7 @@ kernel定义了多种专用的中断描述符, 多以idt_data数组的形式存�
 中断处理程序和中断服务例程的区别: 中断处理程序包括中断处理的整个过程, 而中断服务例程是该过程中对产生中断的设备的处理逻辑. 并不是所有的中断处理程序都需要对应的中断服务例程, 中断服务例程是为了方便外设驱动利用内核提供的函数编程. **有了中断服务例程, dirver只需要专注处理设备自身的中断而不需要关系整个过程**.
 
 ## 中断服务例程
-中断服务例程涉及两个关键的struct, 即irq_desc和irqaction, 两者是1:n的关系, 但并不是每个irq_desc都一定有与之对应的irqaction. irq_desc与irq对应, irqaction与一个设备对应, 共享同一个irq号的多个设备的irqaction对应同一个irq_desc.
+中断服务例程涉及两个关键的struct, 即irq_desc和irqaction, 两者是1:n的关系, 但并不是每个irq_desc都一定有与之对应的irqaction. irq_desc与irq号对应, irqaction与一个设备对应, 共享同一个irq号的多个设备的irqaction对应同一个irq_desc.
 
 ![](/misc/img/os/interrupt/20190602232050759.png)
 
@@ -207,7 +220,7 @@ struct irq_desc {
 } ____cacheline_internodealigned_in_smp;
 ```
 
-irq_desc和irqaction都有处理中断的fn, 执行顺序是: irq_desc上的handle_irq是一定执行的, irqaction的函数一般由handle_irq调用, 并有handle_irq的策略决定调用与否.
+irq_desc和irqaction都有处理中断的fn, 执行顺序是: irq_desc上的handle_irq是一定执行的, irqaction的函数一般由handle_irq调用, 并由handle_irq的策略决定调用与否.
 
 linux使用request_irq()和free_irq()来申请和释放中断. devm_request_irq()的`devm_`开通指kernel managed的资源, 一般不需要出错处理和remove()接口里显示的是否. 比如at86rf230驱动改用devm_request_irq()后就删除了free_irq().
 
@@ -252,14 +265,13 @@ handler和thread_fn的编写原则:
     1. 在函数中启动工作队列或者软中断(如tasklet)等, 由工作队列等来完成工作.
     1. 在thread_fn中执行, 这就是所谓的中断处理的下半段(bottom half)
 1. handler不能进行任何sleep的操作, 调用sleep, 使用信号量, 互斥锁等可能导致sleep的机制都不行.
-1. 不能在handler中调用disable_irq这类需要等待当前中断执行完毕的函数, 中断处理中调用一个需要等待当前中断结束的函数, 会导致死锁. 实际上, handler执行的时候, 一般外部中断依然是在禁止的状态, 不需要desable_irq.
+1. 不能在handler中调用disable_irq这类需要等待当前中断执行完毕的函数, 中断处理中调用一个需要等待当前中断结束的函数, 会导致死锁. 实际上, handler执行的时候, 一般外部中断依然是在禁止的状态, 不需要disable_irq.
 
 > 死锁: 两个及以上task在执行中, 因竞争资源而处于相互等待的现象.
 
 request_irq通过将request_threaded_irq的thread_fn设为NULL来实现. 它们的区别是:
 1. request_irq的handler直接在当前中断上下文中执行, request_threaded_irq的thread_fn在独立线程中执行.
-1. 根据前面的第一条原则, handler不能进行复杂操作, 操作由工作队列等来进行, 即工作队列实际上也在进程上下文.
-1. 执行thread_fn线程的优先级比工作队列线程的优先级高
+1. 根据前面的第一条原则, handler不能进行复杂操作, 操作由工作队列等来进行, 即工作队列实际上也在进程上下文. 执行thread_fn线程的优先级比工作队列线程的优先级高
 
 request_threaded_irq创建新线程时, 会调用sched_setscheduler_nocheck(t, SCHED_FIFO, ...)将线程设置为实时的. 对用户体验影响比较大, 要求快速响应的设备的驱动中, 采用中断模式的情况下, 使用request_threaded_irq有利于提高用户体验; 反之, 要求不高的设备的驱动中, 使用request_irq更合适.
 
