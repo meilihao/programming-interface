@@ -1,4 +1,9 @@
 # biso
+ref:
+- [Linux x86/x86_64现在将始终保留前1MB的内存](https://www.51cto.com/article/665648.html)
+
+	自Linux 5.13开始将无条件地始终保留前1MB内存, 参考[[PATCH v2] x86/efi: unconditionally hold the whole low-1MB memory regions](https://lore.kernel.org/linux-kernel/20210531090023.16471-1-lijiang@redhat.com/)
+
 BIOS全称为Base Input Output System(基本输入/输出系统)，它一组存储在主板ROM中的程序代码主要功能有:
 1. 自检程序，用于开机时对硬件的检测
 1. 系统初始化，包括对硬件，BIOS中断向量等初始化

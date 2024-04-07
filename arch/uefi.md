@@ -287,6 +287,10 @@ uefi提供了大部分总线控制器的驱动程序, 以及大量的功能性pr
 ### bootx64.efi/boot.efi
 uefi固件会发现所有fat(不区分大小写)分区并加入启动菜单, 选中某个菜单, 就是检查其是否存在`efi/boot/bootx64.efi(64 os)或boot.efi(32 os)`并执行它. 如果该efi存在, 某些情况下会自动执行它, 比如qemu环境仅有一个fat分区.
 
+efi文件放入EFI/BOOT/目录(ESP分区上), 且命名为BOOTx64.EFI可让UFEI可以开机时自动执行该efi并引导内核
+
+> ESP分区是fat32, 不区分大小写, ubuntu 22.04是命名为`EFI/BOOT/BOOTX64.EFI`, 它是Grub2定制的UEFI应用.
+
 # coreboot
 参考:
 - [Mainboards supported by coreboot](https://coreboot.org/status/board-status.html)
@@ -305,7 +309,7 @@ ref:
 # git clone -b <release_version> --depth 1 https://github.com/tianocore/edk2.git
 # cd edk2
 # git submodule update --init
-# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` from `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
+# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` fro `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
 # ln -s /usr/bin/python3.8 /usr/bin/python # 如果安装python3-distutils而不是python-is-python3就需要这句, 因为EDK2还是用的python2.x版本，而其命令是python
 # make -C BaseTools # BaseTools contains all the tools required for building EDK II
 # source edksetup.sh # 执行两次原因: `_omb_alias_general_cp_init：未找到命令`部分命令依赖edksetup.sh先设置env
@@ -596,6 +600,8 @@ build编译HelloWorld.c的过程：
 标准应用程序加载过程:
 1. 将HelloWorld.efi 文件加载到内存
 1. 当shell中执行HelloWorld.efi时，shell首先用gBS->LoadImage()将HelloWorld.efi文件加载到内存生成Image对象，然后调用gBS->StartImag(Image)启动这个Image对象。gBS->StartImage()是一个函数指针，它实际指向的是CoreStartImage()
+
+	.efi文件（UEFI应用程序或UEFI驱动程序）加载到内存后生成的对象即Image
 1. 进入映像入口函数
 
 	CoreStartImage()的主要作用是调用映像入口函数，在gBS->StartImage 的核心是Image->EntryPoint(···),它就是程序映像的入口函数，对应程序来说就是`_ModuleEntryPoint` 函数. 进入 `_ModuleEntryPoint` 后，控制权才转交给应用程序(HelloWorld.efi).
