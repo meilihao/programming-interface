@@ -279,6 +279,9 @@ request_threaded_irq创建新线程时, 会调用sched_setscheduler_nocheck(t, S
 ref:
 - [**硬核长文丨深入理解Linux中断机制**](https://zhuanlan.zhihu.com/p/551615380)
 - [Kernel Exploring](https://richardweiyang-2.gitbook.io/kernel-exploring/00-start_from_hardware/05-interrupt_handler)
+- [QEMU 如何模拟中断](https://martins3.github.io/qemu/interrupt.html)
+
+	asm_common_interrupt的来源
 
 ```c
 // https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L498
@@ -304,15 +307,140 @@ SYM_CODE_START(irq_entries_start)
 0 :
 	ENDBR
 	.byte	0x6a, vector // `.byte	0x6a`=push
-	jmp	asm_common_interrupt
+	jmp	asm_common_interrupt // 没找到asm_common_interrupt在哪
 	/* Ensure that the above is IDT_ALIGN bytes max */
 	.fill 0b + IDT_ALIGN - ., 1, 0xcc
 	vector = vector+1
     .endr
 SYM_CODE_END(irq_entries_start)
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L640
+// idtentry.h 会分别被 c 源文件和 asm 源文件 include, 所以其定义也分别有两种
+/* Device interrupts common/spurious */
+DECLARE_IDTENTRY_IRQ(X86_TRAP_OTHER,	common_interrupt);
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L176
+/**
+ * DECLARE_IDTENTRY_IRQ - Declare functions for device interrupt IDT entry
+ *			  points (common/spurious)
+ * @vector:	Vector number (ignored for C)
+ * @func:	Function name of the entry point
+ *
+ * Maps to DECLARE_IDTENTRY_ERRORCODE()
+ */
+#define DECLARE_IDTENTRY_IRQ(vector, func)				\
+	DECLARE_IDTENTRY_ERRORCODE(vector, func)
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L432
+#define DECLARE_IDTENTRY_ERRORCODE(vector, func)			\
+	idtentry vector asm_##func func has_error_code=1
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L176
+/* Entries for common/spurious (device) interrupts */
+#define DECLARE_IDTENTRY_IRQ(vector, func)				\
+	idtentry_irq vector func
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/entry/entry_64.S#L431
+/*
+ * Interrupt entry/exit.
+ *
+ + The interrupt stubs push (vector) onto the stack, which is the error_code
+ * position of idtentry exceptions, and jump to one of the two idtentry points
+ * (common/spurious).
+ *
+ * common_interrupt is a hotpath, align it to a cache line
+ */
+.macro idtentry_irq vector cfunc
+	.p2align CONFIG_X86_L1_CACHE_SHIFT
+	idtentry \vector asm_\cfunc \cfunc has_error_code=1
+.endm
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/kernel/irq.c#L247
+/*
+ * common_interrupt() handles all normal device IRQ's (the special SMP
+ * cross-CPU interrupts have their own entry points).
+ */
+DEFINE_IDTENTRY_IRQ(common_interrupt)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+	struct irq_desc *desc;
+
+	/* entry code tells RCU that we're not quiescent.  Check it. */
+	RCU_LOCKDEP_WARN(!rcu_is_watching(), "IRQ failed to wake up RCU");
+
+	desc = __this_cpu_read(vector_irq[vector]);
+	if (likely(!IS_ERR_OR_NULL(desc))) {
+		handle_irq(desc, regs);
+	} else {
+		apic_eoi();
+
+		if (desc == VECTOR_UNUSED) {
+			pr_emerg_ratelimited("%s: %d.%u No irq handler for vector\n",
+					     __func__, smp_processor_id(),
+					     vector);
+		} else {
+			__this_cpu_write(vector_irq[vector], VECTOR_UNUSED);
+		}
+	}
+
+	set_irq_regs(old_regs);
+}
+
+// https://martins3.github.io/qemu/interrupt.html
+asm_common_interrupt
+  call  error_entry
+  movq  %rsp, %rdi /* pt_regs pointer into 1st argument*/
+  movq  ORIG_RAX(%rsp), %rsi  /* get error code into 2nd argument*/
+  call  common_interrupt
+  jmp error_return
 ```
 
-中断处理函数定义在 irq_entries_start 函数数组里, 它定义了 FIRST_SYSTEM_VECTOR 到 FIRST_EXTERNAL_VECTOR 项, 每一项都是中断处理函数, 会跳到 asm_common_interrupt() 去执行，并最终调用 do_IRQ(), 调用完毕后, 就从中断返回.
+中断处理函数定义在 irq_entries_start 函数数组里, 它定义了 FIRST_SYSTEM_VECTOR 到 FIRST_EXTERNAL_VECTOR 项, 每一项都是中断处理函数, 会跳到 asm_common_interrupt() 去执行，并最终调用 handle_irq(), 调用完毕后, 就从中断返回.
+
+
+irq_entries_start和common_interrupt对vector的处理是为了与系统调用号区分, 处理信号的时候会判断处理信号之前是否处于系统调用过程中, 判断的依据就是regs->orig_ax不小于0, vector也存储在该位置.
+
+common_interrupt完成中断处理的主要逻辑.
+
+handle_irq开启了处理之旅. handle_irq函数完成溢出检查、找到irq对应的irq_desc对象，并调用它的handle_irq字段定义的回调函数.
+
+举例, 键盘和鼠标共享中断引脚，连接到GPIO上，通过GPIO来实现中断，GPIO的中断直接连接到处理器上，假设GPIO的irq号为50，键盘和鼠标的irq号为200.
+
+硬件上，键盘的中断引脚并不直接连接处理器，当它需要中断时，GPIO会检测到引脚电平的变化，进而去中断处理器。软件上，
+GPIO的驱动一方面设置irq:50对应的irq_desc的handle_irq字段，另一方面为所有连接到它的外设（假设irq号在[180, 211]内）设置irq_desc.
+
+> GPIO驱动参考[x3proto_gpio_chip](https://elixir.bootlin.com/linux/v6.6.25/source/arch/sh/boards/mach-x3proto/gpio.c)
+
+键盘和鼠标驱动分别调用request_irq设置了irq_action，并将其链接到irq:200对应的irq_desc，这样irq_desc对象的action字段指向的链表
+中就有键盘和鼠标两个设备的irq_action了.
+
+因为irq是共享的，所以发生中断时，GPIO一般情况下并不知道是键盘还是鼠标触发了中断。这就需要外设处理中断前，首先必须根据自身状态寄存器判断是否是自己触发了中断，如果是才会继续执行。如果硬件或者驱动不支持这类判断，那么该外设不适合共享中断.
+
+处理器检测到中断，通过handle_irq函数调用irq:50对应的中断服务例程. 它判断是哪个引脚引起了中断，然后将中断处理继续传递至连接到该引脚的设备, 即调用了irq:200的irq_desc的handle_irq字段，也就是GPIO驱动中设置的irq_set_chip_and_handler_name的handle参数, 比如handle_simple_irq.
+
+> 其他handle有, handle_edge_irq对应的是边沿触发的设备，如果是电平触发，应该是handle_level_irq.
+
+handle_edge_irq有两个重要功能，第一个功能与中断重入有关, 如果当前中断处理正在执行，这时候又触发了新一轮的同一个irq的中断，新中断并不会马上得到处理，而是执行desc->istate|=IRQS_PENDING操作。当前中断处理完毕后，会循环检测IRQS_PENDING是否被置位，如果是就继续处理中断。
+
+从另一个角度来讲，即使处理当前中断时多个中断到来，完成当前处理后只会处理一次，这是合理的，毕竟对大多数硬件来讲最新时刻的状态更有意义。不过现实中，这种情况应该深入分析，因为这对某些需要跟踪轨迹设备的用户体验有较大影响。比如鼠标，如果中间几个点丢掉了，光标会从一个位置跳到另一个.
+
+第二个功能就是处理当前中断，可以调用handle_irq_event函数实现。该函数会将IRQS_PENDING清零，调用irqd_set将irq_desc的
+irq_data的IRQD_IRQ_INPROGRESS标记置位，表示正在处理中断, 然后调用handle_irq_event_percpu函数将处理权交给设备, 最后清除IRQD_IRQ_INPROGRESS标记.
+
+handle_irq_event_percpu调用__handle_irq_event_percpu，后者遍历irqaction.
+
+键盘和鼠标的驱动将它们的irqaction链接到了irq_desc，让函数回调它们的handler字段. 键盘的驱动调用了
+request_threaded_irq，它的handler参数为NULL，系统默认设置成了irq_default_primary_handler函数，它直接返回IRQ_WAKE_THREAD， 所以对于键盘而言，会执行irq_wake_thread唤醒执行中断处理的线程，键盘的thread_fn=自定义的handle_keyboard_irq就是在该线程中执行的. 而对鼠标而 言，驱动调用的是request_irq，handler就是自定义的handle_mouse_irq函数，它使用工作队列完成I/O操作和数据报告等任务.
+
+### 中断嵌套
+一个中断发生的时候, 另一个中断到来, 需要先处理新中断, 处理完毕再返回原中断继续处理.
+
+x86中，中断嵌套时，第一个中断占用了中断栈，那么后面的中断就只能在当前进程的栈中执行了. 另一点需要说明的是, x86中, common_interrupt是在当前进程中执行，调用irq_desc的handle_irq时才会切换到中断栈中; x64中, 直接切换到中断栈中执行common_interrupt.
+
+### 中断栈
+5.x内核版本中, 默认情况下, 中断处理都会优先在中断栈中执行.
+
+32位系统中, 中断栈分为软中断栈和硬中断栈, 分别由每cpu变量hardirq_stack和softirq_stack表示; 64位系统中, 软硬中断使用同一个中断栈, 由每cpu变量irq_stack_ptr表示. 另外, 软中断也可以在单独的内核线程ksoftirqd中执行, 这种情况下就不需要使用软中断栈了.
 
 
 ### 使用和屏蔽中断
