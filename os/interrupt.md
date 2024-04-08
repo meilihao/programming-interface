@@ -275,6 +275,45 @@ request_irq通过将request_threaded_irq的thread_fn设为NULL来实现. 它们�
 
 request_threaded_irq创建新线程时, 会调用sched_setscheduler_nocheck(t, SCHED_FIFO, ...)将线程设置为实时的. 对用户体验影响比较大, 要求快速响应的设备的驱动中, 采用中断模式的情况下, 使用request_threaded_irq有利于提高用户体验; 反之, 要求不高的设备的驱动中, 使用request_irq更合适.
 
+### 中断处理
+ref:
+- [**硬核长文丨深入理解Linux中断机制**](https://zhuanlan.zhihu.com/p/551615380)
+- [Kernel Exploring](https://richardweiyang-2.gitbook.io/kernel-exploring/00-start_from_hardware/05-interrupt_handler)
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/include/asm/idtentry.h#L498
+/*
+ * ASM code to emit the common vector entry stubs where each stub is
+ * packed into IDT_ALIGN bytes.
+ *
+ * Note, that the 'pushq imm8' is emitted via '.byte 0x6a, vector' because
+ * GCC treats the local vector variable as unsigned int and would expand
+ * all vectors above 0x7F to a 5 byte push. The original code did an
+ * adjustment of the vector number to be in the signed byte range to avoid
+ * this. While clever it's mindboggling counterintuitive and requires the
+ * odd conversion back to a real vector number in the C entry points. Using
+ * .byte achieves the same thing and the only fixup needed in the C entry
+ * point is to mask off the bits above bit 7 because the push is sign
+ * extending.
+ */
+	.align IDT_ALIGN
+SYM_CODE_START(irq_entries_start)
+    vector=FIRST_EXTERNAL_VECTOR
+    .rept NR_EXTERNAL_VECTORS
+	UNWIND_HINT_IRET_REGS
+0 :
+	ENDBR
+	.byte	0x6a, vector // `.byte	0x6a`=push
+	jmp	asm_common_interrupt
+	/* Ensure that the above is IDT_ALIGN bytes max */
+	.fill 0b + IDT_ALIGN - ., 1, 0xcc
+	vector = vector+1
+    .endr
+SYM_CODE_END(irq_entries_start)
+```
+
+中断处理函数定义在 irq_entries_start 函数数组里, 它定义了 FIRST_SYSTEM_VECTOR 到 FIRST_EXTERNAL_VECTOR 项, 每一项都是中断处理函数, 会跳到 asm_common_interrupt() 去执行，并最终调用 do_IRQ(), 调用完毕后, 就从中断返回.
+
 
 ### 使用和屏蔽中断
 - disable_irq()
