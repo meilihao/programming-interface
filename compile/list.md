@@ -11,3 +11,4 @@
 ## lang
 - [哪种编程语言又快又省电？有人对比了27种语言](https://cloud.tencent.com/developer/article/2252180)
 - [各大编程语言性能测试结果的可视化图表](https://www.oschina.net/news/201120/programming-language-benchmarks)
+- [深圳团队研发的编程语言 MoonBit 在日本知名开发者社区 Zenn 爆火](https://www.oschina.net/news/287018)

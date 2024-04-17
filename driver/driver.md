@@ -1108,6 +1108,471 @@ linux不同中断处理方式的特点比较
 softirq、tasklet和工作队列的对比:
 <table border="1" cellpadding="1" cellspacing="1" style="width:650px;"><thead><tr><th>&nbsp;</th><th>softirq</th><th>tasklet</th><th>工作队列</th></tr></thead><tbody><tr><td>执行上下文</td><td>延后的工作运行于中断上下文</td><td>延后的工作运行于中断上下文</td><td>延后的工作运行于进程上下文</td></tr><tr><td>可重用</td><td>可以在不同的CPU上同时运行</td><td>不能在不同的CPU上同时运行，但是不同的CPU可以在运行不同的tasklet</td><td>可以在不同的CPU上同时运行</td></tr><tr><td>睡眠</td><td>不能睡眠</td><td>不能睡眠</td><td>可以睡眠</td></tr><tr><td>抢占</td><td>不能抢占/调度</td><td>不能抢占/调度</td><td>可以抢占/调度</td></tr><tr><td>易用性</td><td>不容易使用</td><td>容易使用</td><td>容易使用</td></tr><tr><td>何时使用</td><td>如果延后的工作不会睡眠，而且有严格的可扩展性或速度要求</td><td>如果延后的工作不会睡眠</td><td>如果延后的工作会睡眠</td></tr></tbody></table>
 
+### wokerqueue
+worker_pool和worker是工作队列的内部结构体，它们负责幕后的管理，一方面处理到来的工作，一方面管理worker.
+
+worker_pool的主要作用是协助worker处理工作和管理worker.
+
+> 出于节省资源和降低内核同步代价的目的: worker既是工人, 又是管理者(创建新的worker和释放多余的worker等任务)
+
+> 每一个worker对象都有一个内核线程与之对应，线程的优先级由对应的nice值决定
+
+> 工作队列初始化:workqueue_init_early; 创建worker: workqueue_init.
+
+worker在内存中有三种存在可能，空闲时在idle_list链表上，处理工作时在busy_hash哈希表上，或者是作为管理者独立存在.
+
+woker的task字段对应的进程会执行worker_thread函数，该函数完成worker的任务.
+
+在进入worker_thread前, worker处于空闲状态, worker_leave_idle将其从idle_list链表删除, worker_pool的nr_idle字段减1. 有worker空闲, 即worker_pool的nr_idle字段大于0时, may_start_working为真，否则执行manage_workers管理工人, manage_workers在需要的情况下会创建一个新的worker.
+
+worker_clr_flags 将 worker 的 WORKER_PREP |WORKER_REBOUND 标志清零，如果worker之前没有工作（WORKER_NOT_RUNNING），worker_pool的nr_running字段加1（多了一个工作的worker）. 增加了nr_running字段，need_more_worker就为假，同一个worker_pool后续的worker会直接进入sleep.
+
+接着的 do-while 循环遍历worker_pool的工作，并调用assign_work一个个处理它们. assign_work调用work_struct
+的回调函数. 处理完所有激活的work后，函数重新给worker置位WORKER_PREP状态，worker空闲的情况下将nr_running字段减1.
+
+最后调用worker_enter_idle进入空闲状态时，它们会判断当前的worker数量是否过多，如果是，就启动worker_pool的idle_timer，后
+者将need_to_manage_workers置为真，并唤醒其中一个worker，该worker以管理者的身份执行manage_workers，释放多余的worker。
+完成以上动作后，worker进入空闲状态，调度其他进程执行.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.27/source/kernel/workqueue.c#L6670
+/*
+ * Structure fields follow one of the following exclusion rules.
+ *
+ * I: Modifiable by initialization/destruction paths and read-only for
+ *    everyone else.
+ *
+ * P: Preemption protected.  Disabling preemption is enough and should
+ *    only be modified and accessed from the local cpu.
+ *
+ * L: pool->lock protected.  Access with pool->lock held.
+ *
+ * K: Only modified by worker while holding pool->lock. Can be safely read by
+ *    self, while holding pool->lock or from IRQ context if %current is the
+ *    kworker.
+ *
+ * S: Only modified by worker self.
+ *
+ * A: wq_pool_attach_mutex protected.
+ *
+ * PL: wq_pool_mutex protected.
+ *
+ * PR: wq_pool_mutex protected for writes.  RCU protected for reads.
+ *
+ * PW: wq_pool_mutex and wq->mutex protected for writes.  Either for reads.
+ *
+ * PWR: wq_pool_mutex and wq->mutex protected for writes.  Either or
+ *      RCU for reads.
+ *
+ * WQ: wq->mutex protected.
+ *
+ * WR: wq->mutex protected for writes.  RCU protected for reads.
+ *
+ * MD: wq_mayday_lock protected.
+ *
+ * WD: Used internally by the watchdog.
+ */
+
+/* struct worker is defined in workqueue_internal.h */
+
+struct worker_pool {
+	raw_spinlock_t		lock;		/* the pool lock */
+	int			cpu;		/* I: the associated cpu */
+	int			node;		/* I: the associated node ID */
+	int			id;		/* I: pool ID */
+	unsigned int		flags;		/* L: flags */
+
+	unsigned long		watchdog_ts;	/* L: watchdog timestamp */
+	bool			cpu_stall;	/* WD: stalled cpu bound pool */
+
+	/*
+	 * The counter is incremented in a process context on the associated CPU
+	 * w/ preemption disabled, and decremented or reset in the same context
+	 * but w/ pool->lock held. The readers grab pool->lock and are
+	 * guaranteed to see if the counter reached zero.
+	 */
+	int			nr_running; // 正在处理worker_pool上工作的worker数量, 即并发度. 当它等于0, 且 worklist不为空的情况下, 才需要唤醒worker处理工作（need_more_worker）；如果它不等于0，说明目前已有其他worker在处理工作
+
+	struct list_head	worklist;	/* L: list of pending works */ // 需要处理的工作的链表
+
+	int			nr_workers;	/* L: total number of workers */ // worker的数量
+	int			nr_idle;	/* L: currently idle workers */ // 空闲worker的数量
+
+	struct list_head	idle_list;	/* L: list of idle workers */ // 空闲worker的链表
+	struct timer_list	idle_timer;	/* L: worker idle timeout */ // 管理空闲worker的timer
+	struct work_struct      idle_cull_work; /* L: worker idle cleanup */
+
+	struct timer_list	mayday_timer;	  /* L: SOS timer for workers */
+
+	/* a workers is either on busy_hash or idle_list, or the manager */
+	DECLARE_HASHTABLE(busy_hash, BUSY_WORKER_HASH_ORDER); // busy_hash: 目前正在处理work的worker
+						/* L: hash of busy workers */
+
+	struct worker		*manager;	/* L: purely informational */
+	struct list_head	workers;	/* A: attached workers */
+	struct list_head        dying_workers;  /* A: workers about to die */
+	struct completion	*detach_completion; /* all workers detached */
+
+	struct ida		worker_ida;	/* worker IDs for task name */
+
+	struct workqueue_attrs	*attrs;		/* I: worker attributes */
+	struct hlist_node	hash_node;	/* PL: unbound_pool_hash node */
+	int			refcnt;		/* PL: refcnt for unbound pools */
+
+	/*
+	 * Destruction of pool is RCU protected to allow dereferences
+	 * from get_work_pool().
+	 */
+	struct rcu_head		rcu;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.27/source/kernel/workqueue_internal.h#L24
+/*
+ * The poor guys doing the actual heavy lifting.  All on-duty workers are
+ * either serving the manager role, on idle list or on busy hash.  For
+ * details on the locking annotation (L, I, X...), refer to workqueue.c.
+ *
+ * Only to be used in workqueue and async.
+ */
+struct worker {
+	/* on idle list while idle, on busy hash table while busy */
+	union {
+		struct list_head	entry;	/* L: while idle */ // 插入到idle_list的连接件
+		struct hlist_node	hentry;	/* L: while busy */ // 插入到busy_hash某个链表的连接件
+	};
+
+	struct work_struct	*current_work;	/* K: work being processed and its */ // 正在处理的work
+	work_func_t		current_func;	/* K: function */ // 正在处理的work的回调函数
+	struct pool_workqueue	*current_pwq;	/* K: pwq */ // 正在处理的work的pool_workqueue对象
+	u64			current_at;	/* K: runtime at start or last wakeup */
+	unsigned int		current_color;	/* K: color */
+
+	int			sleeping;	/* S: is worker sleeping? */
+
+	/* used by the scheduler to determine a worker's last known identity */
+	work_func_t		last_func;	/* K: last work's fn */
+
+	struct list_head	scheduled;	/* L: scheduled works */
+
+	struct task_struct	*task;		/* I: worker task */ // 对应的内核线程
+	struct worker_pool	*pool;		/* A: the associated pool */ // 所属的work_pool
+						/* L: for rescuers */
+	struct list_head	node;		/* A: anchored at pool->workers */
+						/* A: runs through worker->node */
+
+	unsigned long		last_active;	/* K: last active timestamp */
+	unsigned int		flags;		/* L: flags */
+	int			id;		/* I: worker id */
+
+	/*
+	 * Opaque string set with work_set_desc().  Printed out with task
+	 * dump for debugging - WARN, BUG, panic or sysrq.
+	 */
+	char			desc[WORKER_DESC_LEN];
+
+	/* used only by rescuers to point to the target workqueue */
+	struct workqueue_struct	*rescue_wq;	/* I: the workqueue to rescue */
+};
+
+// https://elixir.bootlin.com/linux/v6.6.27/source/kernel/workqueue.c#L2726
+/**
+ * worker_thread - the worker thread function
+ * @__worker: self
+ *
+ * The worker thread function.  All workers belong to a worker_pool -
+ * either a per-cpu one or dynamic unbound one.  These workers process all
+ * work items regardless of their specific target workqueue.  The only
+ * exception is work items which belong to workqueues with a rescuer which
+ * will be explained in rescuer_thread().
+ *
+ * Return: 0
+ */
+static int worker_thread(void *__worker)
+{
+	struct worker *worker = __worker;
+	struct worker_pool *pool = worker->pool;
+
+	/* tell the scheduler that this is a workqueue worker */
+	set_pf_worker(true);
+woke_up:
+	raw_spin_lock_irq(&pool->lock);
+
+	/* am I supposed to die? */
+	if (unlikely(worker->flags & WORKER_DIE)) {
+		raw_spin_unlock_irq(&pool->lock);
+		set_pf_worker(false);
+
+		set_task_comm(worker->task, "kworker/dying");
+		ida_free(&pool->worker_ida, worker->id);
+		worker_detach_from_pool(worker);
+		WARN_ON_ONCE(!list_empty(&worker->entry));
+		kfree(worker);
+		return 0;
+	}
+
+	worker_leave_idle(worker);
+recheck:
+	/* no more worker necessary? */
+	if (!need_more_worker(pool))
+		goto sleep;
+
+	/* do we need to manage? */
+	if (unlikely(!may_start_working(pool)) && manage_workers(worker))
+		goto recheck;
+
+	/*
+	 * ->scheduled list can only be filled while a worker is
+	 * preparing to process a work or actually processing it.
+	 * Make sure nobody diddled with it while I was sleeping.
+	 */
+	WARN_ON_ONCE(!list_empty(&worker->scheduled));
+
+	/*
+	 * Finish PREP stage.  We're guaranteed to have at least one idle
+	 * worker or that someone else has already assumed the manager
+	 * role.  This is where @worker starts participating in concurrency
+	 * management if applicable and concurrency management is restored
+	 * after being rebound.  See rebind_workers() for details.
+	 */
+	worker_clr_flags(worker, WORKER_PREP | WORKER_REBOUND);
+
+	do {
+		struct work_struct *work =
+			list_first_entry(&pool->worklist,
+					 struct work_struct, entry);
+
+		if (assign_work(work, worker, NULL))
+			process_scheduled_works(worker);
+	} while (keep_working(pool));
+
+	worker_set_flags(worker, WORKER_PREP);
+sleep:
+	/*
+	 * pool->lock is held and there's no work to process and no need to
+	 * manage, sleep.  Workers are woken up only while holding
+	 * pool->lock or from local cpu, so setting the current state
+	 * before releasing pool->lock is enough to prevent losing any
+	 * event.
+	 */
+	worker_enter_idle(worker);
+	__set_current_state(TASK_IDLE);
+	raw_spin_unlock_irq(&pool->lock);
+	schedule();
+	goto woke_up;
+}
+
+// https://elixir.bootlin.com/linux/v6.6.27/source/kernel/workqueue.c#L285
+/*
+ * The externally visible workqueue.  It relays the issued work items to
+ * the appropriate worker_pool through its pool_workqueues.
+ */
+struct workqueue_struct {
+	struct list_head	pwqs;		/* WR: all pwqs of this wq */ // 与wq相关的pwq的链表的头
+	struct list_head	list;		/* PR: list of all workqueues */ // wq链表的节点, 链表头是workqueues
+
+	struct mutex		mutex;		/* protects this wq */
+	int			work_color;	/* WQ: current work color */
+	int			flush_color;	/* WQ: current flush color */
+	atomic_t		nr_pwqs_to_flush; /* flush in progress */
+	struct wq_flusher	*first_flusher;	/* WQ: first flusher */
+	struct list_head	flusher_queue;	/* WQ: flush waiters */
+	struct list_head	flusher_overflow; /* WQ: flush overflow list */
+
+	struct list_head	maydays;	/* MD: pwqs requesting rescue */
+	struct worker		*rescuer;	/* MD: rescue worker */
+
+	int			nr_drainers;	/* WQ: drain in progress */
+	int			saved_max_active; /* WQ: saved pwq max_active */ // 用于更新pwq的max_active字段
+
+	struct workqueue_attrs	*unbound_attrs;	/* PW: only for unbound wqs */
+	struct pool_workqueue	*dfl_pwq;	/* PW: only for unbound wqs */
+
+#ifdef CONFIG_SYSFS
+	struct wq_device	*wq_dev;	/* I: for sysfs interface */
+#endif
+#ifdef CONFIG_LOCKDEP
+	char			*lock_name;
+	struct lock_class_key	key;
+	struct lockdep_map	lockdep_map;
+#endif
+	char			name[WQ_NAME_LEN]; /* I: workqueue name */
+
+	/*
+	 * Destruction of workqueue_struct is RCU protected to allow walking
+	 * the workqueues list without grabbing wq_pool_mutex.
+	 * This is used to dump all workqueues from sysrq.
+	 */
+	struct rcu_head		rcu;
+
+	/* hot fields used during command issue, aligned to cacheline */
+	unsigned int		flags ____cacheline_aligned; /* WQ: WQ_* flags */
+	struct pool_workqueue __percpu __rcu **cpu_pwq; /* I: per-cpu pwqs */ // 每cpu变量
+};
+```
+
+
+内核提供了多个创建workqueue_struct（以下简称wq）的函数，比如 create_workqueue 、 alloc_ordered_workqueue 和
+create_singlethread_workqueue等，它们都通过alloc_workqueue实现，区别仅在于传递给函数的标志（第二个参数）不同。
+
+除了内核提供的函数外，用户也可以组合标志传递至alloc_workqueue函数，内核提供了多种标志:
+1. WQ_UNBOUND表示wq关联的worker_pool对象不属于任何CPU（先不讨论UNBOUND的情况，稍后单独分析）
+1. `__WQ_ORDERED`表示工作队列中的work是顺序执行的，不会出现并行的情况
+1. WQ_MEM_RECLAIM保证即使在内存有压力的情况下，也会为wq提供执行环境
+1. WQ_FREEZABLE表示在系统suspend时，不会执行工作
+1. WQ_HIGHPRI表示处理工作的进程拥有较高优先级
+1. WQ_SYSFS会为wq创建相应的文件
+
+alloc_workqueue的目的是将新生成的wq与对应的worker_pool联系起来，考虑到多核和worker_pool的共享，workqueue_struct和worker_pool是多对多的关系，通过pool_workqueue（简称pwq）实现。但内核没有从worker_pool访问wq的需要，所以worker_pool并没有相关字段。对非WQ_UNBOUND的wq而言，每个CPU都有两个worker_pool与之对应，同时多个wq还可以共享一个worker_pool.
+
+workqueue_struct的pwqs字段与cpu_pwqs字段并不重复，在设置了WQ_UNBOUND标志的情况下，后者并不会被用到.
+
+pwq实现了wq与worker_pool的多对多关系，同时也包含了描述一对 {wq, pool}关系的属性的字段。它的pool与wq字段是指向worker_pool和wq的指针，nr_active字段表示处于激活状态的工作数目，max_active字段表示允许处于激活状态的工作的最大数目
+
+在WQ_UNBOUND标志没有置位的情况下，alloc_workqueue会使用cpu_worker_pools变量表示的某CPU对应的worker_pool来初始化wq
+与该CPU对应的pwq，所以大多数wq的worker_pool都是共享的.
+
+如果设置了WQ_MEM_RECLAIM标志，alloc_workqueue会为wq额外创建一个worker，以其rescuer字段表示，该worker一般只会被
+worker_pool的mayday_timer唤醒，用来在因为内存不足等原因创建新worker失败的情况下处理工作.
+
+内核支持的工作有两种，一种是需要立即完成的工作，另一种是可以延迟执行的工作，分别对应work_struct和delayed_work结构体.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.27/source/include/linux/workqueue.h#L98
+struct work_struct {
+	atomic_long_t data; // 工作的标志
+	struct list_head entry; // 将其链接到worker_pool的worklist链表上
+	work_func_t func; // 回调函数
+#ifdef CONFIG_LOCKDEP
+	struct lockdep_map lockdep_map;
+#endif
+};
+```
+work_struct的data字段有多种作用，它的0到3位表示work_struct的状态，分别表示 WORK_STRUCT_PENDING 、 WORK_STRUCT_DELAYED 、
+WORK_STRUCT_PWQ和WORK_STRUCT_LINKED。PENDING表示工作已经插入到wq，DELAYED表示工作还未被激活，PWQ被置位
+时，data的8到最高位包含了pwq的地址（pwq的地址都是256字节对齐的），LINKED表示下一个工作与当前工作是有关联的。当PWQ没有
+被置位时，data的高位包含了worker_pool的id，使用合法的id通过idr_find就可以获得worker_pool的地址.
+
+delayed_work是利用定时器来实现延迟的，它只不过是在延迟一段用户需要的时间后，再进行与work_struct同样的操作。内核提供了
+使用它们的函数和宏:
+```c
+DECLARE_WORK // 定义一个工作
+INIT_WORK // 初始化一个工作
+DECLARE_DELAYED_WORK // 定义一个延时执行的工作
+INIT_DELAYED_WORK // 初始化一个延时执行的工作
+queue_work(wq, work) // 将工作插入wq, 等待执行
+queue_delayed_work // 延迟一段时间后, 将工作插入wq, 等待执行, 延迟时间由第三个参数决定, 单位是jiffy
+
+// ----
+schedule_work(work) // 将工作插入system_wq, 等待执行
+schedule_delayed_work // 延迟一段时间后, 将工作插入system_wq, 等待执行
+flush_work // 如果工作已经插入wq, 等待工作执行完成
+flush_delayed_work // 同上
+cancel_work_sync // 取消工作, 如果工作正在执行, 等待执行完毕
+cancel_delayed_work // 取消工作, 返回时工作可能正在被执行
+cancel_delayed_work_sync // 取消工作, 如果工作正在执行, 等待执行完成
+```
+
+schedule_work等不需要指定wq的函数，调用queue_work等实现，它们使用的是内核定义了全局的wq。比如system_wq 、
+system_highpri_wq 、 system_long_wq 、 system_unbound_wq 和 system_freezable_wq等，在workqueue_init_early函数中完成初始化，区别只在于传递至alloc_workqueue的参数不同.
+
+queue_work根据wq和work定位对应的pwq和worker_pool，如果工作数还未达到激活上限（pwq->nr_active < pwq->max_active为真），
+work_struct被插入worker_pool的worklist字段表示的链表，否则插入pwq 的 delayed_works字段表示的链表，这样工作就可以被
+worker_thread执行了.
+
+以上并没有讨论wq的WQ_UNBOUND置位的情况，这种情况下，wq关联的worker_pool不属于任何CPU.
+
+worker_pool并不一定是共享的，内核维护了一个哈希链表（unbound_pool_hash），该表包含了WQ_UNBOUND标志置1时生成
+的worker_pool。对wq的属性（以workqueue_attrs结构体表示）要求相同的wq才会共享worker_pool，如果哈希表中没有相同属性的
+worker_pool，就生成新的并插入链表。
+
+另外，不再使用wq的cpu_pwqs字段来定位wq对应的pwq，替代它的是numa_pwq_tbl字段。
+
+最后一个主要的区别是UNBOUND的情况下，系统不会改变work_pool的nr_running字段，它始终为0。也就是只要有工作可做，
+need_more_workers就为真。这样一个工人在处理某工作的时候，只要还有其他工作可做，就会唤醒另一个工人处理剩余工作。而没有
+UNBOUND的情况下，一个工人可以处理它所属的worker_pool上的所有工作.
+
+工作队列实现复杂，使用倒是比较简单，只需要创建wq（alloc_workqueue）、插入工作（queue_work）和释放资源三个步
+骤，但需要注意以下几点。
+
+首先，与timer、tasklet等相比，工作队列主要的优势在于在用户的回调函数中允许睡眠，也可以进行耗时或复杂操作。如果场景的需
+求不违反前面几种机制的使用原则，一般没必要使用工作队列，因为它除了处理工作之外，还要进行工人管理等额外操作。
+
+其次，创建和销毁wq都是有代价的，尤其是创建新的wq，内核需要完成一系列复杂操作，所以如果模块中只是需要使用一次工作队
+列，创建wq是不明智的，使用内核提供的全局wq即可。
+
+再次，用户在自己的模块中，不可访问workqueue_struct结构体的字段，内核的初衷也不允许用户访问。使用alloc_workqueue获得wq的
+时候，只是获得了它的指针，即内核负责它的管理，用户控制它的生命周期（创建、销毁）和使用。
+
+最后，传递至alloc_workqueue的标志都有各自特殊的作用，用户需要根据自身的需求分析并测试之后决定，简单地复制其他模块的策
+略并不可取。比如WQ_UNBOUND设置了该标志的情况下，工作会尽快得到处理，但它同时多了一些工人的管理操作，且没有利用多核优
+势的机会。
+
+## 等待事件完成
+### 1. 信号量
+将semaphore结构体的count字段初始化为0即可用它来实现事件的同步.
+
+如果操作有失败的可能，timeout是必要的，否则对系统性能和调试可能都不利, 比如设备复位但硬件存在故障场景.
+
+### 2. 等待队列
+等待队列的实现也较为简单清晰，涉及wait_queue_head（以下简称wqh）和wait_queue_entry（以下简称wq）
+两个结构体，很明显二者是一对多的关系.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.27/source/include/linux/wait.h#L30
+/*
+ * A single wait-queue entry structure:
+ */
+struct wait_queue_entry {
+	unsigned int		flags;
+	void			*private;
+	wait_queue_func_t	func;
+	struct list_head	entry;
+};
+
+struct wait_queue_head {
+	spinlock_t		lock;
+	struct list_head	head;
+};
+typedef struct wait_queue_head wait_queue_head_t;
+```
+
+wqh的task_list字段是wq组成的链表的头，wq的entry字段将其链接至链表上。等待队列有多种使用方式，但它们基本都离不开初始
+化、链接并调度和唤醒并删除三个步骤:
+1. 初始化
+
+	```c
+	DECLARE_WAIT_QUEUE_HEAD // 定义wqh
+	init_waitqueue_head // 初始化wqh
+	DECLARE_WAITQUEUE // 定义wq
+	init_waitqueue_entry // 初始化wq
+	DEFINE_WAIT // 定义wq
+	init_wait // 初始化wq
+	```
+1. 链接,删除
+
+	```c
+	add_wait_queue // 链接wq到wqh
+	add_wait_queue_exclusive // 链接wq到wqh, 标记wq的flags的WQ_FLAG_EXCLUSIVE
+	remove_wait_queue // 从链表删除wq
+	```
+1. 唤醒
+	唤醒wqh上的wq的进程
+
+	```c
+	wake_up
+	wake_up_nr
+	wake_up_all
+	wake_up_locked
+	wake_up_Interruptible
+	```
+1. 其他
+
+	```c
+	prepare_to_wait // 更改进程状态并链接
+	prepare_to_wait_exclusive // 同上, 但会标记wq的flags的WQ_FLAG_EXCLUSIVE
+	finish_wait // 更改进程状态为TASK_RUNNING并将wq从链表上删除
+	```
+
 ## 设备驱动与设备驱动模型
 设备驱动（device driver）是操作系统中负责控制设备的定制化(根据设备的具体型号和相应参数进行特定配置)程序.
 

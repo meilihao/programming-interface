@@ -280,6 +280,7 @@ ref:
 - [**硬核长文丨深入理解Linux中断机制**](https://zhuanlan.zhihu.com/p/551615380)
 - [Kernel Exploring](https://richardweiyang-2.gitbook.io/kernel-exploring/00-start_from_hardware/05-interrupt_handler)
 - [QEMU 如何模拟中断](https://martins3.github.io/qemu/interrupt.html)
+- [do_IRQ() has been replaced by common_interrupt()](https://lkml.indiana.edu/hypermail/linux/kernel/2101.1/04627.html)
 
 	asm_common_interrupt的来源
 
@@ -353,6 +354,92 @@ DECLARE_IDTENTRY_IRQ(X86_TRAP_OTHER,	common_interrupt);
 .macro idtentry_irq vector cfunc
 	.p2align CONFIG_X86_L1_CACHE_SHIFT
 	idtentry \vector asm_\cfunc \cfunc has_error_code=1
+.endm
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/entry/entry_64.S#L384
+/**
+ * idtentry - Macro to generate entry stubs for simple IDT entries
+ * @vector:		Vector number
+ * @asmsym:		ASM symbol for the entry point
+ * @cfunc:		C function to be called
+ * @has_error_code:	Hardware pushed error code on stack
+ *
+ * The macro emits code to set up the kernel context for straight forward
+ * and simple IDT entries. No IST stack, no paranoid entry checks.
+ */
+.macro idtentry vector asmsym cfunc has_error_code:req
+SYM_CODE_START(\asmsym)
+
+	.if \vector == X86_TRAP_BP
+		/* #BP advances %rip to the next instruction */
+		UNWIND_HINT_IRET_ENTRY offset=\has_error_code*8 signal=0
+	.else
+		UNWIND_HINT_IRET_ENTRY offset=\has_error_code*8
+	.endif
+
+	ENDBR
+	ASM_CLAC
+	cld
+
+	.if \has_error_code == 0
+		pushq	$-1			/* ORIG_RAX: no syscall to restart */
+	.endif
+
+	.if \vector == X86_TRAP_BP
+		/*
+		 * If coming from kernel space, create a 6-word gap to allow the
+		 * int3 handler to emulate a call instruction.
+		 */
+		testb	$3, CS-ORIG_RAX(%rsp)
+		jnz	.Lfrom_usermode_no_gap_\@
+		.rept	6
+		pushq	5*8(%rsp)
+		.endr
+		UNWIND_HINT_IRET_REGS offset=8
+.Lfrom_usermode_no_gap_\@:
+	.endif
+
+	idtentry_body \cfunc \has_error_code
+
+_ASM_NOKPROBE(\asmsym)
+SYM_CODE_END(\asmsym)
+.endm
+
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/entry/entry_64.S#L1140
+/**
+ * idtentry_body - Macro to emit code calling the C function
+ * @cfunc:		C function to be called
+ * @has_error_code:	Hardware pushed error code on stack
+ */
+.macro idtentry_body cfunc has_error_code:req
+
+	/*
+	 * Call error_entry() and switch to the task stack if from userspace.
+	 *
+	 * When in XENPV, it is already in the task stack, and it can't fault
+	 * for native_iret() nor native_load_gs_index() since XENPV uses its
+	 * own pvops for IRET and load_gs_index().  And it doesn't need to
+	 * switch the CR3.  So it can skip invoking error_entry().
+	 */
+	ALTERNATIVE "call error_entry; movq %rax, %rsp", \
+		    "call xen_error_entry", X86_FEATURE_XENPV
+
+	ENCODE_FRAME_POINTER
+	UNWIND_HINT_REGS
+
+	movq	%rsp, %rdi			/* pt_regs pointer into 1st argument*/
+
+	.if \has_error_code == 1
+		movq	ORIG_RAX(%rsp), %rsi	/* get error code into 2nd argument*/
+		movq	$-1, ORIG_RAX(%rsp)	/* no syscall to restart */
+	.endif
+
+	call	\cfunc
+
+	/* For some configurations \cfunc ends up being a noreturn. */
+	REACHABLE
+
+	jmp	error_return
 .endm
 
 // https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/kernel/irq.c#L247
@@ -431,6 +518,282 @@ handle_irq_event_percpu调用__handle_irq_event_percpu，后者遍历irqaction.
 
 键盘和鼠标的驱动将它们的irqaction链接到了irq_desc，让函数回调它们的handler字段. 键盘的驱动调用了
 request_threaded_irq，它的handler参数为NULL，系统默认设置成了irq_default_primary_handler函数，它直接返回IRQ_WAKE_THREAD， 所以对于键盘而言，会执行irq_wake_thread唤醒执行中断处理的线程，键盘的thread_fn=自定义的handle_keyboard_irq就是在该线程中执行的. 而对鼠标而 言，驱动调用的是request_irq，handler就是自定义的handle_mouse_irq函数，它使用工作队列完成I/O操作和数据报告等任务.
+
+### 中断返回
+```c
+// https://elixir.bootlin.com/linux/v6.6.25/source/arch/x86/entry/entry_64.S#L1140
+SYM_CODE_START_LOCAL(error_return)
+	UNWIND_HINT_REGS
+	DEBUG_ENTRY_ASSERT_IRQS_OFF
+	testb	$3, CS(%rsp) // 判断指向内核态和用户态代码
+	jz	restore_regs_and_return_to_kernel
+	jmp	swapgs_restore_regs_and_return_to_usermode
+SYM_CODE_END(error_return)
+```
+
+### 系统调用
+x86平台中, 系统调用由指令int 80触发，系统调用号存储在eax寄存器中. 中断处理程序是entry_INT80_32，它保存现场，调用系统调用号对应的系统调用，然后返回.
+
+x64平台上，中断处理程序是entry_SYSCALL_64；在64位内核上运行32位程序，如果该程序通过int 80调用系统调用，中断处理程序是entry_INT80_compat.
+
+如果考虑Intel和AMD实现的快速系统调用指令，还可能包括entry_SYSENTER_compat和entry_SYSCALL_compat，它们的使用有限.
+
+### 软中断
+本质上, 软中断并不是真正的中断, 大多情况下可以将它理解为中断发生时进行的一系列操作，比如timer、tasklet（小任务）等.
+
+默认情况下，内核只支持十种类型的软中断，它们在内核中以类型为softirq_action数组的[softirq_vec](https://elixir.bootlin.com/linux/v6.6.25/source/kernel/softirq.c#L59)表示，softirq_action结构体只有一个类型为函数指针的字段action，表示相应的软中断的处理函数。
+
+各软中断和对应的action:
+```c
+// https://elixir.bootlin.com/linux/v6.6.25/source/include/linux/interrupt.h#L550
+enum
+{
+	HI_SOFTIRQ=0, //  tasklet_hi_action
+	TIMER_SOFTIRQ, // run_timer_softirq
+	NET_TX_SOFTIRQ, // net_tx_action
+	NET_RX_SOFTIRQ, // net_rx_action
+	BLOCK_SOFTIRQ, // blk_done_softirq
+	IRQ_POLL_SOFTIRQ, // irq_pool_softirq
+	TASKLET_SOFTIRQ, // tasklet_action
+	SCHED_SOFTIRQ, /// run_rebalance_domains
+	HRTIMER_SOFTIRQ, // run_hrtimer_softirq
+	RCU_SOFTIRQ,    /* Preferable RCU should always be the last softirq */ // rcu_process_callbacks
+
+	NR_SOFTIRQS
+};
+```
+
+另外，软中断执行频率较高，所以除非必要，一般不建议用户添加新类型的软中断.
+
+内核通过每cpu变量irq_stat的__softirq_pending字段的0到9位对应各类软中断，每一类软中断占一位，可以使用local_softirq_pending宏获得该字段的值. `__raise_softirq_irqoff`会将`__softirq_pending`字段对应
+的位置位，函数参数就是需要置位的软中断类型.
+
+raise_softirq和raise_softirq_irqoff不仅会将`__softirq_pending`字段置位，也会在in_interrupt不为真的情况下唤醒ksoftirqd线程处理软中断. 所以，即使没有发生中断，软中断也可以被触发.
+
+除了raise_softirq这两个函数，invoke_softirq也可以触发软中断处理：如果全局变量force_irqthreads为真，唤醒ksoftirqd线程，否则直接调用`__do_softirq`. ksoftirqd线程执行run_ksoftirqd函数，也会调用
+`__do_softirq`来完成最终操作.
+
+需要注意的是，软中断有可能在ksoftirqd进程中, 也有可能执行在中断上下文中, 所以使用软中断的时候也需要遵守中断编程原则.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.25/source/kernel/softirq.c#L510
+asmlinkage __visible void __softirq_entry __do_softirq(void)
+{
+	unsigned long end = jiffies + MAX_SOFTIRQ_TIME;
+	unsigned long old_flags = current->flags;
+	int max_restart = MAX_SOFTIRQ_RESTART;
+	struct softirq_action *h;
+	bool in_hardirq;
+	__u32 pending;
+	int softirq_bit;
+
+	/*
+	 * Mask out PF_MEMALLOC as the current task context is borrowed for the
+	 * softirq. A softirq handled, such as network RX, might set PF_MEMALLOC
+	 * again if the socket is related to swapping.
+	 */
+	current->flags &= ~PF_MEMALLOC;
+
+	pending = local_softirq_pending();
+
+	softirq_handle_begin();
+	in_hardirq = lockdep_softirq_start();
+	account_softirq_enter(current);
+
+restart:
+	/* Reset the pending bitmask before enabling irqs */
+	set_softirq_pending(0);
+
+	local_irq_enable();
+
+	h = softirq_vec;
+
+	while ((softirq_bit = ffs(pending))) {
+		unsigned int vec_nr;
+		int prev_count;
+
+		h += softirq_bit - 1;
+
+		vec_nr = h - softirq_vec;
+		prev_count = preempt_count();
+
+		kstat_incr_softirqs_this_cpu(vec_nr);
+
+		trace_softirq_entry(vec_nr);
+		h->action(h);
+		trace_softirq_exit(vec_nr);
+		if (unlikely(prev_count != preempt_count())) {
+			pr_err("huh, entered softirq %u %s %p with preempt_count %08x, exited with %08x?\n",
+			       vec_nr, softirq_to_name[vec_nr], h->action,
+			       prev_count, preempt_count());
+			preempt_count_set(prev_count);
+		}
+		h++;
+		pending >>= softirq_bit;
+	}
+
+	if (!IS_ENABLED(CONFIG_PREEMPT_RT) &&
+	    __this_cpu_read(ksoftirqd) == current)
+		rcu_softirq_qs();
+
+	local_irq_disable();
+
+	pending = local_softirq_pending();
+	if (pending) {
+		if (time_before(jiffies, end) && !need_resched() &&
+		    --max_restart)
+			goto restart;
+
+		wakeup_softirqd();
+	}
+
+	account_softirq_exit(current);
+	lockdep_softirq_end(in_hardirq);
+	softirq_handle_end();
+	current_restore_flags(old_flags, PF_MEMALLOC);
+}
+```
+
+pending的初值等于irq_stat的`__softirq_pending`, `__do_softirq`循环pending的每一个为1的位，调用该位对应的softirq_action对象的action字段.
+
+在当前逻辑下, `__softirq_pending`字段多余的位不能用作其他目的，否则会造成数组越界。另外，各种类型的软中断的优先级从HI_SOFTIRQ到RCU_SOFTIRQ依次递减.
+
+软中断处理最终落到了softirq_action对象的action字段.
+
+#### tasklet
+tasklet属于软中断，有HI_SOFTIRQ和TASKLET_SOFTIRQ两种类型，其中HI_SOFTIRQ优先级更高, 过于复杂的操作请考虑工作队列等其他机制.
+
+tasklet涉及两个结构体：tasklet_struct和tasklet_head. 在内核中tasklet_struct对象由单向链表链接，tasklet_head存储了链表的头部和尾部，它采用了FIFO（First In First Out）策略，新的tasklet_struct对象
+（下文中简称tasklet）被插入到链表尾部.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.25/source/include/linux/interrupt.h#L642
+struct tasklet_struct
+{
+	struct tasklet_struct *next; // 指向下一个tasklet
+	unsigned long state; // 当前状态. TASKLET_STATE_SCHED, 被加入调度以待执行; TASKLET_STATE_RUN, 正在执行
+	atomic_t count; // 用来enable/disable tasklet
+	bool use_callback; // tasklet执行时调用的回调函数
+	union {
+		void (*func)(unsigned long data);
+		void (*callback)(struct tasklet_struct *t);
+	};
+	unsigned long data; // 调用回调函数时传递的参数
+};
+
+// https://elixir.bootlin.com/linux/v6.6.26/source/kernel/softirq.c#L706
+/*
+ * Tasklets
+ */
+struct tasklet_head {
+	struct tasklet_struct *head; // 指向tasklet链表头
+	struct tasklet_struct **tail; // 指向链表尾
+};
+```
+
+tasklet_head里的对象是每cpu变量tasklet_hi_vec和tasklet_vec, 分别对应HI_SOFTIRQ和TASKLET_SOFTIRQ.
+
+tasklet相关函数和宏:
+- DECLARE_TASKLET: 定义tasklet, count初始化为0
+- DECLARE_TASKLET_DISABLED: 将count初始化为1, 其他与DECLARE_TASKLET相同
+- tasklet_init: 为tasklet赋值, count赋值为0
+- tasklet_enable: 使能tasklet
+- tasklet_disable: 禁用tasklet, 如果tasklet正在执行, 等待执行完成后才返回
+- tasklet_hi_schedule: 调度tasklet, 对应HI_SOFTIRQ
+- tasklet_schedule: 调度tasklet, 对应TASKLET_SOFTIRQ
+- tasklet_kill: 清除tasklet的调度和运行状态, 如果处于调度或执行状态, 则等待状态清除
+
+tasklet_enable将tasklet的count字段减1，tasklet_disable则将count字段加1，count字段的值被用来控制tasklet的执行.
+tasklet_schedule检查tasklet的state字段的TASKLET_STATE_SCHED状态位是否被置位，如果否，将状态置位，并调用`__tasklet_schedule`将tasklet插入链表.
+
+HI_SOFTIRQ和TASKLET_SOFTIRQ软中断对应的softirq_action对象的action字段分别为tasklet_hi_action和tasklet_action。二者都调用[tasklet_action_common](https://elixir.bootlin.com/linux/v6.6.26/source/kernel/softirq.c#L758)实现.
+
+tasklet_action_common将链表保存至list，然后清空原链表。在while循环中遍历链表中每一个tasklet，如果tasklet没有执行（tasklet_trylock会判断并设置TASKLET_STATE_RUN状态），且它的count字段等于0，调用它的回调函数，否则重新将其插入清空后的链表。也就是说，被执行的tasklet会被从链表删除，没有被执行的tasklet会被重新插入链表.
+
+tasklet说明:
+1. 只有tasklet的count字段等于0的情况下才会得到执行，得不到执行的tasklet会被tasklet_action_common重新插入链表。对初值等于0的tasklet，要保证调用tasklet_disable和tasklet_enable的次数相等
+1. 内核并没有定义将tasklet从链表删除的函数，一旦调用了tasklet_schedule，tasklet就无法取消执行；使用tasklet_disable可以阻止它执行
+1. tasklet_kill并不是杀死tasklet，只是等待清除tasklet的状态。如果调用tasklet_kill时，tasklet处于TASKLET_STATE_SCHED状态，且count字段的值不等于0，那么tasklet_kill会循环下去，直到count
+字段的值为0使tasklet执行一次。所以调用tasklet_kill之前，必须确保tasklet是有可能被执行或者已经被执行的
+
+#### 定时器
+定时器是一种软中断.
+
+定时器主要涉及timer_list和timer_base两个结构体:
+```c
+// https://elixir.bootlin.com/linux/v6.6.26/source/include/linux/timer.h#L11
+struct timer_list {
+	/*
+	 * All fields that change during normal runtime grouped to the
+	 * same cacheline
+	 */
+	struct hlist_node	entry; // 链表的连接件, 链到timer_base->vectors的链表里
+	unsigned long		expires; // 到期时间
+	void			(*function)(struct timer_list *); // 到期执行的操作
+	u32			flags;
+
+#ifdef CONFIG_LOCKDEP
+	struct lockdep_map	lockdep_map;
+#endif
+};
+
+// https://elixir.bootlin.com/linux/v6.6.26/source/kernel/time/timer.c#L199
+struct timer_base {
+	raw_spinlock_t		lock;
+	struct timer_list	*running_timer; // 当前正在运行的timer
+#ifdef CONFIG_PREEMPT_RT
+	spinlock_t		expiry_lock;
+	atomic_t		timer_waiters;
+#endif
+	unsigned long		clk; // 该base执行到的时间, 以jiffy为单位
+	unsigned long		next_expiry;
+	unsigned int		cpu;
+	bool			next_expiry_recalc;
+	bool			is_idle;
+	bool			timers_pending;
+	DECLARE_BITMAP(pending_map, WHEEL_SIZE); // pending_map, 位图, 表示vectors的某个链表是否为空
+	struct hlist_head	vectors[WHEEL_SIZE]; // 链表头组成的数组
+} ____cacheline_aligned;
+```
+
+timer_base和timer_list是1:n的关系.
+
+内核中定义了每cpu变量timer_bases，它的类型为timer_base[NR_BASES]，NR_BASES的值等于2，也就是每一个CPU都有两个timer_base对象，分部为BASE_STD和BASE_DEF（DEFERRABLE的缩写）.
+
+timer函数表:
+- DEFINE_TIMER: 定义一个timer, 初始化为function, expires等字段
+- timer_setup: 初始化timer, 为function, data和flags赋值
+- add_timer(timer): 将timer链接到timer_base内对应的链表头上
+
+	add_timer调用mod_timer实现，后者调用`__mod_timer`，`__mod_timer`会将timer插入目标链表
+
+	> msec_to_jiffies将毫秒为单位的时间值转为jiffies为单位的值
+- add_time_on: 同上, 指定cpu
+- mod_timer(timer, expires): 同上， expires指定了到期时间
+- del_timer(timer): 停止timer, 从对应链表删除
+- del_timer_sync: 同上, 但如果timer正在执行, 会等待执行完毕. 如果time处于pending状态, 返回1, 否则返回0
+
+time的pending状态: timer还在等待被执行，内核提供了timer_pending函数判断该状态.
+
+timer_base维护了一个链表数组，一个timer插入base的哪个链表由它的到期时间和base当前执行到的时间决定，calc_wheel_index会根据这两
+个参数计算得到目标链表的下标idx.
+
+如果timer已经处于pending状态，且调用mod_timer导致它的目标链表与当前链表不一致，`__mod_timer`会将它从当前链表中删除.
+
+如果需要，`__mod_timer`最终会调用enqueue_timer，将timer插入链表，将base的pending_map字段的位图对应的位置1，然后调用timer_set_idx将idx存入timer的字段中。
+
+timer并没有独立表示idx的字段，而是使用它的flags字段的高10位表示idx。之前刻意回避了timer和CPU的关系，也就是timer定位base的
+过程，这也是靠flags字段完成的，flags的低18位表示timer所属的CPU.
+
+定时器机制对应于软中断的TIMER_SOFTIRQ，它的softirq_action对象的action字段为run_timer_softirq，run_timer_softirq调用`__run_timers`，尝试运行当前CPU的两个base对象上的timer.
+
+base的clk字段表示base执行到的时间，将该字段的值与当前jiffies比较，如果jiffies不早于该字段表示的时间，`__run_timers`会调用
+collect_expired_timers收集已经到期的timer，然后在expire_timers中调用call_timer_fn回调timer的function，执行过的timer会从链表中删除.
+
+> 3.10版中timer定义了data字段作为私有数据传递至function函数，使用timer的时候可以利用data传递数据. 5.05版中一般需要定义更大的结构体内嵌timer，在function中通过container_of宏获得该对象
+
+定时器延迟的时间是以jiffy为单位的。所以它无法满足延迟小于一个jiffy的需求，在现代处理器架构中可以使用hrtimer机制
+（见hrtimer_interrupt函数）来替代.
 
 ### 中断嵌套
 一个中断发生的时候, 另一个中断到来, 需要先处理新中断, 处理完毕再返回原中断继续处理.

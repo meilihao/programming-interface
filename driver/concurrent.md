@@ -1,4 +1,7 @@
 # concurrent
+ref:
+- [**Linux内核学习笔记（十一）内核同步方法（自旋锁，信号量，互斥锁，完成变量，顺序锁，禁止抢占）**](https://www.huliujia.com/blog/148dbabde2804f33fc69c42699a84637082c5d78/)
+
 ## 编译乱序/执行乱序
 由于编译器的优化和CPU的乱序执行等特性，CPU访问内存的顺序并不一定与预期的顺序一致. CPU可能会重新排列、推迟或者采取集中访问内存等各种策略，这是无法预知的. 但某些情况下，程序需要按照先后顺序访问内存，内存屏障就派上用场了.
 
@@ -149,3 +152,81 @@ mutex_lock和mutex_lock_interruptible()的区别与down()和down_trylock()的区
 1. free_percpu(volid `*pdata`) : 释放内存
 
 每CPU变量的使用和数组也是不同的. 从本质上来讲，定义了每CPU变量后，把它当作数组来使用，在某些平台上可能是可行的，但这样的程序不具备可移植性.
+
+## atomic变量
+atomic变量由atomic_t结构体表示.
+
+atomic函数表:
+- static inline void atomic_add(int i, atomic_t *v)	给一个原子变量v增加i
+- static inline int atomic_add_return(int i, atomic_t *v)	同上，只不过将变量v的最新值返回
+- static inline void atomic_sub(int i, atomic_t *v)	给一个原子变量v减去i
+- static inline int atomic_sub_return(int i, atomic_t *v)	同上，只不过将变量v的最新值返回
+- static inline int atomic_cmpxchg(atomic_t *ptr, int old, int new)	
+	比较old和原子变量ptr中的值，如果相等，那么就把new值赋给原子变量, 并返回旧的原子变量ptr中的值
+- atomic_xchg(v, new) : 将new赋值给count字段, 返回count字段的原始值
+- atomic_read	获取原子变量的值
+- atomic_set	设定原子变量的值
+- atomic_inc(v)	原子变量的值加一
+- atomic_inc_return(v)	同上，只不过将变量v的最新值返回
+- atomic_dec(v)	原子变量的值减去一
+- atomic_dec_return(v)	同上，只不过将变量v的最新值返回
+- atomic_sub_and_test(i, v)	给一个原子变量v减去i，并判断变量v的最新值是否等于0
+- atomic_add_negative(i,v)	给一个原子变量v增加i，并判断变量v的最新值是否是负数
+- static inline int atomic_add_unless(atomic_t *v, int a, int u)
+
+	只要原子变量v不等于u，那么就执行原子变量v加a的操作。如果v不等于u，返回非0值，否则返回0值
+
+它们的实现多与平台相关，很多处理器对自加自减操作进行了优化，所以如果只是加减1，应该优先选择atomic_inc和atomic_dec，而
+不是atomic_add/atomic_sub.
+
+## 禁中断
+中断发生后，以下情况，需要禁中断:
+1. 在必要的处理之前不能被打断
+1. 处于某些临界状态时，不想被中断打断
+1. 某设备处理自身中断，处理完毕之前不能接受来自自身的新中断
+
+禁中断分两种情况，一种是禁止本地CPU的可屏蔽中断，另一种是禁止本设备对应的中断
+
+禁中断相关函数:
+1. local_irq_disable : 禁止本地cpu的可屏蔽中断
+1. local_irq_enable : 使能本地cpu的可屏蔽中断
+1. disable_req(irq) : 禁止irq号对应的中断
+1. enable_irq(irq) : 使能irq号对应的中断
+
+## 禁抢占
+在发生CPU正在处理硬中断，不能去执行软中断，也不能随意切换进程；或当前进程正在执行关键程序，不允许在该过程中切换进程等情况时，就需要禁止抢占了.
+
+> 每cpu变量`__preempt_count`的值为0时才会抢占当前进程，x86平台正是使用它决定是否可抢占的
+
+内核定义了一系列与内核抢占相关的函数和宏. 在x86平台上，它们都是通过修改__preempt_count实现的:
+1. preempt_disable: 禁抢占, 变量值加1
+1. preempt_enable: 使能抢占, 变量值减1
+1. preempt_count_inc: 变量值加1
+1. preempt_count_dec: 变量值减1
+1. preempt_count_add(val): 变量值加val
+1. preempt_count_sub(val): 变量值减val
+1. preempt_count: 返回变量
+
+preempt_enable只是将变量值减1，减1后如果不等于0，抢占依然是被禁的，disable和enable一般需要配对使用.
+
+`__preempt_count`可以被拆分为几个部分理解，每个部分都表示不同的意义:
+- PREEMPT_OFFSET: 内核抢占, 0~7位
+- SOFTIRQ_OFFSET: 软中断, 8~15
+- HARDIRQ_OFFSET: 硬中断, 16~19
+- NMI_OFFSET: 不可屏蔽中断, 20
+- PREEMPT_NEED_RESCHED： 发生内核抢占, 31
+
+参数列是可以传递给preempt_count_add和preempt_count_sub的值，表示对应的状态。比如，执行preempt_count_add(HARDIRQ_OFFSET)就表示正在处理硬中断，如果新的中断到来嵌套执行，会再次调用它，一层处理完毕调用一次preempt_count_sub(HARDIRQ_OFFSET)直到所有中断处理完16～19位的值等于0.
+
+利用该变量的值反应抢占和中断的状态，内核提供了几个宏, 它们都通过__preempt_count的值计算结果:
+- in_irq: 硬中断
+- in_softirq： 软中断
+- in_serving_softirq： 处理软中断中
+- in_interrupt： 硬中断,  软中断, NMI, 处理软中断中
+- in_nmi: NMI
+- in_task: 非硬中断, 非软中断, 非NMI
+
+in_interrupt比较容易引起误解，因为跟它相关的不仅有硬中断，还包括了软中断和NMI.
+
+处理软中断时，进入和退出处理都会以SOFTIRQ_OFFSET为单位改变`__preempt_count`. 禁用和使能软中断，则以`SOFTIRQ_DISABLE_OFFSET（2*SOFTIRQ_OFFSET）`为单位改变`__preempt_count`。这样当它的值的第8位等于1时，in_serving_softirq为
+真；第8～15位的值不等于0时，in_softirq为真
