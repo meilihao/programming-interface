@@ -1573,6 +1573,39 @@ wqh的task_list字段是wq组成的链表的头，wq的entry字段将其链接�
 	finish_wait // 更改进程状态为TASK_RUNNING并将wq从链表上删除
 	```
 
+add_wait_queue将wq插入链表的头,add_wait_queue_exclusive将wq插入链表的尾部,唤醒操作回调wq的func字段表示的回调函数,一
+般情况下这些回调函数都会进行唤醒进程的操作.
+
+wq按照标记来分可以分为两种,一种是排他性的(WQ_FLAG_EXCLUSIVE标志),一种是非排他性的. 唤醒操作最
+终都通过`__wake_up_common`函数实现,函数的第三个参数nr_exclusive表示需要唤醒的排他性的wq的数目(0表示全部唤醒),
+它们从链表头开始向链表尾部遍历并唤醒wq的进程,直到唤醒的排他性的进程数目达到上限或者链表为空。wake_up、wake_up_nr和
+wake_up_all分别唤醒1个指定数目和所有的排他性的wq.
+
+以上函数有三种常见的使用方式:
+1. 在模块中自行组合它们
+
+	初始化后依次调用add_wait_queue、改变进程状态、调用schedule,这样当前进程即进入等待,被唤醒后才能继续执行;目标事件发生后,调用wake_up唤醒之前的进程.
+1. 使用wait_event,内核提供了一系列类似的函数,它们依然没有摆脱使用等待队列的三个步骤,wait_event只不过是
+add_wait_queue、改变进程状态和调用schedule三个小步骤的封装. 使用它只需要初始化wqh、wait_event和wake_up三部分
+
+	`wait_event[_xxx]`函数表, 可根据函数的后缀含义对应使用:
+	1. wait_event
+	1. wait_event_timeout
+	1. wait_event_interruptible
+	1. wait_event_interruptible_exclusive
+	1. wait_event_killable
+	1. wait_event_lock_irq_cmd
+	1. wait_event_lock_irq
+1. 是使用completion,它与wait_event类似,也是通过等待队列实现的
+
+	completion函数:
+	1. init_completion # 定义一个completion
+	1. wait_for_completion # 等待completion完成, 根据函数名后缀对应使用
+	1. wait_for_completion_interruptible # 同上
+	1. wait_for_completion_timeout # 同上
+	1. complete # 完成completion, 唤醒一个排他性的进程
+	1. complete_all # 完成completion, 唤醒全部进程
+
 ## 设备驱动与设备驱动模型
 设备驱动（device driver）是操作系统中负责控制设备的定制化(根据设备的具体型号和相应参数进行特定配置)程序.
 
