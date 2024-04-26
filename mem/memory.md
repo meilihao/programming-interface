@@ -32,6 +32,8 @@ Linux像多数现代内核一样,采用了虚拟内存管理技术. 该技术利
 虚拟内存有点:
 - 进程隔离
 - 共享内存
+
+	被共享的是物理内存,并不是虚拟内存
 - 便于实现内存保护机制
 
 	可对不同进程的页表条目(共享ram时)进行标记,以表示相关页面内容是可读、可写、可执行亦或是这些保护措施的组合
@@ -48,6 +50,792 @@ Linux像多数现代内核一样,采用了虚拟内存管理技术. 该技术利
 内存Interleave: 把内存打散了平均分配在多根DIMM上，进行交错，从根本上让多通道利用起来，也叫做Channel Interleaving（和Rank interleaving不同）, 需要设置biso开启.
 
 > 相同的, ssd,pcie也有类似的通道概念.
+
+## 内存模式
+ref:
+- [**深入理解 Linux 物理内存分配全链路实现**](https://www.51cto.com/article/743324.html)
+- [kmalloc分配物理内存与高端内存映射--Linux内存管理(十八) ](https://www.cnblogs.com/linhaostudy/p/10183797.html)
+
+Linux支持FLATMEM、DISCONTIGMEM和SPARSEMEM等多种模式,还有一种SPARSEMEM_VMEMMAP是优化版,系统有足够的资源时启用,一般为前三种.
+
+FLATMEM也就是FlatMemory,平面内存模式, DISCONTIGMEM和SPARSEMEM适用于NUMA或者内存热插拔的情形.
+
+Flat Memory模式适用于大多数情形,它把内存看作是连续的,即使中间有hole,也会将hole计算在物理页内。由于管理内存需要利用数据结构记录所有物理页的使用情况,所以它的劣势是当可用的物理内
+存段中存在较大比例的hole时,会浪费一些空间.
+
+DISCONTIGMEM模式(Discontiguous Memory,非连续内存模式) = FLATMEM + 把每个内部连续的内存段分开管理而不计算hole.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/mmzone.h#L1265
+/*
+ * On NUMA machines, each NUMA node would have a pg_data_t to describe
+ * it's memory layout. On UMA machines there is a single pglist_data which
+ * describes the whole memory.
+ *
+ * Memory statistics and page replacement data structures are maintained on a
+ * per-zone basis.
+ */
+typedef struct pglist_data {
+	/*
+	 * node_zones contains just the zones for THIS node. Not all of the
+	 * zones may be populated, but it is the full list. It is referenced by
+	 * this node's node_zonelists as well as other node's node_zonelists.
+	 */
+	struct zone node_zones[MAX_NR_ZONES]; // 节点包含的zone的集合
+
+	/*
+	 * node_zonelists contains references to all zones in all nodes.
+	 * Generally the first zones will be references to this node's
+	 * node_zones.
+	 */
+	struct zonelist node_zonelists[MAX_ZONELISTS];
+
+	int nr_zones; /* number of populated zones in this node */
+#ifdef CONFIG_FLATMEM	/* means !SPARSEMEM */
+	struct page *node_mem_map; // 节点包含的物理内存页对应的page结构体集合
+#ifdef CONFIG_PAGE_EXTENSION
+	struct page_ext *node_page_ext;
+#endif
+#endif
+#if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
+	/*
+	 * Must be held any time you expect node_start_pfn,
+	 * node_present_pages, node_spanned_pages or nr_zones to stay constant.
+	 * Also synchronizes pgdat->first_deferred_pfn during deferred page
+	 * init.
+	 *
+	 * pgdat_resize_lock() and pgdat_resize_unlock() are provided to
+	 * manipulate node_size_lock without checking for CONFIG_MEMORY_HOTPLUG
+	 * or CONFIG_DEFERRED_STRUCT_PAGE_INIT.
+	 *
+	 * Nests above zone->lock and zone->span_seqlock
+	 */
+	spinlock_t node_size_lock;
+#endif
+	unsigned long node_start_pfn; // 节点包含的物理内存的起始页页框号
+	unsigned long node_present_pages; /* total number of physical pages */ // 节点包含的物理内存页数=node_spanned_pages - hole所占页数
+	unsigned long node_spanned_pages; /* total size of physical page
+					     range, including holes */ // 节点包含的物理内存区间, 包含中间的hole
+	int node_id;
+	wait_queue_head_t kswapd_wait;
+	wait_queue_head_t pfmemalloc_wait;
+
+	/* workqueues for throttling reclaim for different reasons. */
+	wait_queue_head_t reclaim_wait[NR_VMSCAN_THROTTLE];
+
+	atomic_t nr_writeback_throttled;/* nr of writeback-throttled tasks */
+	unsigned long nr_reclaim_start;	/* nr pages written while throttled
+					 * when throttling started. */
+#ifdef CONFIG_MEMORY_HOTPLUG
+	struct mutex kswapd_lock;
+#endif
+	struct task_struct *kswapd;	/* Protected by kswapd_lock */
+	int kswapd_order;
+	enum zone_type kswapd_highest_zoneidx;
+
+	int kswapd_failures;		/* Number of 'reclaimed == 0' runs */
+
+#ifdef CONFIG_COMPACTION
+	int kcompactd_max_order;
+	enum zone_type kcompactd_highest_zoneidx;
+	wait_queue_head_t kcompactd_wait;
+	struct task_struct *kcompactd;
+	bool proactive_compact_trigger;
+#endif
+	/*
+	 * This is a per-node reserve of pages that are not available
+	 * to userspace allocations.
+	 */
+	unsigned long		totalreserve_pages;
+
+#ifdef CONFIG_NUMA
+	/*
+	 * node reclaim becomes active if more unmapped pages exist.
+	 */
+	unsigned long		min_unmapped_pages;
+	unsigned long		min_slab_pages;
+#endif /* CONFIG_NUMA */
+
+	/* Write-intensive fields used by page reclaim */
+	CACHELINE_PADDING(_pad1_);
+
+#ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
+	/*
+	 * If memory initialisation on large machines is deferred then this
+	 * is the first PFN that needs to be initialised.
+	 */
+	unsigned long first_deferred_pfn;
+#endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	struct deferred_split deferred_split_queue;
+#endif
+
+#ifdef CONFIG_NUMA_BALANCING
+	/* start time in ms of current promote rate limit period */
+	unsigned int nbp_rl_start;
+	/* number of promote candidate pages at start time of current rate limit period */
+	unsigned long nbp_rl_nr_cand;
+	/* promote threshold in ms */
+	unsigned int nbp_threshold;
+	/* start time in ms of current promote threshold adjustment period */
+	unsigned int nbp_th_start;
+	/*
+	 * number of promote candidate pages at start time of current promote
+	 * threshold adjustment period
+	 */
+	unsigned long nbp_th_nr_cand;
+#endif
+	/* Fields commonly accessed by the page reclaim scanner */
+
+	/*
+	 * NOTE: THIS IS UNUSED IF MEMCG IS ENABLED.
+	 *
+	 * Use mem_cgroup_lruvec() to look up lruvecs.
+	 */
+	struct lruvec		__lruvec;
+
+	unsigned long		flags;
+
+#ifdef CONFIG_LRU_GEN
+	/* kswap mm walk data */
+	struct lru_gen_mm_walk mm_walk;
+	/* lru_gen_folio list */
+	struct lru_gen_memcg memcg_lru;
+#endif
+
+	CACHELINE_PADDING(_pad2_);
+
+	/* Per-node vmstats */
+	struct per_cpu_nodestat __percpu *per_cpu_nodestats;
+	atomic_long_t		vm_stat[NR_VM_NODE_STAT_ITEMS];
+#ifdef CONFIG_NUMA
+	struct memory_tier __rcu *memtier;
+#endif
+#ifdef CONFIG_MEMORY_FAILURE
+	struct memory_failure_stats mf_stats;
+#endif
+} pg_data_t;
+```
+
+内核得到的内存不一定是连续的,也不一定全部由内核使用。系统初始化阶段,内核会使用某些机制(如bios e820/uefi GetMemoryMap)获得系统当前的内存配置情况, linux可通过/sys/firmware/memmap或dmesg的"BIOS-provided physical RAM map"查看.
+
+e820描述的内存段共有6种类型,但只有E820_RAM和E820_RESERVED_KERN两种属于log中的usable,其他的几种并不归内核管理, 其他各段都有特殊的用途.
+
+内核提供了memblock机制来管理可用内存, 每一段内存都有一个memblock_region对象与之对应。node的pglist_data结构体初始化的时候,calculate_node_totalpages函数会根据两段内存和各zone的边界计算得到node_spanned_pages和node_present_pages.
+
+之后在alloc_node_mem_map函数中,根据node_start_pfn和node_spanned_pages的值计算出最终需要管理的内存的页数(主要是对
+齐调整)。页数就是该节点page对象的个数,据此申请内存,将内存地址赋值给node_mem_map字段,page对象就存在这里. node的page对象本质是一个数组,这个数组对应
+着Flat Memory模式的整个平面物理内存,所以内存的hole也需要有page结构体与之对应.
+
+节点的内存根据使用情况划分为多个区域,每个区域都对应一个zone对象. zone最多分为ZONE_DMA、ZONE_DMA32、ZONE_NORMAL、ZONE_HIGHMEM、ZONE_MOVABLE和
+ZONE_DEVICE六种。ZONE_DMA32用在64位系统上 , ZONE_MOVABLE是为了减少内存碎片化引入的虚拟zone.
+
+ZONE_DMA的内存区间为低16M,ZONE_NORMAL的内存区间为16M到max_low_pfn页框的地址,ZONE_HIGHMEM的内存区间为max_low_pfn 到 max_pfn.
+
+max_pfn等于最大的页框号,不考虑预留HighMemory的情况下,如果它大于MAXMEM_PFN(MAXMEM对应的页框) ,
+max_low_pfn就等于MAXMEM_PFN。如果它小于MAXMEM_PFN,max_low_pfn则等于max_pfn,这样就没有ZONE_HIGHMEM了.
+
+page是zone的下一级单位,属于zone。但所有的page对象,都以数组的形式统一放在了pglist_data的node_mem_map字段指向的内存中.
+
+除了碎片化,还要考虑效率,内核在不同阶段采用的内存管理方式也不同,主要分为memblock和buddy系统两种.
+
+并不是所有的usable部分内存都直接归内核管理. 除了memblock和slab系统外,还有一个更高的级别是启动程序,比如
+grub。grub可以通过参数(比如“mem=2048M”即高于2048M的部分不归内核管理)来限制内核可以管理的内存上限. 同样,memblock也可以扣留一部分内存,剩下的部分才轮到buddy系统管理.
+
+> grub扣下的内存可给修改grub的人用的,这部分内存可以在程序中映射、独享.
+
+扣除了grub预留的内存后,所有用途为usable的内存块都会默认进入可用内存块数组(简称memory数组),有一些模块也会选择预留一部分内存供其使用,这些块会进入被预留的内存块数组(简称reserve数组).
+
+内核以memblock_region结构体表示一块,它的base和size字段分别表示块的起始地址和大小. 块以数组的形式进行管理,该数组由memblock_type结构体的regions字段表示。内核共有两个memblock_type对象(也可以理解为有两个由内存块组成的数组),一个表示可用的内存,一个表示被预留的内存,分别由memblock结构体的memory和reserved字段表示.
+
+memblock函数表:
+- memblock_add: 将内存块加入memory数组
+- memblock_remove: 将内存块从memory数组中删除, 很少使用
+- memblock_reserve: 预留内存块, 加入reserve数组
+- memblock_free: 释放内存块, 从reserve数组删除
+
+memblock是内存管理的第一个阶段,也是初级阶段,buddy系统会接替它的工作继续内存管理。它与buddy系统交接是在mem_init函数
+中完成的,标志为after_bootmem变量置为1。mem_init函数会调用set_highmem_pages_init和memblock_free_all分别释放highmem和
+lowmem到buddy系统.
+
+块被加入reserve数组的时候并未从memory数组删除,只有在memory数组中,且不在reserve数组中的块才会进入buddy系统. 与
+grub一样,被预留的内存块也是给预留内存块的模块使用的,模块自行负责内存的映射。所以,buddy系统管理的内存是经过grub和
+memblock"克扣"后剩下的部分.
+
+> 伙伴系统只会维护空闲的块,已经分配出去的块不再属于伙伴系统,只有被释放后才会重新进入伙伴系统.
+
+> memblock预留内存时必须在memblock切换到buddy系统之前调用memblock_reserve
+
+内核的buddy(伙伴)系统也是以块来管理内存的,不过块的大小并不是任意的,块以页为单位,仅有2^0
+,2^1, ...2^10,共11(MAX_ORDER)种(1页,2页......1024页,4K,8K...4M)大小,在内核中以阶(order)来表示块的大小,所以阶有0, 1...10共11种。内存申请优先从小块开始是自然的,释放一个块的时候,如果它的伙伴也处于空闲状态,那么就将二者合并成一个更大的块。合并后
+的块,如果它的伙伴也空闲,就继续合并,依次类推。另外,块包含的内存必须是连续的,不能有洞(hole).
+
+页(page)的上一级是zone,所以块是由zone来记录的,zone的free_area字段是一个大小等于MAX_ORDER的free_area结构体类型的
+数组,数组的每一个元素对应伙伴系统当前所有大小为某个阶的块,阶的值等于数组下标. free_area的free_list字段也是一个数组,数组的
+每一个元素都是同种迁移(MIGRATE)类型的块组成的链表的头,它的nr_free字段表示空闲的块的数量.
+
+这样,zone内同阶同迁移类型的块都在同一个链表上,比如阶等于2、迁移类型为type(比如MIGRATE_MOVABLE)的块,都在`zone-
+>free_area[2]. free_list[type]`链表上,另外,阶等于2的块的数量为`zone->free_area[2]. nr_free个`.
+
+一个块可以用它的第一个页框和阶表示,即page和order。page的page_type字段的PG_buddy标志清零(不是置位)时表示它代表的块在
+伙伴系统中,private字段的值则表示块的阶。需要强调的是,只有块的第一个页框的page对象才有这个对应关系,中间页框的标志对伙伴
+系统而言没有意义.
+
+page的order函数:
+- PageBuddy: page表示的块是否在buddy中
+- page_order: page表示的块的阶
+- set_page_order: 设置page的page_type和private, 块纳入buddy
+- rmv_page_order: 设置page的page_type和private, 块从buddy删除
+
+申请/释放page函数:
+- alloc_page/alloc_pages: 申请一个或多个页
+- free_page/free_pages: 释放一个或多个页
+- `__free_page/__free_pages`: 释放一个或多个页
+
+> XXX_page都是通过XXX_pages实现的,只不过传递给后者的order参数为0.
+
+> `free_XXX 和 __free_XXX` 是有区别的, 与alloc_XXX对应的是`__free_XXX`,而不是前者(有点怪,可能是历史原因)。`__free_XXX`的参数为page和order,而free_XXX的参数为虚拟地址addr和order,addr经过计算得到page,然后调用`__free_XXX`继续释放内
+存。由addr计算得到page,只有映射到直接映射区的Low Memory才可以满足,所以free_XXX只能用于直接映射区的LowMemory
+
+所有的多页申请或释放内存的宏(XXX_pages)都有一个参数order表示申请的内存块的大小,也就是说申请的内存块只能是一整
+块,比如申请32页内存,得到的块order为5,申请33页内存,得到的块order为6,共64页,这确实是一种浪费. 那申请33页内存,先申请
+32页,再申请1页是否可行呢?某些情况下并不可行,申请一个完整的块,得到的是连续的33页内存,分多次申请得到的内存不一定是连续
+的,要求连续内存的场景不能采用这种策略.
+
+如果程序的应用场景并不要求连续内存,应该优先多次使用alloc_page,而不是alloc_pages,多次申请几个分散的
+页,比一次申请多个连续的页,对整个系统要友善得多. 某些malloc lib(比如jemalloc)通常会从内核申请一大块内存再在应用侧自己管理内存.
+
+alloc_pages最终调用`__alloc_pages_nodemask`实现,后者是伙伴系统页分配的核心.
+
+gfp_mask是alloc_pages传递的第一个参数,它是按位解释的,包含了优先选择的zone和内存分配的行为信息,可以由多种标志组合而成:
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/gfp_types.h#L28
+/* Plain integer GFP bitmasks. Do not use this directly. */
+#define ___GFP_DMA		0x01u // DMA zone
+#define ___GFP_HIGHMEM		0x02u // 最高为HIGHMEM zone
+#define ___GFP_DMA32		0x04u
+#define ___GFP_MOVABLE		0x08u
+#define ___GFP_RECLAIMABLE	0x10u
+#define ___GFP_HIGH		0x20u // 可使用紧急内存池
+#define ___GFP_IO		0x40u // 可启动物理IO操作
+#define ___GFP_FS		0x80u // 可使用文件系统的操作
+#define ___GFP_ZERO		0x100u // 清零
+/* 0x200u unused */
+#define ___GFP_DIRECT_RECLAIM	0x400u // 可直接进入页面回收, 需要时进入睡眠
+#define ___GFP_KSWAPD_RECLAIM	0x800u // 可以唤醒kswapd进行页面回收, kswapd是负责页面回收的内核线程
+#define ___GFP_WRITE		0x1000u
+#define ___GFP_NOWARN		0x2000u
+#define ___GFP_RETRY_MAYFAIL	0x4000u
+#define ___GFP_NOFAIL		0x8000u
+#define ___GFP_NORETRY		0x10000u
+#define ___GFP_MEMALLOC		0x20000u // 最高优先级地分配内存
+#define ___GFP_COMP		0x40000u
+#define ___GFP_NOMEMALLOC	0x80000u // 若未置位, 可次高优先级地分配内存
+#define ___GFP_HARDWALL		0x100000u
+#define ___GFP_THISNODE		0x200000u
+#define ___GFP_ACCOUNT		0x400000u
+#define ___GFP_ZEROTAGS		0x800000u
+#ifdef CONFIG_KASAN_HW_TAGS
+#define ___GFP_SKIP_ZERO	0x1000000u
+#define ___GFP_SKIP_KASAN	0x2000000u
+#else
+#define ___GFP_SKIP_ZERO	0
+#define ___GFP_SKIP_KASAN	0
+#endif
+#ifdef CONFIG_LOCKDEP
+#define ___GFP_NOLOCKDEP	0x4000000u
+#else
+#define ___GFP_NOLOCKDEP	0
+#endif
+
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/gfp_types.h#L325
+/**
+ * DOC: Useful GFP flag combinations
+ *
+ * Useful GFP flag combinations
+ * ----------------------------
+ *
+ * Useful GFP flag combinations that are commonly used. It is recommended
+ * that subsystems start with one of these combinations and then set/clear
+ * %__GFP_FOO flags as necessary.
+ *
+ * %GFP_ATOMIC users can not sleep and need the allocation to succeed. A lower
+ * watermark is applied to allow access to "atomic reserves".
+ * The current implementation doesn't support NMI and few other strict
+ * non-preemptive contexts (e.g. raw_spin_lock). The same applies to %GFP_NOWAIT.
+ *
+ * %GFP_KERNEL is typical for kernel-internal allocations. The caller requires
+ * %ZONE_NORMAL or a lower zone for direct access but can direct reclaim.
+ *
+ * %GFP_KERNEL_ACCOUNT is the same as GFP_KERNEL, except the allocation is
+ * accounted to kmemcg.
+ *
+ * %GFP_NOWAIT is for kernel allocations that should not stall for direct
+ * reclaim, start physical IO or use any filesystem callback.
+ *
+ * %GFP_NOIO will use direct reclaim to discard clean pages or slab pages
+ * that do not require the starting of any physical IO.
+ * Please try to avoid using this flag directly and instead use
+ * memalloc_noio_{save,restore} to mark the whole scope which cannot
+ * perform any IO with a short explanation why. All allocation requests
+ * will inherit GFP_NOIO implicitly.
+ *
+ * %GFP_NOFS will use direct reclaim but will not use any filesystem interfaces.
+ * Please try to avoid using this flag directly and instead use
+ * memalloc_nofs_{save,restore} to mark the whole scope which cannot/shouldn't
+ * recurse into the FS layer with a short explanation why. All allocation
+ * requests will inherit GFP_NOFS implicitly.
+ *
+ * %GFP_USER is for userspace allocations that also need to be directly
+ * accessibly by the kernel or hardware. It is typically used by hardware
+ * for buffers that are mapped to userspace (e.g. graphics) that hardware
+ * still must DMA to. cpuset limits are enforced for these allocations.
+ *
+ * %GFP_DMA exists for historical reasons and should be avoided where possible.
+ * The flags indicates that the caller requires that the lowest zone be
+ * used (%ZONE_DMA or 16M on x86-64). Ideally, this would be removed but
+ * it would require careful auditing as some users really require it and
+ * others use the flag to avoid lowmem reserves in %ZONE_DMA and treat the
+ * lowest zone as a type of emergency reserve.
+ *
+ * %GFP_DMA32 is similar to %GFP_DMA except that the caller requires a 32-bit
+ * address. Note that kmalloc(..., GFP_DMA32) does not return DMA32 memory
+ * because the DMA32 kmalloc cache array is not implemented.
+ * (Reason: there is no such user in kernel).
+ *
+ * %GFP_HIGHUSER is for userspace allocations that may be mapped to userspace,
+ * do not need to be directly accessible by the kernel but that cannot
+ * move once in use. An example may be a hardware allocation that maps
+ * data directly into userspace but has no addressing limitations.
+ *
+ * %GFP_HIGHUSER_MOVABLE is for userspace allocations that the kernel does not
+ * need direct access to but can use kmap() when access is required. They
+ * are expected to be movable via page reclaim or page migration. Typically,
+ * pages on the LRU would also be allocated with %GFP_HIGHUSER_MOVABLE.
+ *
+ * %GFP_TRANSHUGE and %GFP_TRANSHUGE_LIGHT are used for THP allocations. They
+ * are compound allocations that will generally fail quickly if memory is not
+ * available and will not wake kswapd/kcompactd on failure. The _LIGHT
+ * version does not attempt reclaim/compaction at all and is by default used
+ * in page fault path, while the non-light is used by khugepaged.
+ */
+#define GFP_ATOMIC	(__GFP_HIGH|__GFP_KSWAPD_RECLAIM)
+#define GFP_KERNEL	(__GFP_RECLAIM | __GFP_IO | __GFP_FS)
+#define GFP_KERNEL_ACCOUNT (GFP_KERNEL | __GFP_ACCOUNT)
+#define GFP_NOWAIT	(__GFP_KSWAPD_RECLAIM)
+#define GFP_NOIO	(__GFP_RECLAIM)
+#define GFP_NOFS	(__GFP_RECLAIM | __GFP_IO)
+#define GFP_USER	(__GFP_RECLAIM | __GFP_IO | __GFP_FS | __GFP_HARDWALL)
+#define GFP_DMA		__GFP_DMA
+#define GFP_DMA32	__GFP_DMA32
+#define GFP_HIGHUSER	(GFP_USER | __GFP_HIGHMEM)
+#define GFP_HIGHUSER_MOVABLE	(GFP_HIGHUSER | __GFP_MOVABLE | __GFP_SKIP_KASAN)
+#define GFP_TRANSHUGE_LIGHT	((GFP_HIGHUSER_MOVABLE | __GFP_COMP | \
+			 __GFP_NOMEMALLOC | __GFP_NOWARN) & ~__GFP_RECLAIM)
+#define GFP_TRANSHUGE	(GFP_TRANSHUGE_LIGHT | __GFP_DIRECT_RECLAIM)
+```
+> `___GFP_DIRECT_RECLAIM`被置位的情况下,会睡眠,不允许睡眠的情景中不可使用,GFP_KERNEL隐含了`___GFP_DIRECT_RECLAIM`,慎重使用
+
+`__alloc_pages_nodemask`先调用prepare_alloc_pages,根据参数计算得到ac、alloc_mask和alloc_flags,先以此调用get_page_from_freelist分配块,如果失败,调用`__alloc_pages_slowpath`,后者会根据gfp_mask
+计算新的alloc_flags,重新调用get_page_from_freelist.
+
+get_page_from_freelist会从用户期望的zone(ac->high_zoneidx)开始向下遍历,例如用户期望分配ZONE_HIGHMEM的内存,函数会按
+照ZONE_HIGHMEM、ZONE_NORMAL和ZONE_DMA的优先级分配内存:
+1. zone_watermark_fast判断当前zone是否能够分配该内存块,由内存块的order和zone的水位线(watermark)决定。
+
+zone的水位线由它的_watermark字段表示,该字段是个数组,分别对应WMARK_MIN、WMARK_LOW和WMARK_HIGH三种情况下的水位
+线,它们的值默认在模块初始化的时候设定,也可以运行时改变。水位线表示zone需要预留的内存页数,内核针对不同紧急程度的
+内存需求有不同的策略,它会预留一部分内存应对紧急需求,根据zone分配内存后是否满足水位线的最低要求来决定是否从该zone分配
+内存.
+
+紧急程度共分为四个等级,分别是默认等级、ALLOC_HIGH、ALLOC_HARDER和ALLOC_OOM,各等级对应的最低剩余内存页数
+分别为`watermark、watermark/2、watermark*3/8和watermark/4`。例如,zone的watermark值为32,当前zone剩余空闲内存为40页,申请的内存块的order为4,分配了内存块之后剩余24页(40-16);如果是默认等级,需要剩余32页,分配失败;如果是ALLOC_HIGH,只需剩余16页
+(32/2),分配成功。
+
+紧急程度和进程优先级与gfp_mask的对应关系:
+- ALLOC_HIGH: `__GFP_HIGH`
+- ALLOC_HARDER: `__GFP_ATOMIC`且!`__GFP_NOMEMALLOC`或者实时进程且不在中断上下文
+- ALLOC_OOM: Out of Memory
+- ALLOC_NO_WATERMARKS: `__GFP_MEMALLOC`
+- 默认: 其他
+
+1. 除了以上四个等级,还有一个额外的ALLOC_NO_WATERMARKS,它表示内存申请不受watermark的限
+制
+1. 找到了合适的zone或者在ALLOC_NO_WATERMARKS置位的情况下,调用rmqueue分配块,rmqueue分两种情况处理
+
+第一种情况,order等于0(只申请一页),内核并不立即使用`zone->free_area[0]. free_list[migratetype]`链表上的块,而是调用
+rmqueue_pcplist函数先查询per_cpu_pages结构体(简称pcp)维护的链表是否可以满足内存申请。pcp对象由zone->pageset的pcp字段表示,
+其中zone->pageset是每cpu变量.
+
+pclist如MIGRATE_UNMOVABLE、MIGRATE_RECLAIMABLE和MIGRATE_MOVABLE。它们相当于几个order为0的块的缓存池,内核
+直接从池中分配块,如果池中的资源不足,则向伙伴系统申请,一次申请pcp->batch块。很显然,它的设计是基于其他模块申请一页内存的
+次数很多的假设,这样一次从伙伴系统申请多个order为0的块缓存下来,就不需要每次都经过伙伴系统,有利于提高内存申请的效率.
+
+第二种情况,order大于0,调用__rmqueue从伙伴系统申请块(实际上order等于0时,如果pcp池中的资源不足也会调用
+`__rmqueue`), 它从当前的order开始向上查询`zone->free_area[order].free_list[migratetype]`链表,如果某个order上的链表不
+为空,则分配成功。如果最终使用的order(记为order_bigger)大于申请的块的order,则拆分使用的块,生成大小等于order+1, order+2,...,
+order_bigger-1的块各一个,大小等于order的块两个(推论2),其中一个返回给用户.
+
+## 线性空间划分
+32位空间划分:  用户[0, 0xC0000000), 内核[0xC0000000, 0xFFFFFFFF), 可通过Memory split编译选项修改. 它划分的方式决定了内核使
+用 线 性 地 址 的 起 始 点 , PAGE_OFFSET , 该 宏 在 x86 上 等 同 于CONFIG_PAGE_OFFSET,后者就由选择的划分方式确定. 
+
+> PAGE_OFFSET是内核线性地址空间的起始,并不是物理内存的开始,物理内存映射到该空间即可访问
+
+X86_64 上 PAGE_OFFSET 在 五 级 页 表 使 能 的 情 况 下 , 值 等 于0xff11000000000000,否则等于0xffff888000000000.
+
+### 32位
+内核会将一部分内存(小于896M)直接映射到线性空间,这部分就是Low Memory,超出的部分必须另做映射才能访问,叫High Memory. 是否使能High Memory由宏CONFIG_HIGHMEM标示.
+
+CONFIG_HIGHMEM 宏 使 能 的 情 况 下 包 含 两 种 情 况 , HIGHMEM4G和HIGHMEM64G,内存小于4G的时候HIGHMEM4G设
+为真,内存大于4G的时候HIGHMEM64G设为真,会使能PAE;另外即 使 内 存 小 于 896M , 也 可 以 将 其 设 为 真 , 通 过 参 数 设 置
+highmem_pages的值,内核也会留出相应的页作为High Memory.
+
+线性空间变量表:
+- high_memory: low memory和high memory的分界,  线性地址一般是`high_memory=max_low_pfn<<PAGE_SIZE+PAGE_OFFSET`
+- PAGE_SIZE: 表示一页内存使用的二进制位数, 一般是12
+- PAGE_OFFSET: 内核线性空间的起始地址
+- FIXADDR_TOP: 固定映射的结尾位置
+-  FIXADDR_START: 固定映射的开始位置
+- VMALLOC_END: 动态映射区的结尾
+- VMALLOC_START: 动态映射区的开始
+
+1G的线性地址空间 [0xC0000000, 0xFFFFFFFF],最高的4K不用, 由FIXADDR_TOP开始向下算起,FIXADDR的TOP和START之间是固
+定映射区。PKMAP_BASE和FIXADDR之间是永久映射区和CPU Entry区 ( 存 放 cpu_entry_area 对 象 ) 。 VMALLOC_END 和
+VMALLOC_START之间是动态映射区,之前介绍的ioremap获取的虚拟内存区间就属于这个区。接下来8M的hole没有使用,目的是越界检
+测,_VMALLOC_RESERVE默认为128M减去8M,实际上动态映射区为120M.
+
+,high_memory是计算得来的,它和PAGE_OFFSET之间的间隔可能更小,但它和VMALLOC_START之间的8M是固定的,也就是说,动态映射区可能比120M大.
+
+以上几个区域是必需的,1G的空间减去这些剩下约896M,这就是896这个数字的来源,以MAXMEM表示,该区间称为直接映射区.
+
+线性地址用户空间和内核空间比例为3∶1,3G的用户空间每个进程独立拥有,互不影响,也就是说进程负责维护自己的这部分页表,称
+为用户页表 ,它只需要映射自己使用的那部分内存,并不需要维护整套用户页表. 内核空间的1G则不同,基本所有进程共有,也就是说它们的页表的内核部分(内核页表)很多情况下是
+相同的,属于公共部分. 
+
+#### 直接映射区
+直接映射区理论上最大为MAXMEM,所谓的直接映射非常简单 , 映 射 后 的 虚 拟 地 址 va 等 于 物 理 地 址 pa 加
+PAGE_OFFSET(0xC0000000)。物理地址从最小页pfn=0开始,依次按照pa+PAGE_OFFSET → va的方式映射到该区间.
+
+从pfn=0开始,一直映射到没有多余空间或者没有物理内存为止。所以,如果系统本身内存不足MAXMEM(896M),且没有特意预留
+High Memory的情况下,全部的物理内存(不包括MMIO)都会映射到直接映射区。如果系统内存大于896M,或者预留了High Memory,内
+存不能(不会)全部映射到该区.
+
+直 接 映 射 区 是 唯 一 的 Low Memory 映 射 的 区 域 , 页 框 0 到 页 框max_low_pfn映射到该区间。映射一旦完成,系统运行期间不会改
+变,这是相对于其他区的优势;从下面几个区的分析中会看到,High Memory映射区域在运行期间是可以改变的,所以系统中需要一直稳定
+存在的结构体和数据只能使用直接映射区的内存,比如page对象.
+
+#### 动态映射区
+VMALLOC_START和VMALLOC_END之间的120M空间为动态映射区,它是内核线性空间中最灵活的一个区。其他几个区都有固定的
+角色,它们不能满足的需求,都可以由动态映射区来满足,常见的ioremap、mmap一般都需要使用它。
+使用动态映射区需要申请一段属于该区域的线性区间,内核提供了get_vm_area函数族来满足该需求,它们的区别在于参数不同,但最
+终都通过调用__get_vm_area_node函数实现。
+
+内核提供了vm_struct结构体来表示获取的线性空间及其映射情况.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/vmalloc.h#L49
+struct vm_struct {
+	struct vm_struct	*next; // 下一个vm_struct, 组成链表
+	void			*addr; // 线性空间的起始地址
+	unsigned long		size; // 大小
+	unsigned long		flags;
+	struct page		**pages; // page对象组成的动态数组
+#ifdef CONFIG_HAVE_ARCH_HUGE_VMALLOC
+	unsigned int		page_order;
+#endif
+	unsigned int		nr_pages; // 包含的页数
+	phys_addr_t		phys_addr; // 对应的物理地址
+	const void		*caller;
+};
+
+struct vmap_area {
+	unsigned long va_start;
+	unsigned long va_end;
+
+	struct rb_node rb_node;         /* address sorted rbtree */
+	struct list_head list;          /* address sorted list */
+
+	/*
+	 * The following two variables can be packed, because
+	 * a vmap_area object can be either:
+	 *    1) in "free" tree (root is free_vmap_area_root)
+	 *    2) or "busy" tree (root is vmap_area_root)
+	 */
+	union {
+		unsigned long subtree_max_size; /* in "free" tree */
+		struct vm_struct *vm;           /* in "busy" tree */
+	};
+	unsigned long flags; /* mark type of vm_map_ram area */
+};
+```
+
+在`__get_vm_area_node`的参数中,start和end表示用户希望的目标线性区间所在的范围,get_vm_area传递的参数为VMALLOC_START
+和VMALLOC_END。内核会将已使用的动态映射区的线性区间记录下来 , 每 一 个 区 间 以 vmap_area 结 构 体 表 示 。 vmap_area 结 构 体 除 了va_start和va_end字段表示区间的起始外,还有两个组织各个vmap_area对象的字段:rb_node和list.
+
+一 个 vmap_area 对 象 既 在 以 vmap_area_root 为 根 的 红 黑 树 中(rb_node),又以list字段链接,rb_node字段的作用是快速查找,list
+字段则是根据查找的结果继续遍历(各区间是按照顺序链接的).
+
+`__get_vm_area_node`会查找一个没有被占用的合适区间,如果找到则将该区间记录到红黑树和链表中,然后利用得到的vmap_area对象
+给vm_struct对象赋值并返回。vm_struct结构体是其他模块可见的,vmap_area结构体是动态映射区内部使用的。
+
+申请到vm_struct线性区间后,就可以将物理内存映射到该区域, ioremap使用的是ioremap_page_range,有的模块使用map_vm_area,
+remap_vmalloc_range等.
+
+最后,free_vm_area和remove_vm_area可以用来取消映射并释放申请的区间,free_vm_area还会释放vm_struct对象所占用的内存.
+
+#### 永久映射区
+永 久 映 射 区 的 线 性 地 址 起 于 PKMAP_BASE , 大 小 为LAST_PKMAP个页,开启了PAE的情况下为512,否则为1024,也就
+是一页页中级目录表示的大小(2M或者4M).
+
+内核提供了kmap函数将一页内存映射到该区,kunmap函数用来取消映射。kmap的参数为page结构体指针,如果对应的页不属于High Memory,则直接返回页对应的虚拟地址vaddr(等于paddr+PAGE_OFFSET),否则
+内核会在该线性区内寻址一个未被占用的页,作为虚拟地址,并根据page和虚拟地址建立映射。
+
+传递的参数决定了kmap一次只映射一页,也就相对于永久映射区被分成了以页为单位的“坑”,内核利用数组来管理一个个“坑”,
+pkmap_count数组就是用来记录“坑”的使用次数的,使用次数为0的表示未被占用。
+
+kmap可能会引起睡眠,不可以在中断等环境中使用.
+
+#### 固定映射区
+固定映射区起始于FIXADDR_TOT_START,终止于FIXADDR_TOP,分为多个小区间,它们的边界由fixed_addresses定义,每一个小区间都有特定的用途,如ACPI等.
+
+所有的小区间中,有一个比较特殊,它有一个特殊的名字叫临时映 射 区 。 它 在 固 定 映 射 区 的 偏 移 量 为 FIX_KMAP_BEGIN 和
+FIX_KMAP_END,区间大小等于KM_TYPE_NR*NR_CPUS页.
+
+从它的大小可以看出,每个CPU都有属于自己的临时映射区,大小为KM_TYPE_NR页。内核提供了kmap_atomic、kmap_atomic_pfn和
+kmap_atomic_prot函数来映射物理内存到该区域,将获得的物理内存的 page 对 象 的 指 针 或 者 pfn 作 为 参 数 传 递 至 这 些 函 数 即 可 ,
+kunmap_atomic函数用来取消映射.
+
+与永久映射区一样,如果对应的物理页不属于High Memory,则直接返回页对应的虚拟地址vaddr(等于paddr + PAGE_OFFSET),否
+则内核会找到一页未使用的线性地址,并建立映射.
+
+临时映射区的区间很小,每个CPU只占几十页,它的管理也很简单。内核使用一个每CPU变量__kmap_atomic_idx来记录当前已使用的
+页的号码,映射成功变量加1,取消映射变量减1。这意味着小于该变量的号码对应的页都被认为是已经映射的。另外,取消映射的时候,
+内核直接取消变量当前值对应的映射,并不是传递进来的虚拟地址对应的映射,所以保证二者一致是程序员的责任。
+
+临时映射区的管理设计得如此简单,优点是快速,kmap_atomic比kmap快很多。它的另一个优点是不会睡眠,kmap会睡眠,所以它的适
+应性更广.
+
+临时映射区的使用是有限制的: 。kmap_atomic会调用preempt_disable禁内核抢占,kunmap_atomic来重新使能它,所以基本上只能用来临时存放一些数据,数据处理完毕立即释放.
+
+### mmap
+mmap使用的不是内核线性空间,是用户线性空间. 
+
+mmap用来将文件或设备映射进内存,映射之后不需要再使用read/write等操作文件,可以像访问普通内存一样访问它们,可以明显
+地提高访问效率。mmap用来建立映射,munmap用来取消映射.
+
+```c
+#include <sys/mman.h>
+
+void *mmap(void addr[.length], size_t length, int prot, int flags,
+          int fd, off_t offset);
+int munmap(void addr[.length], size_t length);
+```
+> mmap的offset必须是物理页大小`(sysconf(_SC_PAGE_SIZE))`的整数倍
+
+mmap将文件或设备(fd)从offset开始, 到offset+length结束的区间映射到addr开始的虚拟内存中,并将addr返
+回,映射后的内容访问权限由prot决定.
+
+prot不能与文件的打开标志冲突,一般是PROT_NONE或者读写执行三种标志的组合:
+- PROT_NONE: 映射的内容不可访问
+- PROT_EXEC: 可执行
+- PROT_READ: 可读
+- PROT_WRITE: 可写
+
+flags 用 来 传 递 映 射 标 示 , 常 见 的 是 MAP_PRIVATE 和MAP_SHARED的其中一种,和以下多种标志的组合:
+-  MAP_PRIVATE: 私有映射
+- MAP_SHARED: 共享映射
+- MAP_FIXED: 严格按照mmap的addr表示的虚拟地址进行映射
+- MAP_ANONYMOUS: 匿名映射, 映射不与任何文件关联
+- MAP_LOCKED: 锁定映射区的页面, 防止被交换出内存
+
+私有和共享是相对于其他进程来说的,MAP_SHARED对映射区的更新对其他映射同一区域的进程可见,所做的更新也会体现在文件
+中,可以使用msync来控制何时写回文件。MAP_PRIVATE采用的是写时复制策略,映射区的更新对其他映射同一区域的进程不可见,所做
+的更新也不会写回文件.
+
+以上对prot和flags的描述,并不适用于所有文件,比如有些文件只接受MAP_PRIVATE,不接受MAP_SHARED,或
+者相反。应用程序并不能随意选择参数,普通文件一般在不违反自身权限的情况下可以自由选择,设备文件等特殊文件可以接受的参数由
+驱动决定.
+
+mmap使用的线性区间管理与内核的线性区间管理是不同的,内核的线性区间是进程共享的,mmap使用的线性区间则是进程自己的用户
+线性空间,在不考虑进程间关系的情况下,进程的用户线性空间是独立的.
+
+内核以vm_area_struct结构体表示一个用户线性空间的区域.
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/mm_types.h#L565
+/*
+ * This struct describes a virtual memory area. There is one of these
+ * per VM-area/task. A VM area is any part of the process virtual memory
+ * space that has a special rule for the page-fault handlers (ie a shared
+ * library, the executable area etc).
+ */
+struct vm_area_struct {
+	/* The first cache line has the info for VMA tree walking. */
+
+	union {
+		struct {
+			/* VMA covers [vm_start; vm_end) addresses within mm */
+			unsigned long vm_start; // 线性区间的开始
+			unsigned long vm_end; // 结束.  实际区间=[vm_start, vm_end)
+		};
+#ifdef CONFIG_PER_VMA_LOCK
+		struct rcu_head vm_rcu;	/* Used for deferred freeing. */
+#endif
+	};
+
+	struct mm_struct *vm_mm;	/* The address space we belong to. */
+	pgprot_t vm_page_prot;          /* Access permissions of this VMA. */ // 映射区域的保护方式
+
+	/*
+	 * Flags, see mm.h.
+	 * To modify use vm_flags_{init|reset|set|clear|mod} functions.
+	 */
+	union {
+		const vm_flags_t vm_flags; // 映射的标志
+		vm_flags_t __private __vm_flags;
+	};
+
+#ifdef CONFIG_PER_VMA_LOCK
+	/*
+	 * Can only be written (using WRITE_ONCE()) while holding both:
+	 *  - mmap_lock (in write mode)
+	 *  - vm_lock->lock (in write mode)
+	 * Can be read reliably while holding one of:
+	 *  - mmap_lock (in read or write mode)
+	 *  - vm_lock->lock (in read or write mode)
+	 * Can be read unreliably (using READ_ONCE()) for pessimistic bailout
+	 * while holding nothing (except RCU to keep the VMA struct allocated).
+	 *
+	 * This sequence counter is explicitly allowed to overflow; sequence
+	 * counter reuse can only lead to occasional unnecessary use of the
+	 * slowpath.
+	 */
+	int vm_lock_seq;
+	struct vma_lock *vm_lock;
+
+	/* Flag to indicate areas detached from the mm->mm_mt tree */
+	bool detached;
+#endif
+
+	/*
+	 * For areas with an address space and backing store,
+	 * linkage into the address_space->i_mmap interval tree.
+	 *
+	 */
+	struct {
+		struct rb_node rb; // 将它插入红黑树中
+		unsigned long rb_subtree_last;
+	} shared;
+
+	/*
+	 * A file's MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
+	 * list, after a COW of one of the file pages.	A MAP_SHARED vma
+	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
+	 * or brk vma (with NULL file) can only be in an anon_vma list.
+	 */
+	struct list_head anon_vma_chain; /* Serialized by mmap_lock &
+					  * page_table_lock */
+	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
+
+	/* Function pointers to deal with this struct. */
+	const struct vm_operations_struct *vm_ops; // 映射的相关操作
+
+	/* Information about our backing store: */
+	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
+					   units */ // 在文件内的偏移量
+	struct file * vm_file;		/* File we map to (can be NULL). */ // 映射文件对应的file对象
+	void * vm_private_data;		/* was vm_pte (shared mem) */
+
+#ifdef CONFIG_ANON_VMA_NAME
+	/*
+	 * For private and shared anonymous mappings, a pointer to a null
+	 * terminated string containing the name given to the vma, or NULL if
+	 * unnamed. Serialized by mmap_lock. Use anon_vma_name to access.
+	 */
+	struct anon_vma_name *anon_name;
+#endif
+#ifdef CONFIG_SWAP
+	atomic_long_t swap_readahead_info;
+#endif
+#ifndef CONFIG_MMU
+	struct vm_region *vm_region;	/* NOMMU mapping region */
+#endif
+#ifdef CONFIG_NUMA
+	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
+#endif
+#ifdef CONFIG_NUMA_BALANCING
+	struct vma_numab_state *numab_state;	/* NUMA Balancing state */
+#endif
+	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
+} __randomize_layout;
+```
+
+既 然进程 要管 理自己的线 性区间分配,就需 要管理它所有 的vm_area_struct对象。进程的mm_struct结构体有两个字段完成该任务,
+mmap字段是进程的vm_area_struct对象组成的链表的头,mm_rb字段是所有vm_area_struct对象组成的红黑树的根。内核使用链表来遍历对象 , 使 用 红 黑 树 来 查 找 符 合 条 件 的 对 象 。 vm_area_struct 结 构 体 的
+vm_next和vm_prev字段用来实现链表,vm_rb字段用来实现红黑树.
+
+从应用的角度看,mmap成功返回就意味着映射完成,但实际上从驱动的角度并不一定如此。很多驱动在mmap中并未实现内存映射,应
+用程序访问该地址时触发异常后,才会做最终的映射工作,这就用到了vm_ops字段.
+
+mmap使用的系统调用与平台有关,但最终都调用ksys_mmap_pgoff函数实现。需要说明的是,mmap传递的offset参数会
+在调用的过程中转换成页数(offset/MMAP_PAGE_UNIT),一般由glibc完成,所以内核获得的参数已经是以页为单位的(pgoff可以理解
+为page offset)。
+
+ksys_mmap_pgoff调用vm_mmap_pgoff,经过参数检查后,最终调用do_mmap函数完成mmap.
+
+do_mmap逻辑:
+第一步当然是做合法性检查和调整,映射的长度len(区间大小)被调整为页对齐,所以mmap返回后,实际映射的长度可能比要求的要大。比如某个mmap调用中,offset和length等于0和0x50,实际映射为0
+和0x1000.
+
+检查完毕就开始找一个合适的线性区间,也就是找“坑”,通过get_unmapped_area 实 现 . get_unmapped_area优先调用文件的get_unmapped_area操作,如果文件没有定义,则使用当前进程的get_unmapped_area函数(current->mm->get_unmapped_area),该函数与平台有关. 如果参数addr等于0,内核会根据当前进程的mm_struct对象的mm_rb字段指向的进程所有的vm_area_struct对象组成的红黑树查找一段合适的区域,如果addr不等于0,且(addr, addr + len)没有被占用,则返回addr,否则与addr等于0等同。如果参数flags的MAP_FIXED标示
+被置位,则直接返回addr.
+
+> 在MAP_FIXED被置位的情况下, 不检查区间是否被占用就直接返回的原因: 为MAP_FIXED有个隐含属性,就是“抢地盘”. 如果得到的区间已被占用,内核会在mmap_region函数中取消该区间
+的映射,将区间让出来. 所以MAP_FIXED并不推荐使用, 但有些情况下,它却是必需的, 比如brk.
+
+> MAP_FIXED的另外一个版本MAP_FIXED_NOREPLACE会友好很多。如果指定的区间已经被占用,MAP_FIXED_NOREPLACE会直接返回错误(EEXIST)
+
+然后计算vm_flags,可以看到,如果文件没有打开写权限,VM_MAYWRITE和VM_SHARED标示会被清除;如果文件没有打开读权限,则直接返回EACCES。实际
+上,在一般情况下共享隐含着“写”,私有隐含着“读”。当然,从代码逻辑上看,即使文件没有打开写权限,MAP_SHARED也可以成功,但是映射的页并没有写权限`[vm_flags = calc_vm_prot_bits(prot) | (...)`,
+因为文件没有打开写权限,prot也就没有PROT_WRITE标志,所以vm_flags也不会有VM_WRITE.
+
+完成了以上准备工作,就可以调用mmap_region进行映射.
+
+mmap_region主要做三件事,初始化vm_area_struct对象、完成映射、将对象插入链表和红黑树。不考虑匿名映射,mmap最终是靠驱动提供的文件的mmap操作实现的(file->f_op->mmap),也
+就是说mmap究竟产生了什么效果最终是由驱动决定的.
+
+驱动完成映射的方式一般有以下几类:
+1. 驱动有属于自己的物理内存,多为MMIO,直接调用内核函数完成映射
+1. 第二类与第一类类似, 但物理内存不是现成的, 需要先申请内存然后做映射
+1. 第三类,驱动的mmap并不提供映射操作,由异常触发实际映射动作
+
+映射后的页面的访问权限(保护标志)由mmap的prot参数决定. 在mmap_region函数中,参考了prot和flags处理得到的vm_flags经过计算得到`(vma->vm_page_prot=vm_get_page_prot(vm_flags))`,vma->vm_page_prot就是最终用来设置页访问权限的。在完成映射的最后过程中(vm_iomap_memory等),vma->vm_page_prot被用来设置页表的属性.
+
+mmap返回后,实际上并没有完成内存映射的动作,返回的只是没有物理内存与之对应的虚拟地址. 稍后访问该地址会导致内存访问异常, 内核处理该异常则会回调驱动的vm_operations_struct的fault操作,
+驱动的fault操作中,一般需要申请物理内存赋值给vm_fault的page字段并完成自身的逻辑,内核会完成虚拟内存和物理内存的映射。
+
+必须使用brk的场景:
+一个程序开始执行后,进程的堆内存的起始位置(start)就确定了。进程申请堆内存时,如果当前的堆内存可以满足申请,则返回虚
+拟地址给进程,否则调用brk来扩大当前堆内存。内存释放的时候,也可以调用brk来缩小堆内存,进程当前的堆内存为[start, sbrk(0)]。
+start不变,堆内存连续(虚拟地址),那么要想改变堆内存的大小,则只能改变程序间断点,而且用户空间必须计算新的程序间断点
+后再调用brk。内核接收到的参数就是程序间断点表示的地址,这个地址是不允许改变的,否则堆内存就会混乱了,MAP_FIXED就派上用
+场了。
+
+最后,在内核中,brk并没有调用mmap来实现,但它实际上是一个简单的mmap.
+
+几种不同的mmap映射方式:
+使用文件映射,也就是非匿名映射,最终的映射由文件定义的mmap操作实现,有些文件在mmap函数中完成了最终的映射,接下来
+可以正常访问内存(情况1),但很多文件仅仅在mmap函数中定义了`vma->vm_ops`,并没有映射内存,接下来访问内存会导致缺页异常,
+进而调用`vma->vm_ops->fault`完成实际的映射.
+
+情况1中 , 使用MAP_SHARED和MAP_PRIVATE映射的内存,得到的结果也不同,MAP_PRIVATE方式映射的物理页没有写权限,稍
+后写内存会导致异常,这是COW的一种情况,MAP_SHARED方式映射的内存可读可写. 注意,“没有写权限”意思是暂时没有, 但是可能“可以有”。
+
+匿名映射,映射后的内存访问与文件无关,使用MAP_SHARED方式映射时,内核会调用shmem_zero_setup函数创建一个文件来映射
+内存,mmap返回后,并没有完整的内存映射,接下来的内存访问会导致 缺 页 异 常 , 最 终 由 vma->vm_ops->fault 完 成 映 射 。 使 用
+MAP_PRIVATE方式映射并没有直接或者间接的文件操作,也就是没有内存映射,也没有vma->vm_ops,内存访问会导致缺页异常,由
+do_anonymos_page函数完成内存映射.
 
 ## 内存管理
 参考:
@@ -312,7 +1100,6 @@ struct zone {
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
 } ____cacheline_internodealigned_in_smp;
-
 ```
 
 在很多服务器和大型计算机上，如果物理内存是分布式的，由多个计算节点组成，那么每个 CPU 核都会有自己的本地内存，CPU 在访问它的本地内存的时候就比较快，访问其他 CPU 核内存的时候就比较慢，这种体系结构被称为 Non-Uniform Memory Access（NUMA）.
@@ -1689,7 +2476,7 @@ Linux内核内存管理的一项重要工作就是如何在频繁申请释放内
 	调用alloc_pages(它以页为单位进行分配, 得到页面地址), 再调用page_address可得到内存地址. [__get_free_pages](https://elixir.bootlin.com/linux/v5.11/source/mm/page_alloc.c#L5034)封装了它俩.
 1. slub负责分配比页更小的内存对象, 解决内部碎片的问题
 
-	伙伴系统之上的内存管理, 基于对象
+	伙伴系统之上的内存管理, 基于对象. slab实际上是内核在buddy系统基础上构建的cache,它批量申请内存(多页),完成映射,用户需要使用内存的时候直接由它返回,不需要再经过buddy系统.
 
 	slub针对多处理器、NUMA系统进行了优化.
 
@@ -1702,6 +2489,24 @@ Linux内核内存管理的一项重要工作就是如何在频繁申请释放内
 	要从slub申请内存需要先使用[kmem_cache_create](https://elixir.bootlin.com/linux/v5.11/source/mm/slab_common.c#L407)创建一个slub对象. 再通过[kmem_cache_alloc](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3484)和[kmem_cache_free](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3686)来申请和释放内存.
 
 	vmalloc: 把物理地址不连续的内存页拼凑成逻辑地址连续的内存区间.
+
+	`sl[x]b`函数表(函数相同, 但实现有差异)
+	- kmalloc/kzalloc: 申请内存
+	- kfree: 释放申请的内存
+	- kmem_cache_create: 创建一个cache
+	- kmem_cache_alloc/kmem_cache_zalloc: 从cache申请内存
+	- kmem_cache_free: 释放从cache申请的内存
+	- kmem_cache_destroy: 销毁cache
+
+	> 创建和销毁cache是有代价的,若非必要,使用内核提供的cache更加高效
+
+申请内存因素表:
+1. 小于4M, 连续: buddy, slub
+1. 小于4M, 不连续: buddy, slub, vmalloc
+1. 大于4M, 连续: grub, memblock
+1. 大于4M, 不连续: vmalloc
+
+使用grub、memblock和buddy得到的是物理内存,需要自行映射,slab和vmalloc得到的是虚拟内存.
 
 ### slub
 在 SLUB 分配器中，它把一个内存页面或者一组连续的内存页面，划分成大小相同的块，其中这一个小的内存块就是 SLUB 对象，但是这一组连续的内存页面中不只是 SLUB 对象，还有 SLUB 管理头和着色区.
@@ -1847,6 +2652,71 @@ TLB是特别的cpu缓存, 是MMU的核心部件, 通过缓存进程最近使用�
 通过使用Hugepage分配大页可以提高性能. 因为页大小的增加，可以减少缺页异常. 例如，2MB大小的内容（假设是2MB对齐），如果是4KB大小的页粒度，则会产生512次缺页异常，但是使用2MB大小的页，只会产生一次缺页异常. 页粒度的改变，使得TLB同样的空间可以保存更多虚存空间到物理空间的映射. 尽可能地利用TLB，少用MMU，以减少寻址和缺页处理带来的开销，从而提高应用程序的整体性能.
 
 大页还有一个优势是这些预先分配的内存基本上不会被换出. 当然，大页也有缺点，比如它需要额外配置，需要应用程序事先预估使用多少内存，大页需要在进程启动之前实现启用和分配好内存. 目前，在大部分场景下，系统配置的主内存越来越多，这个限制不会成为太大的障碍.
+
+为了TLB一致性, 需要刷新, 具体场景:
+1. 内存映射是与进程相关的,进程切换会导致一部分映射产生变化,需要刷新这部分映射对应的TLB
+2. 物理内存或者虚拟内存重新映射,导致页表项产生变化,可能需要刷新产生变化的内存对应的TLB
+3. 部分内存访问的权限等属性发生变化,可能需要刷新TLB
+
+tlb刷新函数:
+1. flush_tlb_mm: 刷新mm_struct相关的TLB, 针对场景1
+1. flush_tlb_range/flush_tlb_page:  刷新一段或者一页内存相关的TLB, 针对场景2和场景3
+1. flush_tlb_all: 刷新所有TLB
+
+## 内存缓存
+按照不同的缓存策略,x86上,一般可以将内存分为以下几类:
+1. Strong Uncacheable(UC)内存,读和写操作都不会经过缓存。这种策略的内存访问效率较低,但写内存有副作用的情况下,它是正确的选择.
+1. Uncacheable(UC-,又称为UC_MINUS)内存,与UC内存的唯一区别在于可以通过修改MTRR将它变成WC内存,只能通过PAT设置
+1. Write Combining(WC)内存,与UC内存的唯一区别是WC的内存允许CPU缓冲多个写操作,在适当的时机一次写入,通俗点就是批量写操作
+1. Write Back(WB)内存,也就是Cacheable内存,读写都会经过缓存,除非被迫刷新缓存,CPU可以自行决定何时将内容写回内存
+1. Write Through(WT)内存,与WB内存类似,但写操作不仅写缓存,还会写入物理内存中
+1. Write Protected(WP)内存,与WB内存类似,但每次写都会导致对应的缓存失效,只能通过MTRR设置
+
+很显然,WB内存的访问效率最高,但并不是所有内存都可以设置成WB类型,至少需要满足两个基本条件:内存可读和写内存不能有副作用(side effect free)。所谓副作用就是写内存会触发其他操作,比如写设备的寄存器相关的MMIO会导致设备状态或行为产生变化。将这部分内存缓存起来会导致这些变化滞后,因为数据只是写到
+了缓存中,并没有真正生效.
+
+有两种方式修改内存缓存类型,就是MTRR和PAT:
+1. MTRR的全称是Memory Type Range Register, 可以通过它设置一段物理内存的缓存策略.
+
+	BIOS一般会为内存配置合理的缓存方式,开机后可以在/proc/mtrr文件中查看. 
+
+	通过读写或者使用ioctl操作/proc/mtrr查看或者更改一段内存的缓存方式.
+
+	MTRR有两个限制:一是只能按块配置缓存方式,二是有最大数量限制(硬件相关)
+1. PAT(Page Attribute Table)可以对MTRR有效补充,它的粒度为页 ( Page ) , 而且没有数量限制
+
+	编译内核的时候设置CONFIG_X86_PAT=y使能PAT
+
+	PAT可以按照页控制内存的缓存属性,它的原理是修改页表项的属性位.
+
+	内核定义了一系列PAT相关的函数满足不同的场景,它们多是平台相关的:
+	1. mmio等
+
+		- ioremap : UC-
+		- ioremap_cache: WB
+		- ioremap_uc: UC
+		- ioremap_nocache: UC-
+		- ioremap_wc: wc
+		- ioremap_wt: wt
+
+	1. ram
+
+		- set_memory_wb: wb(默认)
+		- set_memory_uc: UC-
+		- set_memory_wc: WC
+		- set_memory_wt: WT
+	
+除了直接调用函数外,还有一些特殊的文件可以控制缓存属性.
+
+pci设备的resource文件,如果以_wc结尾,映射该文件得到的内存是WC类型,否则就是UC-类型.
+
+通过/dev/mem文件, 可以根据物理内存的偏移量映射它获得虚拟内存. 如果文件置位了O_SYNC标志,映射后得到的内存是UC-类型,否则由当前指定的缓存类型和MTRR决定.
+
+内核编译了debugfs的情况下,可以通过/sys/kernel/debug/x86/pat_memtype_list(/sys/kernel/debug是debugfs挂载点,不同的系统可能有差异)文件查看PAT列表.
+
+除了CPU之外, 许多设备比如DMA也可访问内存, 也会存在一致性问题.
+
+刷新缓存可以解决一致性的问题,可惜的是内核并没有统一的函数完成该任务,我们可以在x86上使用wbinvd(wb invalid),在arm上使用flush_cache类函数(flush_cache_range、flush_cache_all等).
 
 ## transparent huge pages(THP)
 
@@ -2319,3 +3189,209 @@ linux使用mempool_create创建内存池.
 
 ### IOMMU
 针对外设总线和内存地址间的转化
+
+## 缺页异常
+缺页异常不止没有对应的物理内存一种,访问权限不足等也会导致异常. 。为了帮助区分、处理缺页异常, CPU会额外提供两项信息:错误码和异常地址.
+
+错误码error_code存储在栈中,包含以下信息:
+1. 异常的原因是物理页不存在,还是访问权限不足,由X86_PF_PROT标志区分,当error_code&X86_PF_PROT等于0时,表示前者
+1. 导致异常时,处于用户态还是内核态,由X86_PF_USER标志区分
+1. 导致异常的操作是读还是写,由X86_PF_WRITE标志区分
+1. 物理页存在,但页目录项或者页表项使用了保留的位, X86_PF_RSVD标志会被置位
+1. 读取指令的时候导致异常,X86_PF_INSTR标志会被置位
+1. 访问违反了protection key导致异常,X86_PF_PK标志会被置位. 所谓protection key,简单理解就是有些寄存器可以控制部分内存的读写权限,越权访问会导致异常
+
+异常地址,就是导致缺页异常的虚拟地址,存储在CPU的cr2寄存器中.
+
+常见的导致缺页异常的场景和合理的处理方式:
+1. 程序逻辑错误
+
+	分为以下三类:
+	1. 访问不存在的地址,最简单的是访问空指针
+	1. 访问越界,比如用户空间的程序访问了内核的地址
+	1. 违反权限,比如以只读形式映射内存的情况下写内存
+
+	缺页异常对此无能为力,程序的执行没有按照程序员的预期执行,应该是程序员来解决。缺页异常并不是用来解决程序错误的,对此只能是oops、kernel panic等.
+1. 访问的地址未映射物理内存
+
+	这是正常的,也是对系统有益的. 物理内存有限, 按需映射物理内存可以避免浪费
+1. TLB过时,页表更新后,TLB未更新,这种情况下,绕过TLB访问内存中的页表即可
+1. COW(Copy On Write,写时复制)等,内存没有写权限,写操作导致缺页异常,但它与第一种场景的第三类错误是不同的, 产生异常的内存是可以有写权限的,是`可以有`和`真没有`的区别
+
+### 处理缺页异常
+缺页异常的处理函数是page_fault,它是由汇编语言完成的,除了保存现场外,它还会从栈中获得error_code,然后调用do_page_fault函数. 后者读取cr2寄存器得到导致异常的虚拟地址,然后调用`__do_page_fault`, `__do_page_fault`根据不同的场景处理异常.
+
+X86_PF_RSVD类型的异常被当作一种错误:使用保留位有很大的风险, 它们都是X86预留未来使用的,使用它们有可能会造成冲突。所以无论产生异常的地址属于内核空间(第1步)还是用户空间(第3
+步),都不会尝试处理这种情况,而是产生错误.
+
+如果导致异常的虚拟地址address属于内核空间, X86_PF_USER意味着程序在用户态访问了内核地址, 同样是错误,能够得到处理的只有vmalloc和spurious等. 使用vmalloc申请内存的时候更新的是主内核
+页表, 并没有更新进程的页表(进程拥有独立页表的情况下), 进程在访问这部分地址时就会产生异常,此时只需要复制主内核页表的内容给进程的页表即可, 这也是第1步的vmalloc_fault函数的逻辑.
+
+内核中,页表的访问权限更新了,出于效率的考虑,可能不会立即刷新TLB. 比如某段内存由只读变成读写,TLB没有刷新,写这段内存可能导致X86_PF_PROT异常,spurious_fault就是处理这类异常
+的,也就是导致缺页异常的第三种场景.
+
+如果异常得不到有效处理,就属于bad_area,会调用bad_area、bad_area_nosemaphore、bad_area_access_error等函数,它们的逻辑类似 , 如果产生异常时进程处于用户态(X86_PF_USER),发送
+SIGSEGV(SEGV的全称为Segmentation Violation)信号给进程;如果进程处于内核态,尝试修复错误,失败的情况下使进程退出。
+
+从第3步开始,导致异常的虚拟地址都属于用户空间,所以问题就变成找到address所属的vma,映射内存。第4步,find_vma找到第一个
+结尾地址(vma->vm_end)大于address的vma(进程的vma是有顺序的),找不到则出错。如果该vma包含了address,那么它就是address
+所属的vma,否则尝试扩大vma来包含address,失败则出错.
+
+第5步,找到了vma之后,过滤几种因为权限不足导致异常的场景:内存映射为只读,尝试写内存;读取不可读的内存;内存映射为不可读、不可写、不可执行。这几种场景都是程序逻辑错误,不予处
+理.
+
+到了第6步,才真正进入处理缺页异常的核心部分,前5步讨论了address属于内核空间的情况和哪些情况算作错误两个话题,算是“前
+菜”。至此, 可以把导致缺页异常的场景总结为错误和异常两类,除了vmalloc_fault和spurious_fault外,前面讨论的场景均为错误,都不会得到处理,理解缺页异常的第一个关键就是清楚处理异常并不是为
+了纠正错误.
+
+handle_mm_fault调用__handle_mm_fault继续处理异常. 到此已经找到了address所属的vma,目标是完成address所需的映射。面临
+的问题可以分为以下三种类型:
+1. 没有完整的内存映射,也就是没有映射物理内存,申请物理内存完成映射即可
+1. 映射完整,但物理页已经被交换出去,需要将原来的内容读入内存,完成映射
+1. 映射完整,内存映射为可写,页表为只读,写内存导致异常,常见的情况就是COW
+
+`__do_page_fault`的第5步和类型3都提到了内存映射的权限和页表的权限,在此总结.
+
+用户空间虚拟内存访问权限分为两部分,一部分存储在 vma->vm_flags中(VM_READ、VM_EXEC和VM_WRITE等),另一部分存储在页表中. 前者表示内存映射时设置的访问权限(内存映射的权
+限),表示被允许的访问权限,是一个全集,允许范围外的访问是错误,比如尝试写以PROT_READ方式映射的内存。后者表示实际的访问权限(页表的权限),内存映射后,物理页的访问权限可能会发生
+变化,比如以可读可写方式映射的内存,在某些情况下页表被改变,变成了只读,写内存就会导致异常,这种情况不是错误,因为访问是权限允许范围内的,COW就是如此。这是理解缺页异常的第二个关
+键,区分内存访问权限的两部分。
+
+明确了问题之后,`__handle_mm_fault`的逻辑就清晰了,它访问address对应的页目录,如果某一级的项为空,表示是第一种问题,申请一页内存填充该项即可。它访问到pmd(页中级目录),接下来这
+三种类型的问题的“分水岭”出现了:pte内容的区别导致截然不同的处理逻辑,由handle_pte_fault函数完成.
+
+vm_fault结构体(以下简称vmf)是用来辅助处理异常的,保存了处理异常需要的信息.
+
+```
+// https://elixir.bootlin.com/linux/v6.6.28/source/include/linux/mm.h#L508
+/*
+ * vm_fault is filled by the pagefault handler and passed to the vma's
+ * ->fault function. The vma's ->fault is responsible for returning a bitmask
+ * of VM_FAULT_xxx flags that give details about how the fault was handled.
+ *
+ * MM layer fills up gfp_mask for page allocations but fault handler might
+ * alter it if its implementation requires a different allocation context.
+ *
+ * pgoff should be used in favour of virtual_address, if possible.
+ */
+struct vm_fault {
+	const struct {
+		struct vm_area_struct *vma;	/* Target VMA */ // address对应的vma
+		gfp_t gfp_mask;			/* gfp mask to be used for allocations */
+		pgoff_t pgoff;			/* Logical page offset based on vma */ // address相对于映射文件的偏移量, 以页为单位
+		unsigned long address;		/* Faulting virtual address - masked */
+		unsigned long real_address;	/* Faulting virtual address - unmasked */
+	};
+	enum fault_flag flags;		/* FAULT_FLAG_xxx flags
+					 * XXX: should really be 'const' */ FAULT_FLAG_xxx标志
+	pmd_t *pmd;			/* Pointer to pmd entry matching
+					 * the 'address' */ // 页中级目录项的指针
+	pud_t *pud;			/* Pointer to pud entry matching
+					 * the 'address'
+					 */ // 页上级目录项 的指针
+	union {
+		pte_t orig_pte;		/* Value of PTE at the time of fault */ // 导致异常时页表项的内存
+		pmd_t orig_pmd;		/* Value of PMD at the time of fault,
+					 * used by PMD fault only.
+					 */
+	};
+
+	struct page *cow_page;		/* Page handler may use for COW fault */ // cow使用的内存页
+	struct page *page;		/* ->fault handlers should return a
+					 * page here, unless VM_FAULT_NOPAGE
+					 * is set (which is also implied by
+					 * VM_FAULT_ERROR).
+					 */ // 处理异常函数返回的内存页
+	/* These three entries are valid only while holding ptl lock */
+	pte_t *pte;			/* Pointer to pte entry matching
+					 * the 'address'. NULL if the page
+					 * table hasn't been allocated.
+					 */ // 页表项的指针
+	spinlock_t *ptl;		/* Page table lock.
+					 * Protects pte page table if 'pte'
+					 * is not NULL, otherwise pmd.
+					 */
+	pgtable_t prealloc_pte;		/* Pre-allocated pte page table.
+					 * vm_ops->map_pages() sets up a page
+					 * table from atomic context.
+					 * do_fault_around() pre-allocates
+					 * page table to avoid allocation from
+					 * atomic context.
+					 */
+};
+```
+
+,进入handle_pte_fault函数前,除了与pte和page相关的字段外,其他多数字段都已经被__handle_mm_fault函数赋值了,它处理到
+pmd 为 止 。 pgoff 由 计 算 得 来 , 等 于 (address-vma->vm_start)>>PAGE_SHIFT加上vma->vm_pgoff.
+
+第1步,判断pmd项是否有效(指向一个页表),无效则属于第一种问题;有效则判断pte是否有效,无效也属于第一种问题,有效则属
+于后两种.
+
+请注意区分pte_none和!vmf->pte,前者判断页表项的内容是否有效,后者判断pte是否存在。pmd项没有指向页表的情况下后者为真, 页表项没有期望的内容时前者为真。
+
+第2步针对第一种问题,非匿名映射由do_fault函数处理。do_fault根据不同的情况调用相应的函数.
+
+如果是读操作导致异常,调用do_read_fault;如果是写操作导致异常,以MAP_PRIVATE映射的内存,调用do_cow_fault;如果是写操作导致异常,以MAP_SHARED映射的内存,调用do_shared_fault.
+
+以上三个do_xxx_fault都会调用__do_fault,后者回调vma->vm_ops->fault函数得到一页内存(vmf->page);得到内存后,再调用finish_fault函数更新页表完成映射。do_read_fault和do_shared_fault
+的区别在于内存的读写权限,do_cow_fault与它们的区别在于最终使用的物理页并不是得到的vmf->page,它会重新申请一页内存(vmf->cow_page) , 将 vmf->page 复 制 到 vmf->cow_page , 然 后 使 用 vmf->cow_page更新页表.
+
+此处需要强调两点,首先,vma->vm_ops->fault是由映射时的文件定义的(vma->vm_file),文件需要根据vmf的信息返回一页内存,赋值给vmf->page。其次,do_cow_fault最终使用的物理页是新申请的
+vmf->cow_page,与文件返回的物理页只是此刻内容相同,此后便没有任何关系,之后写内存并不会更新文件.
+
+第3步,页表项内容有效,但物理页不存在,也就是第二种问题, 由do_swap_page函数处理.
+
+第4步,写操作导致异常,但物理页没有写权限,也就是第三种问题,由do_wp_page函数处理。需要注意的是,写映射为只读的内存导致异常的情况已经被__do_page_fault函数的第5步过滤掉了,所以此处
+的情况是,内存之前被映射为可写,但实际不可写,具体场景之后分析.
+
+do_wp_page主要处理三种情况,前两种情况见下面的分析,第三种在下节分析.
+1. 以PROT_WRITE(可写)和MAP_SHARED(共享)标志映射的内存,调用wp_pfn_shared函数尝试将其变为可写即可.
+2. 以PROT_WRITE(可写)和MAP_PRIVATE(不共享)标志映射的内存,就是所谓的COW,调用wp_page_copy函数处理。wp_page_copy新申请一页内存,复制原来页中的内容,更新页表,后续写操作只会更新新的内存,与原内存无关
+
+举例理解:
+1. mmap映射内存,得到虚拟地址,如果实际上并没有物理地址与之对应,访问内存会导致缺页异常,由handle_pte_fault的第2步处理。接下来不同的情况由不同的函数处理,结果也不一样
+
+	场景, 处理函数, 结果:
+	- 读访问, do_read_fault, 完成映射, 不尝试将内存变为可写
+	- 写访问, MAP_SHARED映射内存, do_shared_fault, 完成映射, 尝试将内存变为可写
+	- 写访问, MAP_PRIVATE映射内存, do_cow_fault, 申请一页新内存, 复制内容, 完成映射, 新内存可写
+2.  接例1,读访问导致异常处理后,内存依然不可写,但此时内存映射是完整的,写内存会导致异常,由handle_pte_fault的第4步处理,至于是do_wp_page函数处理的哪种情况由映射的方式决定
+3. mmap映射内存,得到虚拟地址,并没有物理地址与之对应的情况下,内核调用get_user_pages尝试访问该内存。由于此时内存映射不完整,内核会调用handle_mm_fault完成映射,这种情况下物理页
+的访问权限由内核的需要决定。如果访问权限为只读,用户空间下次写该内存就会导致异常,处理过程与例2相同
+4. 以MAP_PRIVATE方式映射内存,得到的内存不可写,写内存导致异常,处理过程与例1的情况3类似
+
+### cow
+COW的全称是Copy On Write,也就是写时复制,handle_pte_fault的第2步和第4步都有它的身影。从缺页异常的处理过程来看,缺页异常认定为COW的条件是以MAP_PRIVATE方式映射的内存,映射不完
+整,或者物理内存权限为只读;写内存(FAULT_FLAG_WRITE)。
+
+由此, 可以总结出COW的认定条件.
+
+首先,必须是以MAP_PRIVATE方式映射的内存,它的意图是对内存的修改,对其他进程不可见,而以MAP_SHARED方式映射的内
+存,本意就是与其他进程共享内存,并不存在复制一说,也就不存在COW中的Copy了.
+
+其次,写内存导致异常。有两层含义,首先必须是写,也就是COW中的Write;其次是导致异常,也就是映射不完整或者访问权限
+不足。映射不完整容易理解,就是得到虚拟内存后,没有实际的物理内存与之对应。至于访问权限不足,上节中的例2到例4都属于这种情
+况,访问权限不足的场景,与子进程的创建有关。
+
+子进程被创建时,会负责父进程的很多信息,包括部分内存信息,其中复制内存映射信息的任务由dup_mmap函数完成。
+dup_mmap函数复制父进程的没有置位VM_DONTCOPY标志的vma,调用copy_page_range函数尝试复制vma的页表项信息。后者访问
+子进程的四级页目录,如果不存在则申请一页内存并使用它更新目录项,然后复制父进程的页表项,完成映射。这就是复制vma信息的一
+般过程,不过实际上存在以下几种情况需要特殊处理。
+
+copy_page_range不会复制父进程以MAP_SHARED方式映射普通内存对应的vma。所谓普通内存是相对于MMIO等内存来说的,MMIO的映射信息是需要复制的。这种情况下,子进程得到执行后,访问这
+段内存时会导致缺页异常,由缺页异常程序来处理.
+
+不复制是基于一个事实:子进程被创建后,多数情况下会执行新的程序,拥有自己的内存空间,父进程的内存它多半不会全部使用,
+所以创建进程时尽量较少复制。
+
+针对MAP_PRIVATE和PROT_WRITE方式映射的内存,首先,仅复制页表项信息是不够的,因为复制了页表项,子进程和父进程随后
+可以访问相同的物理内存,这违反了MAP_PRIVATE的要求。其次,如果不复制,由缺页异常来处理,缺页异常会申请新的一页,使用新页完成映射。这看似没有问题,但实际上退化成了映射不完整的场景
+中,丢失了内存中的数据。
+
+copy_page_range函数针对这种情况的策略就是将页表项的权限降级为只读,复制页表项完成映射。子进程和父进程写这段内存时,就会导致缺页异常,由handle_pte_fault的第4步处理.
+
+子进程创建后,子进程和父进程写COW的内存都会导致异常,如果父进程先写,就会触发复制,即使子进程不需要写。COW在这种情况下失效,所以子进程先执行对COW更加有利,如果子进程直接执行
+新的程序,就不需要复制了。内核定义了一个变量sysctl_sched_child_runs_first,它可以控制子进程是否抢占父进程, 可以通过写/proc/sys/kernel/sched_child_runs_first文件设置它的值。
+
+另外,如果子进程执行新的程序,或者取消了它与COW有关的映射,父进程再次写COW的内存导致缺页异常后还需要复制吗?这取决于拥有COW内存的进程的数量,如果仅剩一个进程映射这段内存,只需要修改页表项将内存标记为可写即可;如果还有其他进程需要访问这段内存,父进程也需要复制内存,这就是do_wp_page处理的第3种情况。当然了,如果父进程放弃了映射,子进程写内存可能同样不需
+要复制内存,二者在程序上并没有地位上的差别.

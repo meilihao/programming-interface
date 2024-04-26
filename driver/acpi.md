@@ -26,3 +26,5 @@ arch/x86/kernel/head64.S -> arch/x86/kernel/head64.c:x86_64_start_kernel() -> ar
 > acpi tables 可见 `/sys/firmware/acpi/tables`
 
 > seabios 1.16.2也仅支持acpi 1.0
+
+acpid是一个用户空间的服务进程, 用来处理电源相关事件, 比如转发电源事件给应用, 让它安全退出, 避免异常退出导致数据损坏.

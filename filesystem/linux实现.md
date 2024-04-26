@@ -21,7 +21,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	struct super_block {
 		struct list_head	s_list;		/* Keep this first */ //链入到所有超级块链表super_blocks(循环双向链表)的连接件
 		dev_t			s_dev;		/* search index; _not_ kdev_t */ // 存储超级块的设备标识
-		unsigned char		s_blocksize_bits; //以bit为单位的块大小
+		unsigned char		s_blocksize_bits; //表示s_blocksize的位数
 		unsigned long		s_blocksize; //以B为单位的块大小
 		loff_t			s_maxbytes;	/* Max file size */ //一个文件最大字节数
 		struct file_system_type	*s_type; //指向文件系统类型
@@ -52,7 +52,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		__u16 s_encoding_flags;
 	#endif
 		struct hlist_bl_head	s_roots;	/* alternate root dentries for NFS */
-		struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
+		struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */ // 挂载它的mount对象组成的链表的头
 		struct block_device	*s_bdev; // 对于磁盘fs, 指向fs存在的块设备指针; 否则为NULL
 		struct backing_dev_info *s_bdi; // 指向后备设备信息描述符. 对于某些磁盘fs, 指向块设备请求队列的内嵌后备设备信息; 某些网络fs会定义自己的后备设备信息, 而其他fs可能使用空操作
 		struct mtd_info		*s_mtd; // 对于基于MTD的超级块, 指向MTD信息结构
@@ -208,6 +208,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 	`dentry + inode`可表示一个文件.
 
+	super_block与inode是一对多.
+
 	```c
 	// https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/fs.h#L639
 	// v6.5.2->v6.6.17仅改变__i_ctime
@@ -228,7 +230,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct posix_acl	*i_default_acl;
 	#endif
 
-		const struct inode_operations	*i_op; //操作inode的函数集合
+		const struct inode_operations	*i_op; //操作inode的函数集合, 针对文件本身
 		struct super_block	*i_sb; //指向所属超级块
 		struct address_space	*i_mapping; //文件数据在内存中的页缓存. 缓存文件的内容 by radix tree. 对文件的读写操作首先在i_mapping中的缓存里查找. 如果缓存存在则从缓存获取, 不用访问存储设备, 这加速了文件操作.
 
@@ -237,7 +239,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 	#endif
 
 		/* Stat data, not accessed from path walking */
-		unsigned long		i_ino; //inode编号
+		unsigned long		i_ino; //inode编号, 在同一个fs中唯一
 		/*
 		 * Filesystems may only read i_nlink directly.  They shall use the
 		 * following functions for modification:
@@ -297,7 +299,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		atomic_t		i_readcount; /* struct files open RO */
 	#endif
 		union {
-			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ //操作file的函数集合, 比如读写函数和异步io函数
+			const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */ //操作file的函数集合, 比如读写函数和异步io函数, 针对文件内容
 			void (*free_inode)(struct inode *);
 		};
 		struct file_lock_context	*i_flctx;
@@ -306,7 +308,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		union {
 			struct pipe_inode_info	*i_pipe; // inode表示一个管道文件, 则指向管道信息
 			struct cdev		*i_cdev; // inode表示一个字符设备, 则指向字符设备
-			char			*i_link;
+			char			*i_link; // 链接的目标文件的路径
 			unsigned		i_dir_seq;
 		};
 
@@ -387,7 +389,13 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 	为了加快对dentry的查找, kernel使用了hash表来缓存dentry, 即dentry cache=[dentry_hashtable](https://elixir.bootlin.com/linux/v6.6.23/source/fs/dcache.c#L101)
 
-	inode反映fs对象的元数据, dentry反映fs对象在fs树中的位置, dentry和inode是多对一的关系.
+	> 记dentry的父dentry为parent,那么dentry的d_hash字段会将它链接到由dentry_hashtable、parent和d_name的hash字段三者计算得到的哈希链表中
+
+	inode反映fs对象的元数据, dentry反映fs对象在fs树中的位置, dentry和inode是多对一的关系, 比如多个硬连接共享一个inode.
+
+	> 某一个文件系统可能有两套层级结构,一套存在于文件系统内部,由其自行维护;另一套由dentry表示,它来源于文件系统内部, 二者冲突时,以前者为准
+
+	> dentry和inode存在于内存中, inode有fs实际文件对应, 而dentry没有
 
 	```c
 	//https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/dcache.h#L82
@@ -398,10 +406,10 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		seqcount_spinlock_t d_seq;	/* per dentry seqlock */
 		struct hlist_bl_node d_hash;	/* lookup hash list */ //目录的hash链表, 链接到dentry cache的hash表. = v2.6.28的`struct hlist_node`
 		struct dentry *d_parent;	/* parent directory */ //指向父dentry
-		struct qstr d_name; //dentry名称. 打开一个文件时, 会根据这个名称来查找目标文件.
+		struct qstr d_name; //dentry名称. 打开一个文件时, 会根据这个名称来查找目标文件. qstr,全称为quick string,将文件的名字、名字的长度和哈希值保存,避免每次使用都需要计算一次
 		struct inode *d_inode;		/* Where the name belongs to - NULL is
 						 * negative */ //指向dentry关联的inode, inode与dentry共同描述了一个普通文件或目录文件
-		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */ //短目录名. 如果文件名超过36, 则另外分配空间
+		unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */ //短目录名. 如果文件名超过36, 则申请内存,将名字存入d_name,d_name的name字段指向最终存储名字的位置
 
 		/* Ref lookup also touches following */
 		struct lockref d_lockref;	/* per-dentry lock and refcount */ //目录锁与计数
@@ -420,7 +428,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		 * d_alias and d_rcu can share memory
 		 */
 		union {
-			struct hlist_node d_alias;	/* inode alias list */ // 链入到所属inode的i_dentry链表的连接件. 因为dentry和inode是N:1
+			struct hlist_node d_alias;	/* inode alias list */ // 链入到所属inode的i_dentry链表的连接件.
 			struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
 		 	struct rcu_head d_rcu;
 		} d_u;
@@ -451,6 +459,8 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 
 	dentry_operations 结构中的函数，也需要具体文件系统实现，下层代码查找或者操作目录时 VFS 就会调用这些函数，让具体文件系统根据自己储存设备上的目录信息处理并设置 dentry 结构中的信息，这样文件系统中的目录就和 VFS 的目录对应了.
 1. 文件对象(file)：代表进程已打开的文件. 用于建立进程与文件之间的对应关系.
+
+	file结构体对应文件的内容,并不是说它包含了文件的内容,而是说它记录了文件的访问方法和访问状态.
 
 	文件对象代表进程与具体文件交互的关系. kernel为每个打开的文件申请一个文件对象并返回该文件的fd. 每个进程有一个文件描述符表, 它用数组保存了进程打开的每个文件.
 
@@ -487,7 +497,7 @@ Linux为了实现这种VFS系统，采用面向对象的设计思路，主要抽
 		struct file_ra_state	f_ra; // 用于文件预读的状态
 		struct path		f_path; //文件路径, 包括所在fs的装载实例和该文件关联的dentry
 		struct inode		*f_inode;	/* cached value */ //对应的inode
-		const struct file_operations	*f_op; //操作文件的函数集合
+		const struct file_operations	*f_op; //操作文件的函数集合, 从inode的i_fop获取
 
 		u64			f_version; // 版本号, 在每次使用后自动递增
 	#ifdef CONFIG_SECURITY
@@ -580,6 +590,10 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 - 内存的文件系统 : 这类文件系统的数据不是存储在硬盘的，而是占用内存空间，经常用到的 /proc 和 /sys 文件系统都属于这一类，读写这类文件，实际上是读写内核中相关的数据数据
 - 网络的文件系统 : 用来访问其他计算机主机数据的文件系统，比如 NFS、SMB 等等
 
+文件系统从逻辑上可以分为两部分:
+1. 虚拟文件系统(Virtual File System, VFS)
+1. 挂载到VFS的实际文件系统
+
 **文件系统首先要先挂载到某个目录才可以正常使用**，比如 Linux 系统在启动时，会把文件系统挂载到根目录.
 
 ## mount
@@ -588,6 +602,7 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 
 ```c
 // https://elixir.bootlin.com/linux/v6.6.18/source/include/linux/mount.h#L70
+// 文件系统的挂载信息
 struct vfsmount {
 	struct dentry *mnt_root;	/* root of the mounted tree */ // 指向这个fs根目录的dentry
 	struct super_block *mnt_sb;	/* pointer to superblock */ // 指向这个fs根目录的超级块
@@ -606,6 +621,9 @@ static struct hlist_head *mount_hashtable __read_mostly; // 除根vfsmount外, �
 ### 新内核mount
 参考:
 - [深入理解 Linux 文件系統之文件系統掛載](https://webcache.googleusercontent.com/search?q=cache:EX2JdZE_xJgJ:https://www.readfog.com/a/1637370894679642112+&cd=3&hl=zh-CN&ct=clnk)
+- [文件系统(六)—文件系统mount过程](https://blog.csdn.net/u012489236/article/details/124523247)
+	使用fs_context前的mount
+
 
 ```
 [mount即sys_mount](https://elixir.bootlin.com/linux/v6.6.18/source/fs/namespace.c#L3872)
@@ -656,6 +674,358 @@ init_fs_context = legacy_init_fs_context
 
 无论使用哪一种, 都会在xxx_init_fs_contex中实现fc->ops =  &xxx_context_ops 接口, 后面也都会调用fc->ops.get_tree来创建super_block
 ```
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/fs/namespace.c#L3299
+/*
+ * create a new mount for userspace and request it to be added into the
+ * namespace's tree
+ */
+static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
+			int mnt_flags, const char *name, void *data)
+{
+	struct file_system_type *type;
+	struct fs_context *fc;
+	const char *subtype = NULL;
+	int err = 0;
+
+	if (!fstype)
+		return -EINVAL;
+
+	type = get_fs_type(fstype); // 找到对应的file_system_type对象
+	if (!type)
+		return -ENODEV;
+
+	if (type->fs_flags & FS_HAS_SUBTYPE) {
+		subtype = strchr(fstype, '.');
+		if (subtype) {
+			subtype++;
+			if (!*subtype) {
+				put_filesystem(type);
+				return -EINVAL;
+			}
+		}
+	}
+
+	fc = fs_context_for_mount(type, sb_flags);
+	put_filesystem(type);
+	if (IS_ERR(fc))
+		return PTR_ERR(fc);
+
+	/*
+	 * Indicate to the filesystem that the mount request is coming
+	 * from the legacy mount system call.
+	 */
+	fc->oldapi = true;
+
+	if (subtype)
+		err = vfs_parse_fs_string(fc, "subtype",
+					  subtype, strlen(subtype));
+	if (!err && name)
+		err = vfs_parse_fs_string(fc, "source", name, strlen(name));
+	if (!err)
+		err = parse_monolithic_mount_data(fc, data);
+	if (!err && !mount_capable(fc))
+		err = -EPERM;
+	if (!err)
+		err = vfs_get_tree(fc);
+	if (!err)
+		err = do_new_mount_fc(fc, path, mnt_flags);
+
+	put_fs_context(fc);
+	return err;
+}
+
+int finish_automount(struct vfsmount *m, const struct path *path)
+{
+	struct dentry *dentry = path->dentry;
+	struct mountpoint *mp;
+	struct mount *mnt;
+	int err;
+
+	if (!m)
+		return 0;
+	if (IS_ERR(m))
+		return PTR_ERR(m);
+
+	mnt = real_mount(m);
+	/* The new mount record should have at least 2 refs to prevent it being
+	 * expired before we get a chance to add it
+	 */
+	BUG_ON(mnt_get_count(mnt) < 2);
+
+	if (m->mnt_sb == path->mnt->mnt_sb &&
+	    m->mnt_root == dentry) {
+		err = -ELOOP;
+		goto discard;
+	}
+
+	/*
+	 * we don't want to use lock_mount() - in this case finding something
+	 * that overmounts our mountpoint to be means "quitely drop what we've
+	 * got", not "try to mount it on top".
+	 */
+	inode_lock(dentry->d_inode);
+	namespace_lock();
+	if (unlikely(cant_mount(dentry))) {
+		err = -ENOENT;
+		goto discard_locked;
+	}
+	if (path_overmounted(path)) {
+		err = 0;
+		goto discard_locked;
+	}
+	mp = get_mountpoint(dentry);
+	if (IS_ERR(mp)) {
+		err = PTR_ERR(mp);
+		goto discard_locked;
+	}
+
+	err = do_add_mount(mnt, mp, path, path->mnt->mnt_flags | MNT_SHRINKABLE);
+	unlock_mount(mp);
+	if (unlikely(err))
+		goto discard;
+	mntput(m);
+	return 0;
+
+discard_locked:
+	namespace_unlock();
+	inode_unlock(dentry->d_inode);
+discard:
+	/* remove m from any expiration list it may be on */
+	if (!list_empty(&mnt->mnt_expire)) {
+		namespace_lock();
+		list_del_init(&mnt->mnt_expire);
+		namespace_unlock();
+	}
+	mntput(m);
+	mntput(m);
+	return err;
+}
+
+// https://elixir.bootlin.com/linux/v6.6.28/source/fs/namespace.c#L3225
+/*
+ * add a mount into a namespace's mount tree
+ */
+static int do_add_mount(struct mount *newmnt, struct mountpoint *mp,
+			const struct path *path, int mnt_flags)
+{
+	struct mount *parent = real_mount(path->mnt);
+
+	mnt_flags &= ~MNT_INTERNAL_FLAGS;
+
+	if (unlikely(!check_mnt(parent))) {
+		/* that's acceptable only for automounts done in private ns */
+		if (!(mnt_flags & MNT_SHRINKABLE))
+			return -EINVAL;
+		/* ... and for those we'd better have mountpoint still alive */
+		if (!parent->mnt_ns)
+			return -EINVAL;
+	}
+
+	/* Refuse the same filesystem on the same mount point */
+	if (path->mnt->mnt_sb == newmnt->mnt.mnt_sb && path_mounted(path))
+		return -EBUSY;
+
+	if (d_is_symlink(newmnt->mnt.mnt_root))
+		return -EINVAL;
+
+	newmnt->mnt.mnt_flags = mnt_flags;
+	return graft_tree(newmnt, parent, mp);
+}
+```
+
+do_new_mount_fc 完 成 两 个 任 务 , 首 先 调 用 lock_mount 找 到mountpoint,然后调用do_add_mount里的graft_tree完善mount的关系.
+
+lock_mount是一个循环,不断调用以path作为参数调用lookup_mnt,lookup_mnt判断是否有挂载到(path->mnt,path->dentry)上
+的文件系统(记mount为m,遍历检查mount_hashtable对应链表上的元素, 满足 &m->mnt_parent->mnt == path->mnt &&m-
+>mnt_mountpoint==path->dentry即找到),如果找到,返回该vfsmount信息,继续查找是否有挂载到它上的文件系统。如此反复,直到找不到为止
+
+mountpoint的核心字段是m_dentry和m_count,分别表示挂载的dentry 和 dentry 被 mount的次数。get_mountpoint判断dentry对应的mountpoint是否已经存在,如果存在直接返回,否则创建一个新的并将其初始化返回.
+
+得到了mountpoint之后,graft_tree就可以建立mount与mountpoint和它的父mount的关系了.
+
+总结,mount包括两个步骤,第一步获得super_block和root. 第一步完成之后,文件系统并不可直接访问,需要调用do_add_mount将mount对象挂载到它的parent上.
+
+挂载的反操作是卸载,umount执行mount的相反操作.
+
+## 查找文件
+查找某个路径一般包括三步:设置起点:查找中间路径和处理`尾巴`(最后一个path elem),对应的函数一般为path_init、link_path_walk和xxx_last.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.28/source/fs/namei.c#L2471
+/* Returns 0 and nd will be valid on success; Retuns error, otherwise. */
+static int path_lookupat(struct nameidata *nd, unsigned flags, struct path *path) // nd, 工作目录, 一般是为AT_FDCWD(Current Work Directory, 当前工作目录, -100), 也可以是一个正整数,表示fd(文件描述符),并没有AT_FDROOT,路径以‘/’字符开始即表示root. nd->name->name字段表示路径名
+{
+	const char *s = path_init(nd, flags); // 设置查找的起点,给nd与文件相关的字段赋初值
+	int err;
+
+	if (unlikely(flags & LOOKUP_DOWN) && !IS_ERR(s)) {
+		err = handle_lookup_down(nd);
+		if (unlikely(err < 0))
+			s = ERR_PTR(err);
+	}
+
+	while (!(err = link_path_walk(s, nd)) &&
+	       (s = lookup_last(nd)) != NULL)
+		;
+	if (!err && unlikely(nd->flags & LOOKUP_MOUNTPOINT)) {
+		err = handle_lookup_down(nd);
+		nd->state &= ~ND_JUMPED; // no d_weak_revalidate(), please...
+	}
+	if (!err)
+		err = complete_walk(nd);
+
+	if (!err && nd->flags & LOOKUP_DIRECTORY)
+		if (!d_can_lookup(nd->path.dentry))
+			err = -ENOTDIR;
+	if (!err) {
+		*path = nd->path;
+		nd->path.mnt = NULL;
+		nd->path.dentry = NULL;
+	}
+	terminate_walk(nd);
+	return err;
+}
+```
+
+查找标志:
+- LOOKUP_FOLLOW: follow link
+- LOOKUP_DIRECTORY: 查找的是目录
+- LOOKUP_PARENT: 查找中间路径, 不处理`尾巴`
+- LOOKUP_REVAL: 存储的dentry不可信, 进行real lookup
+- LOOKUP_RCU: RCU查找
+
+与RCU查找对应的是REF查找,官方名字分别为rcu-walk和ref-walk,二者的区别在于查找过程中使用的同步机制不同,前者使用rcu
+同步机制,不需要使用lock,后者需要使用lock。LOOKUP_PARENT比较常用,比如“mkdira/b/d”,d应该是不存在的,所以只需要path_lookupat查找到`a/b`即可.
+
+path_init并没有改变查找的路径,它只设置了查找的起点. 进入link_path_walk函数前,nd的path和inode等字段已经指向了查找的起点文件。以‘/’开始的路径名,nd此时表示的是“/”,否则可以理解
+为“.”(当前目录)。
+
+link_path_walk可以用来查找中间的路径,比如`a/b/c`中的`a/b`.
+
+link_path_walk在while循环中遍历中间路径上的每一个单元,调用walk_component依次查找它们。walk_component失败时返回表示错误的负值,成功时返回值大于等于零,等于零表示查找一个单元结束,
+大于零则表示查找到的文件是一个符号链接,需要在下一次循环中处理。
+
+> 非链接文件的情况: nd->depth始终等于0
+
+walk_component用来查找路径的中间单元.
+
+walk_component的第一个参数nd的path字段表示上一次查找的结果(第一次调用时由path_init指定),也就是本轮查找的dentry的
+parent。我们在文件系统的数据结构一节说过,dentry可以表示文件系统的层级结构,所以可以先根据dentry来查找目标文件,这就是
+lookup_fast做的事情。
+
+但是dentry并不是一开始就存在于内存中的,比如目录a下,有b、c和d三个文件,访问过a/b之后,b的dentry就在内存中了,下次可以不
+用在文件系统内部查找,直接查找dentry就可以找到b了,但如果查找的是c,靠dentry是不够的。
+
+dentry查不到的文件,并不意味着不存在,这就需要深入文件系统内部查找了,是lookup_slow做的事情。如果lookup_fast和
+lookup_slow都没有找到文件,那就表示目标文件不存在.
+
+lookup_fast顾名思义就是快速查找,它根据当前存在的dentry组成的层级结构来查找目标文件. lookup_fast主要包括lookup(第1步)和follow(第2步)两个
+逻辑.
+
+lookup的任务是在parent(nd->path.dentry)下按照名字查找要找的dentry(前面介绍过,dentry在dentry_hashtable指向的某个哈希
+链表上)。如果没有找到dentry,返回0,表示在dentry层级结构中找不到文件。如果找到了dentry,并不能立即返回,因为它有可能是某
+个文件系统的挂载点,而被隐藏.
+
+lookup_fast如果查找不到dentry,返回值等于0,接下来就由lookup_slow继续查找。它的流程的主要逻辑分为两部分:在dentry的
+层级结构中再次尝试查找目标;调用d_alloc申请新的dentry,调用parent(nd->last)的inode提供的lookup回调函数深入文件系统内部查
+找。lookup_slow找到文件后,walk_component会在第4步调用
+follow_managed“拆墙”。
+
+walk_component调用lookup_fast和lookup_slow找到文件、“拆墙”,找不到文件函数出错返回;找到文件,如果文件是一个符号链接
+(symlink),返回1由link_path_walk继续处理,否则调用path_to_nameidata为nameidata对象赋值作为本次查找的结果,返回0。
+如果walk_component返回0,link_path_walk以得到的nameidata继续查找下一个单元;如果大于0,说明查找到的文件是符号链接,调用get_link查找它链接的文件.
+
+经过了查找、“拆墙”和符号链接处理后,一个单元的查找终于结束,link_path_walk继续以该单元为parent查找下一个单元,直到倒数
+第二个单元,并将查找结果返回,由path_lookupat处理“尾巴”(最后一个单元).
+
+如果用户需要path_lookupat 处 理 “ 尾 巴 ” ( LOOKUP_PARENT 清零),它会负责查找最后一个单元,查找的逻辑与link_path_walk的一轮查找并没有本质区别, 没有合并是为了复用.
+
+## mkdir
+mkdir和mkdirat系统调用用来创建目录,入口分别是sys_mkdir和sys_mkdirat, 都调用do_mkdirat实现, 主要逻辑是调用user_path_create函数返回一个新的dentry,然后调用vfs_kdir深入文件系统创建目录
+并为dentry赋值.
+
+user_path_create调用filename_create函数,后者先查找目标目录的父目录(lookup),然后在父目录下查找文件,文件如果存在则返回-
+EEXIST,否则创建一个新的dentry,将其返回。
+
+记父目录的inode为parent,vfs_mkdir先判断parent->i_op->mkdir是否为空,如果为空则表明文件系统不支持mkdir操作,返回-EPERM,
+否则调用parent->i_op->mkdir由文件系统创建目录并为dentry赋值.
+
+rmdir,也是系统调用,入口为sys_rmdir,由do_rmdir函数实现. 它先调用filename_parentat找到目标目录的父目录,然后调用`__lookup_hash`找到目录,最后调用vfs_rmdir删除目录。与vfs_mkdir类
+似,vfs_rmdir先判断parent->i_op->rmdir是否为空,如果为空则表明文件系统不支持rmdir操作,返回-EPERM;否则调用parent->i_op->rmdir删除目录。另外,如果要删除的目录上挂载了文件系统,vfs_rmdir会返回-EBUSY,rmdir失败.
+
+mkdir和rmdir都是先找到文件(前者找parent,后者找parent和目标目录),然后调用parent(inode)的i_op提供的回调函数完成操作。
+整个过程中,VFS负责维护dentry组成的层级结构,同时通知文件系统维护其内部的层级结构,二者的桥梁就是inode。所以inode除了表示它对应的文件之外,还是VFS与文件系统沟通的枢纽.
+
+## mknod
+mknod用来创建节点.
+
+有mknod和mknodat两个系统调用,入口分别为sys_mknod和sys_mknodat,二者都由do_mknodat实现.
+
+do_mknodat 先 调 用 user_path_create 找 到 需 要 创 建 节 点 所 在 的 目录,并创建文件的dentry,然后创建文件。可以创建的文件包含普通
+文件、字符设备文件、块设备文件、FIFO文件和Socket文件,所以所谓的节点也就是这几种文件的代称。
+
+如果目标是普通文件,则调用vfs_create创建它,与open创建普通文件无异。实际上,mknod的初衷并不是创建普通文件,而是后面四
+种文件,我们如果需要创建普通文件,使用open更好,不会引起误解。
+
+如果目标是后四种文件,则调用vfs_mknod创建它们,vfs_mknod会先判断parent->i_op->mknod(parent为目录的inode)是否为空,如
+果为空则表明文件系统不支持mknod操作,返回-EPERM;否则调用parent->i_op->mknod,创建文件。devtmpfs是使用mknod很好的例子.
+
+## 删除文件
+unlink和unlinkat系统调用则用来删除文件,入口分别为sys_unlink和sys_unlinkat。unlinkat可以用来删除目录,它的第三个参数flag的AT_REMOVEDIR标志如果置位,表示删除目录,
+会调用do_rmdir(只是套用了rmdir)。删除普通文件由do_unlinkat函数实现,有了以上几种操作的分析,读者应该可以猜到,它无非也是先找到文件,然后调用文件的回调函数。
+
+的确如此,do_unlinkat的主要逻辑是调用filename_parentat找到文件的父目录,然后调用__lookup_hash找到文件,然后调用vfs_unlink深
+入文件系统执行unlink操作。
+
+vfs_unlink先判断dir->i_op->unlink是否为空,如果为空则表明文件不支持unlink操作,返回-EPERM;否则调用dir->i_op->unlink由文件系
+统,执行unlink操作。如果成功返回,会调用d_delete处理dentry,d_delete会将dentry从哈希链表中删除,这样do_unlinkat调用的dput才会
+将dentry彻底删除。
+
+unlink执行完毕后,实际的文件是否还存在呢?unlink删除的是什么,比如我们创建两个硬链接a和b,然后unlink b, vfs_unlink中使用的
+是b的dentry,所以对a没有影响,那么被删掉的只是硬链接b。既然unlink删除的只不过是硬链接,文件系统的unlink操作就需要判断硬链
+接被删除后文件是否还有硬链接存在,如果有,则不能删除文件,否则就需要将文件删除.
+
+## fcntl
+用来控制文件的属性
+
+fcntl函数功能： 
+1. 复制一个现有的描述符(cmd=F_DUPFD/F_DUPFD_CLOEXEC). 
+2. 获得/设置文件描述符标记(cmd=F_GETFD或F_SETFD). 
+3. 获得/设置文件状态标记(cmd=F_GETFL或F_SETFL). 
+4. 获得/设置记录锁(cmd=F_GETLK , F_SETLK或F_SETLKW). LK即lock
+5. 获得/设置异步I/O所有权(cmd=F_GETOWN或F_SETOWN, F_GETOWN_EX或F_SETOWN_EX, F_GETOWNER_UIDS, F_GETSIG或F_SETSIG). 
+6. 通知: F_NOTIFY
+7. 修改pipe容量: F_SETPIPE_SZ和F_GETPIPE_SZ
+8. Leases: F_GETTLEASE和F_SETTLEASE. 文件状态发生特定变化后, 持有对应lease的进程会收到通知.
+
+常用的是前3种.
+
+F_DUPFD用来复制文件描述符,得到的文件描述符应该不小于arg。实现比较简单,首先调用alloc_fd获取一个不小于arg的文件描述
+符,然后调用fd_install建立新的文件描述符和file对象的对应关系。F_DUPFD_CLOEXEC除了F_DUPFD的功能外,还会将新文件描述符
+相关的O_CLOEXEC标志(close-on-exec)置位。
+
+注意,O_CLOEXEC是属于文件描述符的,而不是属于file对象的,也就是说每个文件描述符可以自行定义它的标志。进程的文件描
+述符的使用状态由位图表示,文件描述符的标志也是由位图表示( task_struct->files->fdt->close_on_exec ) , 位的值为1,表示
+O_CLOEXEC置位。
+
+F_GETFD用来获取文件描述符的标志,F_SETFD根据arg的值设置文件描述符的O_CLOEXEC标志,目前文件描述符仅支持O_CLOEXEC一种标志.
+
+F_GETFL获取文件状态标志,F_SETFL用来改变文件状态标志。文件的状态标志由file对象的f_flags字段表示,F_SETFL最终体现在该
+字段上,或者使文件产生一些行为,但并不是所有的标志都是有效果的 , 仅 支 持 O_APPEND 、 O_NONBLOCK 、 O_NDELAY 、O_DIRECT、O_NOATIME和FASYNC,其他的标志应该在open的时候
+设置。
+
+为什么其他的标志(比如O_SYNC)会被忽略呢?因为用户使用fcntl改变了文件的标志,肯定期待着会改变文件的后续行为,但某些标志可能已经产生了影响,即使更改了这些标志,文件的既有行为可
+能也无法完全改变。这种情况下,对用户宣称支持这些标志是不明智的,即使某些情况下可能成功.
+
+## ioctl
+用来控制设备的IO等操作
+
+ioctl也是内核提供的系统调用,入口是sys_ioctl。sys_ioctl调用do_vfs_ioctl 实 现 , 它 先 处 理 内 核 定 义 的 普 遍 适 用 的 cmd , 比 如
+FIOCLEX将文件描述符的close_on_exec置位;然后调用vfs_ioctl处理文 件 的 ioctl 定 义 专 属 的 命 令 , vfs_ioctl 函 数 调 用 filp->f_op->unlocked_ioctl完成.
+
+ioctl命令需要保证它们的唯一性,而且内核和应用程序使用的同一个命令的值必须相等,二者包含同一份头文件可以满足这个条件。另外,内核提供了`_IO 、_IOR、_IOW和_IOWR`等宏,可以使用它们定义命令来保证唯一性.
 
 ## 相关扩展
 - 从2.4.10开始, buffer cache不再是一个独立的缓存, 而是被包含在page cache中, 通过page cache来实现.
@@ -1199,6 +1569,114 @@ eh_entries 表示这个节点里面有多少项. 这里的项分两种，如果�
 
 ## inode 位图和块位图
 在文件系统里面，有专门的一个块来保存 inode 的位图. 在这 4k 里面，每一位对应一个 inode. 如果是 1，表示这个 inode 已经被用了；如果是 0，则表示没被用. 同样，同样fs也有一个块保存 block 的位图.
+
+[open flags](https://man7.org/linux/man-pages/man2/open.2.html):
+- os.O_RDONLY: 以只读的方式打开
+- os.O_WRONLY: 以只写的方式打开
+- os.O_RDWR : 以读写的方式打开
+- os.O_CREAT:  文件不存在, 创建文件
+- os.O_EXCL: 若O_CREAT置位, 且文件已存在, 返回-EEXIST
+- os.O_TRUNC: 打开一个文件并截断它的长度为零（必须有写权限）
+- os.O_APPEND: 以追加写的方式打开
+- os.O_NONBLOCK: 打开时不阻塞
+- os.O_DSYNC: 写操作等待物理I/O完成, fdatasync
+- os.O_SYNC : 写操作等待物理I/O完成, 文件属性更新完毕, fsync
+- os.O_DIRECT: 直接I/O, 绕过缓冲, 直接写入文件
+- os.O_SHLOCK: 自动获取共享锁
+- os.O_EXLOCK: 自动获取独立锁
+- os.O_CLOEXEC: close-on-exec, 调用exec成功后, 自动关闭
+- os.O_NOFOLLOW: 不追踪软链接
+- os.O_DIRECTORY: 如果目标文件不是目录, 打开失败
+
+一个进程打开某个文件,返回的文件描述符具有唯一性,所以内核需要记录哪些文件描述符已被占用,哪些未被使用,由位图实现
+(files_struct.fdt->open_fds)。files_struct.next_fd记录着下一个可能可用的文件描述符,在__alloc_fd调用find_next_zero_bit以它作为起始点(也可以指定一个大于它的起始点),在位图中查找下一个可用的文
+件描述符.
+
+在用户空间中可以使用文件描述符定位已打开的文件,内核维护了它和文件本身数据结构的对应关系:files_struct.fdt的fd字段是一个file结构体指针的数组,以文件描述符作为下标,即可得到文件的file
+对象(current->files->fdt->fd[fd]).
+
+open系统调用的入口为sys_open,后者调用do_sys_open(openat也是如此) . do_sys_open主要完成三个任务,首先调用get_unused_fd_flags(由__alloc_fd实现)获得一个新的可用的文件描
+述符,然后调用do_filp_open获得文件的file对象,最后调用fd_install建立文件描述符和file对象的关系.
+
+do_filp_open和它调用的path_openat函数主要逻辑与查找类似,分为三部分,调用path_init设置查找起点,调用link_path_walk查找路径的中间单元,最后调用do_last处理“尾巴”。简单地讲,就是先找到目
+标文件的父目录,然后处理文件.
+
+do_last逻辑:
+第1步显然是要找到目标文件,如果O_CREAT没有置位,使用lookup_fast查找文件,找到则进入第5步。如果O_CREAT置位,或者lookup_fast没有找到文件(提醒下,没有找到和出错是不同的,返回
+值也不同,前者等于0,后者小于0,参考查找一节的介绍),进入lookup_open.
+
+lookup_open先尝试在父目录中查找文件,调用d_lookup在dentry层级结构中查找,记父目录的inode为parent,找不到则调用parent-
+>i_op->lookup深入文件系统内部查找,仍未找到则说明文件不存在。如果文件不存在(!dentry->d_inode),且O_CREAT置位,parent-
+>i_op->create为空,则表明文件系统不支持create操作,返回-EACCES;否则调用parent->i_op->create由文件系统创建文件并为
+dentry赋值。
+
+lookup_open实际上并没有open的动作,主要逻辑只是查找文件,如果文件不存在,需要的情况下,创建文件并返回。
+
+第3步,如果文件是新创建的(file->f_mode|=FMODE_CREATED),那么它不可能是某个文件系统的挂载点
+(mountpoint),也不可能是一个符号链接(symlink,由symlink创建,而不是open),就可以跳过中间的步骤到finish_open_created.
+
+如果文件不是新创建的,那么它有可能是某个文件系统的挂载点,就需要调用follow_managed“拆墙”。它也有可能是一个符号链
+接,由第4步和第5步处理。如果它是符号链接,step_into返回1,当前do_last结束,path_openat会调用trailing_symlink获得链接的目标文件路
+径,然后继续调用link_path_walk和do_last,如此循环,直到找到最终的目标文件.
+
+第6步,vfs_open调用do_dentry_open,它们为file对象赋值,调用文件系统的open回调函数.
+
+f->f_mode的初始值是由open时的flags参数决定的:在path_init之前,由alloc_empty_file函数调用__alloc_file计算得到。至此,do_sys_open的第二个任务完成,接下来它调用fd_install建
+立fd和file对象的对应关系, open结束.
+
+close入口为sys_close.
+
+如果file对象的引用数(file->f_count字段)不小于2,说明除了当前文件描述符外,还有其他文件描述符使用它,此时不能将其释放,
+将f_count的值减1然后返回。只有当file对象所有的文件描述符都close的情况下,才需要继续3之后的步骤(file对象和文件描述符实际上并
+不是1对1的关系)。
+
+flush会执行并等待设备文件完成未完的操作,fasync用于异步通知 。dput判断是否还有其他file对象引用dentry(dentry-
+>d_lockref.count>1),如果有,则说明dentry需要继续存在,直接返回;否则根据dentry的状态和文件系统的策略对其处理。
+
+close的逻辑比较简单,但这里有一个值得深入讨论的问题:close之后,没有被引用的文件(dentry->d_lockref.count==0),是否应该
+将它的dentry释放?dentry维护了一个层级结构,我们肯定希望尽可能地把它留在内存中,否则下次再次使用文件就需要深入文件系统再查
+询一次。
+
+一般在两种情况下删除dentry,第一种是文件被删除(d_unhashed),dentry无效;第二种是dentry->d_op->d_delete返回值
+非0。很多文件系统并没有定义d_delete操作,所以close一般不会将dentry删除;如果需要定义d_delete操作,返回值要慎重,否则会给VFS增加负担.
+
+内核提供了link和linkat创建硬链接,它们都是系统调用,入口分别是sys_link和sys_linkat,都通过do_linkat实现.
+
+sys_linkat的逻辑比较清晰,先调用user_path_at找到目标文件,然后调用user_path_create在新的路径下创建dentry,最后调用vfs_link完成link.
+
+vfs_link最终会调用dir->i_op->link,link由文件系统自由实现,主要涉及以下三点.
+
+首先,链接并不是创建文件,文件已经存在,就是old_dentry->d_inode,要做的肯定不是在dir下面创建新的文件,而是让文件“归
+属 ” 于 dir 。 其 次 , old_dentry 和 new_dentry 最 终 都 要 与 old_dentry->d_inode 关 联 ( hlist_add_head(&dentry->d_u.d_alias, &inode-
+>i_dentry)),可以调用d_instantiate实现。最终,link还需要调整文件的硬链接数目(inode的__i_nlink字段).
+
+创建硬链接有诸多限制,从以上代码段中可以看到,硬链接不能跨文件系统、不能给目录创建硬链接等。
+
+跨文件系统: inode仅在同一个fs保证唯一.
+
+不给目录创建硬连接: 有可能出现闭环链接关系, 这样遍历的时候可能会陷入死循环中.
+
+Linux并没有刻意区分普通文件和目录,普通文件的inode的i_nlink(`__i_nlink与i_nlink`组成一个union,前者写,后者读)
+字段表示硬链接数目,目录的inode也有i_nlink字段是直接指向该目录的目录数.
+
+symlink 和 symlinkat系统调用用来创建符号链接,入口分别为sys_symlink和sys_symlinkat,二者都调用do_symlinkat实现.
+
+> 快捷方式本身是一个文件, 它包含目标文件路径信息.
+
+,link_path_walk调用get_link查找符号链接的目标文件的路径,get_link先查看inode->i_link字段,不为空的情
+况下直接使用它。否则调用inode->i_op->get_link,得到目标文件的路径。
+
+得到路径后,在接下来的循环中继续调用walk_component找到目标文件,该路径中可能还会存在符号链接,这种情况下继续调用get_link和walk_component,直到找到最终的目标文件.
+
+do_symlinkat调用user_path_create函数返回一个新的dentry,然后调用vfs_symlink深入文件系统,创建符号链接并为dentry赋值。
+
+记 父 目 录 的 inode 为 parent , vfs_symlink 先 判 断 parent->i_op->symlink是否为空,如果为空则表明文件系统不支持symlink操作,返
+回-EPERM;否则调用parent->i_op->symlink,由文件系统创建symlink并为dentry赋值。
+
+symlink需要在parent目录下创建一个符号链接类型的文件,并根据文件系统自身的策略将目标文件的路径反映(不一定是保存)出
+来,这与快捷方式的创建过程也是类似的。
+
+需要注意的是,在创建符号链接的过程中,并没有验证目标文件是否存在,也就是说可以成功地给一个不存在的文件创建符号链接, 甚至可以先创建符号链接,再创建文件.
 
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L1199
@@ -2036,6 +2514,7 @@ static struct file_system_type *file_systems; // 所有file_system_type都会加
 
 // https://elixir.bootlin.com/linux/v6.6.17/source/include/linux/fs.h#L2358
 // 与 mount 相关联的 file_system_type 中的属性达到变化: get_sb(2.6)->mount(4.9)->init_fs_context(5.10), 见erofs_fs_type, ext2_fs_type, 参考[[RFC PATCH 37/68] vfs: Convert apparmorfs to use the new mount API](https://lore.kernel.org/linux-security-module/155373033460.7602.12727592550663113967.stgit@warthog.procyon.org.uk/T/)
+// file_system_type表示fs种类
 struct file_system_type {
 	const char *name;
 	int fs_flags; // 标志
@@ -2052,8 +2531,8 @@ struct file_system_type {
 		       const char *, void *);
 	void (*kill_sb) (struct super_block *); // 在该fs实例卸载时调用
 	struct module *owner; // 指向实现该fs的module
-	struct file_system_type * next; // 指向fs类型链表的下一项
-	struct hlist_head fs_supers; // 保存该fs类型的所有superblock实例链表的表头
+	struct file_system_type * next; // 指向单链表file_systems的下一项
+	struct hlist_head fs_supers; // 该fs类型的所有super_block实例链表的表头
 
 	struct lock_class_key s_lock_key; // 用于调试锁依赖性
 	struct lock_class_key s_umount_key; // 同上
@@ -2225,7 +2704,7 @@ struct mount {
 #endif
 	struct list_head mnt_mounts;	/* list of children, anchored here */ // 装载到这个fs的目录上所有子fs的链表的表头
 	struct list_head mnt_child;	/* and going through their mnt_child */ // 链接到被装载到的父fs mnt_mounts链表的连接件
-	struct list_head mnt_instance;	/* mount instance on sb->s_mounts */
+	struct list_head mnt_instance;	/* mount instance on sb->s_mounts */ // 将mount链接到super_block的s_mounts链表
 	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */ // 保存fs的块设备的设备名, 或特殊fs的文件系统类型名
 	struct list_head mnt_list; // 链入达到进程名字空间中已装载fs链表的连接件. 链表头是mnt_namespace.list
 	struct list_head mnt_expire;	/* link in fs-specific expiry list */ // 链入到fs专有的过期链表的连接件, 用于NFS, CIFS, AFS等网络fs
@@ -2488,7 +2967,7 @@ struct nameidata {
 	struct inode	*inode; /* path.dentry.d_inode */
 	unsigned int	flags; // 查询标志
 	unsigned	seq, m_seq, r_seq;
-	int		last_type; // 路径名最后一个组件的类型(在LOOKUP_PARENT标志位设置时使用)
+	int		last_type; // 路径名最后一个组件的类型(在LOOKUP_PARENT标志位设置时使用) // 有5中: LAST_NORM(文件), LAST_ROOT(rooot), LAST_DOT(`.`), LAST_DOTDON(`..`), LAST_BIND(用于follow_link)
 	unsigned	depth; // 当前正在查找的符号链接的嵌套深度
 	int		total_link_count;
 	struct saved {
@@ -2496,7 +2975,7 @@ struct nameidata {
 		struct delayed_call done;
 		const char *name;
 		unsigned seq;
-	} *stack, internal[EMBEDDED_LEVELS];
+	} *stack, internal[EMBEDDED_LEVELS]; // stack, 保存查找信息
 	struct filename	*name;
 	struct nameidata *saved;
 	unsigned	root_seq;
@@ -2613,8 +3092,43 @@ inode 结构就表示硬盘上的 inode，包括块设备号等. 几乎每一种
 ## 系统调用层和虚拟文件系统层
 文件系统的读写，其实就是调用系统函数 read 和 write.
 
+read系统调用的入口为sys_read,先调用file_pos_read获取file对象当前的fp,然后调用vfs_read读文件,最后调用file_pos_write更新fp。
+读写位置是属于file对象的,而不是属于文件的,由file->f_pos字段表示.
+
+open同一个文件两次之后,fd1和fd2对应两个不同的file对象。fd1的file对象的fp在write之后得到了更新,文件的内容为abcdefg;fd2的
+file对象的在close(fd1)后仍然为0,所以write(fd2)写到了文件的开头,最终的结果是hijklfg.
+
+vfs_read需要文件系统至少实现file->f_op->read和file->f_op->read_iter二者之一。如果文件系统定义了read,则调用read;否则调
+用new_sync_read,后者调用read_iter实现。
+
+write像极了read,它的系统调用入口为sys_write,先调用file_pos_read获取file对象当前fp,然后调用vfs_write写文件,最后调用
+file_pos_write更新fp。vfs_write也与vfs_read类似,如果文件系统实现了file->f_op->write,则调用它;否则调用new_sync_write,
+new_sync_write调用filp->f_op->write_iter实现写操作。
+
+对文件读写实际上是一个复杂的过程,VFS仅仅是调用文件系统的回调函数,具体的逻辑由文件系统自行决定.
+
+3.10版内核并没有read_iter和write_iter,有的是aio_read和aio_write,它们的功能类似。a表示asynchronized,意思是异步I/O。所
+谓的异步I/O,就是不等I/O操作完成即返回,操作完成再行处理。new_sync_read和new_sync_write中的new,是相对于do_sync_read和
+do_sync_write而言的。3.10版内核中,以read为例,如果文件系统定义了read,则调用read;否则调用do_sync_read,后者调用aio_read实现。
+
+无论是new_sync_xxx还是do_sync_xxx都是synchronized,同步的,也就是等待I/O操作完成。aio_xxx是实现异步读写的,xxx_iter可
+以实现同步、异步读写,也就是说new_sync_xxx和do_sync_xxx通过可以实现异步读写的操作来实现。
+
+逻辑上看似有些矛盾,实际上,do_sync_xxx调用aio_xxx后并不会直接返回,如果aio_xxx的返回值等于-EIOCBQUEUED(iocb
+queued,表示已经插入I/O操作),它会调用wait_on_sync_kiocb等待I/O操作结束再返回。
+
+至于new_sync_xxx调用xxx_iter,内核不允许它们在这种情况下返回-EIOCBQU-EUED,也就是说文件系统定义xxx_iter的时候需要区分
+当前的请求是同步I/O,还是异步I/O,根据请求决定策略,内核提供了is_sync_kiocb函数辅助判断请求是否为同步I/O。
+
+需要说明的是,异步I/O和读写置位了O_NONBLOCK的文件并不是一回事,异步I/O并不要求进行实际的I/O操作,O_NONBLOCK的意
+思是进行I/O操作时,发现“无事可做”,不再等待,它描述的问题是阻塞(Block)。比如要买菜市场的菜,你可以在网上点外送,然后继续
+忙其他事情,这是异步I/O;也可以去楼下,发现去早了,菜市场还没开门。等待是阻塞,不等待是非阻塞。你去了,就是同步I/O,不管有没有买到菜.
+
+aio的使用分为两种情况,一种是glibc定义的aio_xxx函数,另一种是内核定义的io_submit、io_getevents等系统调用,与read/write相比,
+它们的使用场景较少.
+
 ```c
-ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+ssize_tksys_read(unsignedintfd, char __user *buf, size_t count)
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
