@@ -1,5 +1,827 @@
 # task
+Linux实际上并没有从本质上将进程和线程分开,线程又被称为轻量级进程( Low WeightProcess,LWP).
+
+所谓Linux的进程和线程并没有本质差别,指的是二者的实现,但二者的地位并不等同. 比如提起进程id,线程(轻量级进程)不被当作进程看待,类似的地方还有很多,在这类场景中,提起进程,不包含轻量级进程,而有些场景却是可以包含的. 究其原因,Linux有自身的特性,但为了程序的可移植性,它必须遵循POSIX等一系列标准.
+
+比如getpid系统调用POSIX规定返回进程id,如果一个轻量级进程调用它返回的是线程id,那么在Linux上可以正常运行的程序,移植到其他操作系统就需要很多额外的工作. 为了不引起歧义,在此约定,本书中“进程id”指的是线程组id,而“进程的id”也可以是线程id.
+
 在 Linux 里面，无论是进程，还是线程，到了内核里面，统一都叫任务（Task），由一个统一的结构 [task_struct](https://elixir.bootlin.com/linux/latest/source/include/linux/sched.h#L632) 进行管理.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.29/source/include/linux/sched.h#L743
+struct task_struct {
+#ifdef CONFIG_THREAD_INFO_IN_TASK
+	/*
+	 * For reasons of header soup (see current_thread_info()), this
+	 * must be the first element of task_struct.
+	 */
+	struct thread_info		thread_info;
+#endif
+	unsigned int			__state;
+
+#ifdef CONFIG_PREEMPT_RT
+	/* saved state for "spinlock sleepers" */
+	unsigned int			saved_state;
+#endif
+
+	/*
+	 * This begins the randomizable portion of task_struct. Only
+	 * scheduling-critical items should be added above here.
+	 */
+	randomized_struct_fields_start
+
+	void				*stack; // 进程的内核栈
+	refcount_t			usage;
+	/* Per task flags (PF_*), defined further below: */
+	unsigned int			flags;
+	unsigned int			ptrace;
+
+#ifdef CONFIG_SMP
+	int				on_cpu;
+	struct __call_single_node	wake_entry;
+	unsigned int			wakee_flips;
+	unsigned long			wakee_flip_decay_ts;
+	struct task_struct		*last_wakee;
+
+	/*
+	 * recent_used_cpu is initially set as the last CPU used by a task
+	 * that wakes affine another task. Waker/wakee relationships can
+	 * push tasks around a CPU where each wakeup moves to the next one.
+	 * Tracking a recently used CPU allows a quick search for a recently
+	 * used CPU that may be idle.
+	 */
+	int				recent_used_cpu;
+	int				wake_cpu;
+#endif
+	int				on_rq;
+
+	int				prio; // 进程的优先级
+	int				static_prio; // 同上
+	int				normal_prio; // 同上
+	unsigned int			rt_priority; // 同上
+
+	struct sched_entity		se; // 进程调度相关
+	struct sched_rt_entity		rt; // 同上
+	struct sched_dl_entity		dl; // 同上
+	const struct sched_class	*sched_class; // 进程所属的sched_class
+
+#ifdef CONFIG_SCHED_CORE
+	struct rb_node			core_node;
+	unsigned long			core_cookie;
+	unsigned int			core_occupation;
+#endif
+
+#ifdef CONFIG_CGROUP_SCHED
+	struct task_group		*sched_task_group;
+#endif
+
+#ifdef CONFIG_UCLAMP_TASK
+	/*
+	 * Clamp values requested for a scheduling entity.
+	 * Must be updated with task_rq_lock() held.
+	 */
+	struct uclamp_se		uclamp_req[UCLAMP_CNT];
+	/*
+	 * Effective clamp values used for a scheduling entity.
+	 * Must be updated with task_rq_lock() held.
+	 */
+	struct uclamp_se		uclamp[UCLAMP_CNT];
+#endif
+
+	struct sched_statistics         stats;
+
+#ifdef CONFIG_PREEMPT_NOTIFIERS
+	/* List of struct preempt_notifier: */
+	struct hlist_head		preempt_notifiers;
+#endif
+
+#ifdef CONFIG_BLK_DEV_IO_TRACE
+	unsigned int			btrace_seq;
+#endif
+
+	unsigned int			policy;
+	int				nr_cpus_allowed;
+	const cpumask_t			*cpus_ptr;
+	cpumask_t			*user_cpus_ptr;
+	cpumask_t			cpus_mask;
+	void				*migration_pending;
+#ifdef CONFIG_SMP
+	unsigned short			migration_disabled;
+#endif
+	unsigned short			migration_flags;
+
+#ifdef CONFIG_PREEMPT_RCU
+	int				rcu_read_lock_nesting;
+	union rcu_special		rcu_read_unlock_special;
+	struct list_head		rcu_node_entry;
+	struct rcu_node			*rcu_blocked_node;
+#endif /* #ifdef CONFIG_PREEMPT_RCU */
+
+#ifdef CONFIG_TASKS_RCU
+	unsigned long			rcu_tasks_nvcsw;
+	u8				rcu_tasks_holdout;
+	u8				rcu_tasks_idx;
+	int				rcu_tasks_idle_cpu;
+	struct list_head		rcu_tasks_holdout_list;
+#endif /* #ifdef CONFIG_TASKS_RCU */
+
+#ifdef CONFIG_TASKS_TRACE_RCU
+	int				trc_reader_nesting;
+	int				trc_ipi_to_cpu;
+	union rcu_special		trc_reader_special;
+	struct list_head		trc_holdout_list;
+	struct list_head		trc_blkd_node;
+	int				trc_blkd_cpu;
+#endif /* #ifdef CONFIG_TASKS_TRACE_RCU */
+
+	struct sched_info		sched_info;
+
+	struct list_head		tasks;
+#ifdef CONFIG_SMP
+	struct plist_node		pushable_tasks;
+	struct rb_node			pushable_dl_tasks;
+#endif
+
+	struct mm_struct		*mm; // 进程的内存信息
+	struct mm_struct		*active_mm; // 同上
+
+	int				exit_state; // 进程退出字段
+	int				exit_code; // 同上
+	int				exit_signal; // 同上
+	/* The signal sent when the parent dies: */
+	int				pdeath_signal;
+	/* JOBCTL_*, siglock protected: */
+	unsigned long			jobctl;
+
+	/* Used for emulating ABI behavior of previous Linux versions: */
+	unsigned int			personality;
+
+	/* Scheduler bits, serialized by scheduler locks: */
+	unsigned			sched_reset_on_fork:1;
+	unsigned			sched_contributes_to_load:1;
+	unsigned			sched_migrated:1;
+
+	/* Force alignment to the next boundary: */
+	unsigned			:0;
+
+	/* Unserialized, strictly 'current' */
+
+	/*
+	 * This field must not be in the scheduler word above due to wakelist
+	 * queueing no longer being serialized by p->on_cpu. However:
+	 *
+	 * p->XXX = X;			ttwu()
+	 * schedule()			  if (p->on_rq && ..) // false
+	 *   smp_mb__after_spinlock();	  if (smp_load_acquire(&p->on_cpu) && //true
+	 *   deactivate_task()		      ttwu_queue_wakelist())
+	 *     p->on_rq = 0;			p->sched_remote_wakeup = Y;
+	 *
+	 * guarantees all stores of 'current' are visible before
+	 * ->sched_remote_wakeup gets used, so it can be in this word.
+	 */
+	unsigned			sched_remote_wakeup:1;
+
+	/* Bit to tell LSMs we're in execve(): */
+	unsigned			in_execve:1;
+	unsigned			in_iowait:1;
+#ifndef TIF_RESTORE_SIGMASK
+	unsigned			restore_sigmask:1;
+#endif
+#ifdef CONFIG_MEMCG
+	unsigned			in_user_fault:1;
+#endif
+#ifdef CONFIG_LRU_GEN
+	/* whether the LRU algorithm may apply to this access */
+	unsigned			in_lru_fault:1;
+#endif
+#ifdef CONFIG_COMPAT_BRK
+	unsigned			brk_randomized:1;
+#endif
+#ifdef CONFIG_CGROUPS
+	/* disallow userland-initiated cgroup migration */
+	unsigned			no_cgroup_migration:1;
+	/* task is frozen/stopped (used by the cgroup freezer) */
+	unsigned			frozen:1;
+#endif
+#ifdef CONFIG_BLK_CGROUP
+	unsigned			use_memdelay:1;
+#endif
+#ifdef CONFIG_PSI
+	/* Stalled due to lack of memory */
+	unsigned			in_memstall:1;
+#endif
+#ifdef CONFIG_PAGE_OWNER
+	/* Used by page_owner=on to detect recursion in page tracking. */
+	unsigned			in_page_owner:1;
+#endif
+#ifdef CONFIG_EVENTFD
+	/* Recursion prevention for eventfd_signal() */
+	unsigned			in_eventfd:1;
+#endif
+#ifdef CONFIG_IOMMU_SVA
+	unsigned			pasid_activated:1;
+#endif
+#ifdef	CONFIG_CPU_SUP_INTEL
+	unsigned			reported_split_lock:1;
+#endif
+#ifdef CONFIG_TASK_DELAY_ACCT
+	/* delay due to memory thrashing */
+	unsigned                        in_thrashing:1;
+#endif
+
+	unsigned long			atomic_flags; /* Flags requiring atomic access. */
+
+	struct restart_block		restart_block;
+
+	pid_t				pid;
+	pid_t				tgid; // 进程所属的线程组的id
+
+#ifdef CONFIG_STACKPROTECTOR
+	/* Canary value for the -fstack-protector GCC feature: */
+	unsigned long			stack_canary;
+#endif
+	/*
+	 * Pointers to the (original) parent process, youngest child, younger sibling,
+	 * older sibling, respectively.  (p->father can be replaced with
+	 * p->real_parent->pid)
+	 */
+
+	/* Real parent process: */
+	struct task_struct __rcu	*real_parent; // 进程的父进程
+
+	/* Recipient of SIGCHLD, wait4() reports: */
+	struct task_struct __rcu	*parent; // 同上
+
+	/*
+	 * Children/sibling form the list of natural children:
+	 */
+	struct list_head		children; // 进程的子进程组成的链表的表头
+	struct list_head		sibling; // 将进程链接到兄弟进程组成的链表中, 表头为父进程的children字段
+	struct task_struct		*group_leader; // 进程所在的线程组的领导进程
+
+	/*
+	 * 'ptraced' is the list of tasks this task is using ptrace() on.
+	 *
+	 * This includes both natural children and PTRACE_ATTACH targets.
+	 * 'ptrace_entry' is this task's link on the p->parent->ptraced list.
+	 */
+	struct list_head		ptraced;
+	struct list_head		ptrace_entry;
+
+	/* PID/PID hash table linkage. */
+	struct pid			*thread_pid; // 进程对应的pid
+	struct hlist_node		pid_links[PIDTYPE_MAX];
+	struct list_head		thread_group; // 将进程链接到线程组中, 链表的头为线程组领导进程的thread_group字段
+	struct list_head		thread_node;
+
+	struct completion		*vfork_done;
+
+	/* CLONE_CHILD_SETTID: */
+	int __user			*set_child_tid;
+
+	/* CLONE_CHILD_CLEARTID: */
+	int __user			*clear_child_tid;
+
+	/* PF_KTHREAD | PF_IO_WORKER */
+	void				*worker_private;
+
+	u64				utime;
+	u64				stime;
+#ifdef CONFIG_ARCH_HAS_SCALED_CPUTIME
+	u64				utimescaled;
+	u64				stimescaled;
+#endif
+	u64				gtime;
+	struct prev_cputime		prev_cputime;
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
+	struct vtime			vtime;
+#endif
+
+#ifdef CONFIG_NO_HZ_FULL
+	atomic_t			tick_dep_mask;
+#endif
+	/* Context switch counts: */
+	unsigned long			nvcsw;
+	unsigned long			nivcsw;
+
+	/* Monotonic time in nsecs: */
+	u64				start_time;
+
+	/* Boot based time in nsecs: */
+	u64				start_boottime;
+
+	/* MM fault and swap info: this can arguably be seen as either mm-specific or thread-specific: */
+	unsigned long			min_flt;
+	unsigned long			maj_flt;
+
+	/* Empty if CONFIG_POSIX_CPUTIMERS=n */
+	struct posix_cputimers		posix_cputimers;
+
+#ifdef CONFIG_POSIX_CPU_TIMERS_TASK_WORK
+	struct posix_cputimers_work	posix_cputimers_work;
+#endif
+
+	/* Process credentials: */
+
+	/* Tracer's credentials at attach: */
+	const struct cred __rcu		*ptracer_cred;
+
+	/* Objective and real subjective task credentials (COW): */
+	const struct cred __rcu		*real_cred; // credentials
+
+	/* Effective (overridable) subjective task credentials (COW): */
+	const struct cred __rcu		*cred; // 同上
+
+#ifdef CONFIG_KEYS
+	/* Cached requested key. */
+	struct key			*cached_requested_key;
+#endif
+
+	/*
+	 * executable name, excluding path.
+	 *
+	 * - normally initialized setup_new_exec()
+	 * - access it with [gs]et_task_comm()
+	 * - lock it with task_lock()
+	 */
+	char				comm[TASK_COMM_LEN];
+
+	struct nameidata		*nameidata;
+
+#ifdef CONFIG_SYSVIPC
+	struct sysv_sem			sysvsem;
+	struct sysv_shm			sysvshm;
+#endif
+#ifdef CONFIG_DETECT_HUNG_TASK
+	unsigned long			last_switch_count;
+	unsigned long			last_switch_time;
+#endif
+	/* Filesystem information: */
+	struct fs_struct		*fs; // fs相关信息
+
+	/* Open file information: */
+	struct files_struct		*files; // 进程使用的文件信息
+
+#ifdef CONFIG_IO_URING
+	struct io_uring_task		*io_uring;
+#endif
+
+	/* Namespaces: */
+	struct nsproxy			*nsproxy; // 管理进程的多种namespace
+
+	/* Signal handlers: */
+	struct signal_struct		*signal; // 信号处理
+	struct sighand_struct __rcu		*sighand; // 同上
+	sigset_t			blocked; // 同上
+	sigset_t			real_blocked; // 同上
+	/* Restored if set_restore_sigmask() was used: */
+	sigset_t			saved_sigmask; // 同上
+	struct sigpending		pending; // 同上
+	unsigned long			sas_ss_sp;
+	size_t				sas_ss_size;
+	unsigned int			sas_ss_flags;
+
+	struct callback_head		*task_works;
+
+#ifdef CONFIG_AUDIT
+#ifdef CONFIG_AUDITSYSCALL
+	struct audit_context		*audit_context;
+#endif
+	kuid_t				loginuid;
+	unsigned int			sessionid;
+#endif
+	struct seccomp			seccomp;
+	struct syscall_user_dispatch	syscall_dispatch;
+
+	/* Thread group tracking: */
+	u64				parent_exec_id;
+	u64				self_exec_id;
+
+	/* Protection against (de-)allocation: mm, files, fs, tty, keyrings, mems_allowed, mempolicy: */
+	spinlock_t			alloc_lock;
+
+	/* Protection of the PI data structures: */
+	raw_spinlock_t			pi_lock;
+
+	struct wake_q_node		wake_q;
+
+#ifdef CONFIG_RT_MUTEXES
+	/* PI waiters blocked on a rt_mutex held by this task: */
+	struct rb_root_cached		pi_waiters;
+	/* Updated under owner's pi_lock and rq lock */
+	struct task_struct		*pi_top_task;
+	/* Deadlock detection and priority inheritance handling: */
+	struct rt_mutex_waiter		*pi_blocked_on;
+#endif
+
+#ifdef CONFIG_DEBUG_MUTEXES
+	/* Mutex deadlock detection: */
+	struct mutex_waiter		*blocked_on;
+#endif
+
+#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
+	int				non_block_count;
+#endif
+
+#ifdef CONFIG_TRACE_IRQFLAGS
+	struct irqtrace_events		irqtrace;
+	unsigned int			hardirq_threaded;
+	u64				hardirq_chain_key;
+	int				softirqs_enabled;
+	int				softirq_context;
+	int				irq_config;
+#endif
+#ifdef CONFIG_PREEMPT_RT
+	int				softirq_disable_cnt;
+#endif
+
+#ifdef CONFIG_LOCKDEP
+# define MAX_LOCK_DEPTH			48UL
+	u64				curr_chain_key;
+	int				lockdep_depth;
+	unsigned int			lockdep_recursion;
+	struct held_lock		held_locks[MAX_LOCK_DEPTH];
+#endif
+
+#if defined(CONFIG_UBSAN) && !defined(CONFIG_UBSAN_TRAP)
+	unsigned int			in_ubsan;
+#endif
+
+	/* Journalling filesystem info: */
+	void				*journal_info;
+
+	/* Stacked block device info: */
+	struct bio_list			*bio_list;
+
+	/* Stack plugging: */
+	struct blk_plug			*plug;
+
+	/* VM state: */
+	struct reclaim_state		*reclaim_state;
+
+	struct io_context		*io_context;
+
+#ifdef CONFIG_COMPACTION
+	struct capture_control		*capture_control;
+#endif
+	/* Ptrace state: */
+	unsigned long			ptrace_message;
+	kernel_siginfo_t		*last_siginfo;
+
+	struct task_io_accounting	ioac;
+#ifdef CONFIG_PSI
+	/* Pressure stall state */
+	unsigned int			psi_flags;
+#endif
+#ifdef CONFIG_TASK_XACCT
+	/* Accumulated RSS usage: */
+	u64				acct_rss_mem1;
+	/* Accumulated virtual memory usage: */
+	u64				acct_vm_mem1;
+	/* stime + utime since last update: */
+	u64				acct_timexpd;
+#endif
+#ifdef CONFIG_CPUSETS
+	/* Protected by ->alloc_lock: */
+	nodemask_t			mems_allowed;
+	/* Sequence number to catch updates: */
+	seqcount_spinlock_t		mems_allowed_seq;
+	int				cpuset_mem_spread_rotor;
+	int				cpuset_slab_spread_rotor;
+#endif
+#ifdef CONFIG_CGROUPS
+	/* Control Group info protected by css_set_lock: */
+	struct css_set __rcu		*cgroups;
+	/* cg_list protected by css_set_lock and tsk->alloc_lock: */
+	struct list_head		cg_list;
+#endif
+#ifdef CONFIG_X86_CPU_RESCTRL
+	u32				closid;
+	u32				rmid;
+#endif
+#ifdef CONFIG_FUTEX
+	struct robust_list_head __user	*robust_list;
+#ifdef CONFIG_COMPAT
+	struct compat_robust_list_head __user *compat_robust_list;
+#endif
+	struct list_head		pi_state_list;
+	struct futex_pi_state		*pi_state_cache;
+	struct mutex			futex_exit_mutex;
+	unsigned int			futex_state;
+#endif
+#ifdef CONFIG_PERF_EVENTS
+	struct perf_event_context	*perf_event_ctxp;
+	struct mutex			perf_event_mutex;
+	struct list_head		perf_event_list;
+#endif
+#ifdef CONFIG_DEBUG_PREEMPT
+	unsigned long			preempt_disable_ip;
+#endif
+#ifdef CONFIG_NUMA
+	/* Protected by alloc_lock: */
+	struct mempolicy		*mempolicy;
+	short				il_prev;
+	short				pref_node_fork;
+#endif
+#ifdef CONFIG_NUMA_BALANCING
+	int				numa_scan_seq;
+	unsigned int			numa_scan_period;
+	unsigned int			numa_scan_period_max;
+	int				numa_preferred_nid;
+	unsigned long			numa_migrate_retry;
+	/* Migration stamp: */
+	u64				node_stamp;
+	u64				last_task_numa_placement;
+	u64				last_sum_exec_runtime;
+	struct callback_head		numa_work;
+
+	/*
+	 * This pointer is only modified for current in syscall and
+	 * pagefault context (and for tasks being destroyed), so it can be read
+	 * from any of the following contexts:
+	 *  - RCU read-side critical section
+	 *  - current->numa_group from everywhere
+	 *  - task's runqueue locked, task not running
+	 */
+	struct numa_group __rcu		*numa_group;
+
+	/*
+	 * numa_faults is an array split into four regions:
+	 * faults_memory, faults_cpu, faults_memory_buffer, faults_cpu_buffer
+	 * in this precise order.
+	 *
+	 * faults_memory: Exponential decaying average of faults on a per-node
+	 * basis. Scheduling placement decisions are made based on these
+	 * counts. The values remain static for the duration of a PTE scan.
+	 * faults_cpu: Track the nodes the process was running on when a NUMA
+	 * hinting fault was incurred.
+	 * faults_memory_buffer and faults_cpu_buffer: Record faults per node
+	 * during the current scan window. When the scan completes, the counts
+	 * in faults_memory and faults_cpu decay and these values are copied.
+	 */
+	unsigned long			*numa_faults;
+	unsigned long			total_numa_faults;
+
+	/*
+	 * numa_faults_locality tracks if faults recorded during the last
+	 * scan window were remote/local or failed to migrate. The task scan
+	 * period is adapted based on the locality of the faults with different
+	 * weights depending on whether they were shared or private faults
+	 */
+	unsigned long			numa_faults_locality[3];
+
+	unsigned long			numa_pages_migrated;
+#endif /* CONFIG_NUMA_BALANCING */
+
+#ifdef CONFIG_RSEQ
+	struct rseq __user *rseq;
+	u32 rseq_len;
+	u32 rseq_sig;
+	/*
+	 * RmW on rseq_event_mask must be performed atomically
+	 * with respect to preemption.
+	 */
+	unsigned long rseq_event_mask;
+#endif
+
+#ifdef CONFIG_SCHED_MM_CID
+	int				mm_cid;		/* Current cid in mm */
+	int				last_mm_cid;	/* Most recent cid in mm */
+	int				migrate_from_cpu;
+	int				mm_cid_active;	/* Whether cid bitmap is active */
+	struct callback_head		cid_work;
+#endif
+
+	struct tlbflush_unmap_batch	tlb_ubc;
+
+	/* Cache last used pipe for splice(): */
+	struct pipe_inode_info		*splice_pipe;
+
+	struct page_frag		task_frag;
+
+#ifdef CONFIG_TASK_DELAY_ACCT
+	struct task_delay_info		*delays;
+#endif
+
+#ifdef CONFIG_FAULT_INJECTION
+	int				make_it_fail;
+	unsigned int			fail_nth;
+#endif
+	/*
+	 * When (nr_dirtied >= nr_dirtied_pause), it's time to call
+	 * balance_dirty_pages() for a dirty throttling pause:
+	 */
+	int				nr_dirtied;
+	int				nr_dirtied_pause;
+	/* Start of a write-and-pause period: */
+	unsigned long			dirty_paused_when;
+
+#ifdef CONFIG_LATENCYTOP
+	int				latency_record_count;
+	struct latency_record		latency_record[LT_SAVECOUNT];
+#endif
+	/*
+	 * Time slack values; these are used to round up poll() and
+	 * select() etc timeout values. These are in nanoseconds.
+	 */
+	u64				timer_slack_ns;
+	u64				default_timer_slack_ns;
+
+#if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
+	unsigned int			kasan_depth;
+#endif
+
+#ifdef CONFIG_KCSAN
+	struct kcsan_ctx		kcsan_ctx;
+#ifdef CONFIG_TRACE_IRQFLAGS
+	struct irqtrace_events		kcsan_save_irqtrace;
+#endif
+#ifdef CONFIG_KCSAN_WEAK_MEMORY
+	int				kcsan_stack_depth;
+#endif
+#endif
+
+#ifdef CONFIG_KMSAN
+	struct kmsan_ctx		kmsan_ctx;
+#endif
+
+#if IS_ENABLED(CONFIG_KUNIT)
+	struct kunit			*kunit_test;
+#endif
+
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	/* Index of current stored address in ret_stack: */
+	int				curr_ret_stack;
+	int				curr_ret_depth;
+
+	/* Stack of return addresses for return function tracing: */
+	struct ftrace_ret_stack		*ret_stack;
+
+	/* Timestamp for last schedule: */
+	unsigned long long		ftrace_timestamp;
+
+	/*
+	 * Number of functions that haven't been traced
+	 * because of depth overrun:
+	 */
+	atomic_t			trace_overrun;
+
+	/* Pause tracing: */
+	atomic_t			tracing_graph_pause;
+#endif
+
+#ifdef CONFIG_TRACING
+	/* Bitmask and counter of trace recursion: */
+	unsigned long			trace_recursion;
+#endif /* CONFIG_TRACING */
+
+#ifdef CONFIG_KCOV
+	/* See kernel/kcov.c for more details. */
+
+	/* Coverage collection mode enabled for this task (0 if disabled): */
+	unsigned int			kcov_mode;
+
+	/* Size of the kcov_area: */
+	unsigned int			kcov_size;
+
+	/* Buffer for coverage collection: */
+	void				*kcov_area;
+
+	/* KCOV descriptor wired with this task or NULL: */
+	struct kcov			*kcov;
+
+	/* KCOV common handle for remote coverage collection: */
+	u64				kcov_handle;
+
+	/* KCOV sequence number: */
+	int				kcov_sequence;
+
+	/* Collect coverage from softirq context: */
+	unsigned int			kcov_softirq;
+#endif
+
+#ifdef CONFIG_MEMCG
+	struct mem_cgroup		*memcg_in_oom;
+	gfp_t				memcg_oom_gfp_mask;
+	int				memcg_oom_order;
+
+	/* Number of pages to reclaim on returning to userland: */
+	unsigned int			memcg_nr_pages_over_high;
+
+	/* Used by memcontrol for targeted memcg charge: */
+	struct mem_cgroup		*active_memcg;
+#endif
+
+#ifdef CONFIG_BLK_CGROUP
+	struct gendisk			*throttle_disk;
+#endif
+
+#ifdef CONFIG_UPROBES
+	struct uprobe_task		*utask;
+#endif
+#if defined(CONFIG_BCACHE) || defined(CONFIG_BCACHE_MODULE)
+	unsigned int			sequential_io;
+	unsigned int			sequential_io_avg;
+#endif
+	struct kmap_ctrl		kmap_ctrl;
+#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
+	unsigned long			task_state_change;
+# ifdef CONFIG_PREEMPT_RT
+	unsigned long			saved_state_change;
+# endif
+#endif
+	struct rcu_head			rcu;
+	refcount_t			rcu_users;
+	int				pagefault_disabled;
+#ifdef CONFIG_MMU
+	struct task_struct		*oom_reaper_list;
+	struct timer_list		oom_reaper_timer;
+#endif
+#ifdef CONFIG_VMAP_STACK
+	struct vm_struct		*stack_vm_area;
+#endif
+#ifdef CONFIG_THREAD_INFO_IN_TASK
+	/* A live task holds one reference: */
+	refcount_t			stack_refcount;
+#endif
+#ifdef CONFIG_LIVEPATCH
+	int patch_state;
+#endif
+#ifdef CONFIG_SECURITY
+	/* Used by LSM modules for access restriction: */
+	void				*security;
+#endif
+#ifdef CONFIG_BPF_SYSCALL
+	/* Used by BPF task local storage */
+	struct bpf_local_storage __rcu	*bpf_storage;
+	/* Used for BPF run context */
+	struct bpf_run_ctx		*bpf_ctx;
+#endif
+
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+	unsigned long			lowest_stack;
+	unsigned long			prev_lowest_stack;
+#endif
+
+#ifdef CONFIG_X86_MCE
+	void __user			*mce_vaddr;
+	__u64				mce_kflags;
+	u64				mce_addr;
+	__u64				mce_ripv : 1,
+					mce_whole_page : 1,
+					__mce_reserved : 62;
+	struct callback_head		mce_kill_me;
+	int				mce_count;
+#endif
+
+#ifdef CONFIG_KRETPROBES
+	struct llist_head               kretprobe_instances;
+#endif
+#ifdef CONFIG_RETHOOK
+	struct llist_head               rethooks;
+#endif
+
+#ifdef CONFIG_ARCH_HAS_PARANOID_L1D_FLUSH
+	/*
+	 * If L1D flush is supported on mm context switch
+	 * then we use this callback head to queue kill work
+	 * to kill tasks that are not running on SMT disabled
+	 * cores
+	 */
+	struct callback_head		l1d_flush_kill;
+#endif
+
+#ifdef CONFIG_RV
+	/*
+	 * Per-task RV monitor. Nowadays fixed in RV_PER_TASK_MONITORS.
+	 * If we find justification for more monitors, we can think
+	 * about adding more or developing a dynamic method. So far,
+	 * none of these are justified.
+	 */
+	union rv_task_monitor		rv[RV_PER_TASK_MONITORS];
+#endif
+
+#ifdef CONFIG_USER_EVENTS
+	struct user_event_mm		*user_event_mm;
+#endif
+
+	/*
+	 * New fields for task_struct should be added above here, so that
+	 * they are included in the randomized portion of task_struct.
+	 */
+	randomized_struct_fields_end
+
+	/* CPU-specific state of this task: */
+	struct thread_struct		thread; // 平台相关信息
+
+	/*
+	 * WARNING: on x86, 'thread_struct' contains a variable-sized
+	 * structure.  It *MUST* be at the end of 'task_struct'.
+	 *
+	 * Do not put anything below here!
+	 */
+};
+```
 
 task_struct即进程描述符(process descriptor)也叫进程控制块(PCB))存在任务队列(task list, 双向循环链表)中. 它包含描述该进程内存资源、文件系统资源、文件资源、tty 资源、信号处理等的指针.
 
@@ -17,6 +839,56 @@ pid_t tgid; // thread group ID, 可判断tast_struct代表的是一个进程还�
 struct task_struct *group_leader;
 ```
 任何一个进程,如果只有主线程,那pid是自己,tgid是自己,group_leader指向的还是自己; 但如果一个进程创建了其他线程, 那么线程有自己的pid,tgid就是进程的主线程的pid,group_leader指向的就是进程的主线程.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.29/source/include/linux/pid.h#L59
+struct upid {
+	int nr; // id
+	struct pid_namespace *ns; // 命名空间
+};
+
+struct pid
+{
+	refcount_t count; // 引用计数
+	unsigned int level; // pid的层级
+	spinlock_t lock;
+	/* lists of tasks that use this pid */
+	struct hlist_head tasks[PIDTYPE_MAX]; // 链表数组
+	struct hlist_head inodes;
+	/* wait queue for pidfd notifications */
+	wait_queue_head_t wait_pidfd;
+	struct rcu_head rcu;
+	struct upid numbers[]; // 每个层级的upid的信息
+};
+```
+
+> 5.05版的内核中, upid去掉了pid_chain字段, pid_namespace结构体增加了类型为idr的idr字段,由它维护id和pid之间的一对一关系,这样只需要使用id在pid_namespace内查找即可,相对于3.10版本的内核步骤有所简化.
+
+pid作为进程id和task_struct的桥梁. upid结构体存储每个层级的id和命名空间等信息.
+
+进程的id是有空间的, 不同的空间中相同的id也可能表示不同的进程. 通常,进程都在一个level等于0的命名空间(pid_namespace)中.
+
+pid的tasks字段表示四个链表的头,它们分别对应PIDTYPE_PID(进程)、PIDTYPE_TGID(线程组)、
+PIDTYPE_PGID(进程组)和PIDTYPE_SID(会话)四种类型(pid_type);task_struct的pid_links字段是hlist_node数组,也分别对
+应这四种类型,可以分别将进程链接到四个目标进程的pid对应的链表中.
+
+一个进程拥有一个pid,也拥有一个task_struct,从这个角度来讲,pid和task_struct是一对一的关系。pid->tasks[PIDTYPE_PID]是进
+程自身组成的链表的头,该链表上仅有一个元素,就是进程的task_struct->pid_links [PIDTYPE_PID],所以根据pid定位task_struct是
+可行的,内核提供了pid_task函数完成该任务.
+
+另外,从task_struct到pid也是通路,task_struct的signal->pids字段是pid*类型的数组,维护着四种类型对应的进程的pid。除此之外,还
+可以通过task_struct的thread_pid字段访问进程的pid。内核提供了丰富的函数完成id、pid和task_struct的转换.
+
+#### pid_namespace
+亲属关系包括父子和兄弟两种。进程的task_struct有real_parent和parent两个字段表示它的父进程,其中real_parent指向它真正的父进程,这个父进程在进程被创建时就已经确定了,parent多数情况下与real_parent是相同的,但在进程被trace的时候,parent会被临时改变。
+
+另外,进程的父进程并不是一直不变的,如果父进程退出,进程会被指定其他的进程作为父进程。
+
+进程的task_struct会通过sibling字段链接到父进程的链表中,链表的头为父进程的task_struct的children字段,链表上的子进程都是同父的兄弟进程。
+
+pid的tasks字段表示四个链表的头. PIDTYPE_PGID类型的链表由同一个进程组中的进程组成,它们通过task_struct->pid_links[PIDTYPE_PGID] 链 接 到 pid->tasks[PIDTYPE_PGID] 链 表中,pid对应的进程为进程组的领导进程。类似的,PIDTYPE_SID类型的链表由同一个会话中的进程组成,它们通过task_struct->pid_links[PIDTYPE_SID]链接到pid->tasks[PIDTYPE_SID]链表中,pid对应的进程为会话的领导进程。PIDTYPE_TGID类型的链表在3.10版本的内核中是不存在的,虽然名为线程组,但实际上只有线程组的领导进程的pid上存在该链表,而它本身是该链表的唯一元素.
+
+线程并不是由进程组和会话管理的,它们由领导进程管理,所以线程的task_struct并没有链接到进程组和会话的链表中.
 
 ### `struct list_head		tasks;`
 用于管理进程数据结构的双向链表`[struct list_head](https://elixir.bootlin.com/linux/v5.9-rc6/source/include/linux/types.h#L178) tasks`是一个很关键的进程链表.
@@ -47,30 +919,30 @@ task_struct里的struct sigpending pending是本任务的; 而struct signal_stru
 ```c
 /* -1 unrunnable, 0 runnable, >0 stopped: */
 volatile long			state; // [state值的定义](https://elixir.bootlin.com/linux/latest/source/include/linux/sched.h#L75)
-int exit_state;
-unsigned int flags;
+int exit_state; // EXIT_ZOMBIE和EXIT_DEAD还可以出现在task_struct的exit_state字段中,意义相同
+unsigned int flags; // [flags](https://elixir.bootlin.com/linux/v6.6.29/source/include/linux/sched.h#L1726)
 ```
 
 state:
 ```c
 // state是通过bitset的方式设置
 /* Used in tsk->state: */
-#define TASK_RUNNING			0x0000
-#define TASK_INTERRUPTIBLE		0x0001
-#define TASK_UNINTERRUPTIBLE		0x0002
-#define __TASK_STOPPED			0x0004
-#define __TASK_TRACED			0x0008
+#define TASK_RUNNING			0x0000 // 正在执行或正准备执行
+#define TASK_INTERRUPTIBLE		0x0001 // 阻塞
+#define TASK_UNINTERRUPTIBLE		0x0002 // 与TASK_INTERRUPTIBLE一致, 但不能由信号唤醒
+#define __TASK_STOPPED			0x0004 // 停止执行
+#define __TASK_TRACED			0x0008 // 被监控
 /* Used in tsk->exit_state: */
-#define EXIT_DEAD			0x0010
-#define EXIT_ZOMBIE			0x0020
+#define EXIT_DEAD			0x0010 // 进程已退出
+#define EXIT_ZOMBIE			0x0020 // 僵尸进程, 执行被终止, 但父进程还没使用wait()等系统调用来获知它的终止信息
 #define EXIT_TRACE			(EXIT_ZOMBIE | EXIT_DEAD)
 /* Used in tsk->state again: */
-#define TASK_PARKED			0x0040
-#define TASK_DEAD			0x0080
-#define TASK_WAKEKILL			0x0100
-#define TASK_WAKING			0x0200
-#define TASK_NOLOAD			0x0400
-#define TASK_NEW			0x0800
+#define TASK_PARKED			0x0040 // 主要用于内核线程
+#define TASK_DEAD			0x0080 // 进程已死亡, 可以进行资源回收
+#define TASK_WAKEKILL			0x0100 // 在收到致命信号时唤醒进程
+#define TASK_WAKING			0x0200 // 进程正在被唤醒
+#define TASK_NOLOAD			0x0400 // 进程不计算在负载中
+#define TASK_NEW			0x0800 // 新创建的进程
 #define TASK_STATE_MAX			0x1000
 
 /* Convenience macros for the sake of set_current_state: */
@@ -123,30 +995,31 @@ TASK_TRACED表示进程被debugger(比如ptrace)等进程监视,进程执行被�
 state是和进程的运行、调度有关系, 还有其他的一些状态称为标志, 放在flags字段中,这些字段都被定义称为宏 ,以PF开头:
 ```c
 // https://elixir.bootlin.com/linux/latest/source/include/linux/sched.h#L1466
+// PF =  process flag
 /*
  * Per process flags
  */
-#define PF_IDLE			0x00000002	/* I am an IDLE thread */
+#define PF_IDLE			0x00000002	/* I am an IDLE thread */ // idle进程
 #define PF_EXITING		0x00000004	/* Getting shut down */ 表示正在退出. 当有这个flag的时候,在函数find_alive_thread中,找活着的线程时,遇到有这个flag的,就直接跳过
-#define PF_EXITPIDONE		0x00000008	/* PI exit done on shut down */
+#define PF_EXITPIDONE		0x00000008	/* PI exit done on shut down */ // pi state(priority inheritance state)清理完毕
 #define PF_VCPU			0x00000010	/* I'm a virtual CPU */ // 表示进程运行在虚拟CPU上. 在函数account_system_time中,统计进程的系统运行时间,如果有这个flag,就调用account_guest_time,按照客户机的时间进行统计
-#define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */
+#define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */ // 进程是一个workqueue的worker
 #define PF_FORKNOEXEC		0x00000040	/* Forked but didn't exec */ // 表示fork完了,还没有exec. 在_do_fork函数里面调用copy_process,这个时候把flag设置为PF_FORKNOEXEC; 当exec中调用了load_elf_binary的时候又把这个flag去掉
 #define PF_MCE_PROCESS		0x00000080      /* Process policy on mce errors */
-#define PF_SUPERPRIV		0x00000100	/* Used super-user privileges */
+#define PF_SUPERPRIV		0x00000100	/* Used super-user privileges */ // 进程拥有超级用户权限
 #define PF_DUMPCORE		0x00000200	/* Dumped core */
-#define PF_SIGNALED		0x00000400	/* Killed by a signal */
+#define PF_SIGNALED		0x00000400	/* Killed by a signal */ // 进程被某个信号杀掉
 #define PF_MEMALLOC		0x00000800	/* Allocating memory */
 #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */
 #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
 #define PF_USED_ASYNC		0x00004000	/* Used async_schedule*(), used by module init */
-#define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
-#define PF_FROZEN		0x00010000	/* Frozen for system suspend */
+#define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */ // 进程不能被freeze
+#define PF_FROZEN		0x00010000	/* Frozen for system suspend */ // 进程处于frozen状态
 #define PF_KSWAPD		0x00020000	/* I am kswapd */
 #define PF_MEMALLOC_NOFS	0x00040000	/* All allocation requests will inherit GFP_NOFS */
 #define PF_MEMALLOC_NOIO	0x00080000	/* All allocation requests will inherit GFP_NOIO */
 #define PF_LESS_THROTTLE	0x00100000	/* Throttle me less: I clean memory */
-#define PF_KTHREAD		0x00200000	/* I am a kernel thread */
+#define PF_KTHREAD		0x00200000	/* I am a kernel thread */ // 进程是一个内核线程
 #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
 #define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
@@ -3604,6 +4477,17 @@ struct thread_struct		thread; // 在 Linux 中，真的参与进程切换的寄�
 然而,前6个参数有时候需要进行寻址,但是如果在寄存器里面,是没有地址的,因而还是会放到栈里面,只不过放到栈里面的操作是被调用函数做的
 
 #### 内核态函数栈(kernel stack)
+有内核栈,对应的也有用户栈。进程本身也有用户态和内核态之分,进程在执行应用程序时处于用户态,如果中断发生,或者进程执行了系统调用,需要切换至内核态.
+
+需要栈切换的原因: 两种状态下CPU的特权级是不一样的,在x86上,CPU有0~3共四个特权级, 不同的指令需要的特权级是不一样的, 比如用户态下CPU的特权级不够,
+无法处理中断.
+
+内核栈就是进程在内核态下使用的栈,用户栈则是进程在用户态下使用的栈。除此之外,与用户栈相比,内核栈有其特殊性.
+
+首先是大小不同,内核栈一般为8K,用户栈可以很大. 进程创建时,它的内核栈就已经分配,由进程管理.
+
+其次,每次由用户栈切换到内核栈时,内核栈为空。切换至内核栈后,内核处理完中断或者进程的系统调用返回用户栈时,内核栈中的信息对进程已毫无价值,进程也绝不会期待某个时间点以此刻的状态继续执行,所以没有必要保留内核栈中的信息,每次切换后,内核栈就都是空的了。当然了,所谓的空并不是指将数据清零,而是每次都会回到栈起始的地方.
+
 Linux 给每个 task 都分配了内核栈.
 32位系统的THREAD_SIZE在[page_32_types.h](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/page_32_types.h), 是这样定义的: PAGE_SIZE 是 4K，左移一位就是乘以 2，也就是 8K.
 64位系统的THREAD_SIZE在[page_64_types.h](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/page_64_types.h), 是这样定义的: 在PAGE_SIZE的基础上左移两位,也即16K,并且要求起始地址必须是8192的整数倍.
@@ -3776,6 +4660,9 @@ return prev_p;
 ## 进程的创建
 ![](/misc/img/process/9d9c5779436da40cabf8e8599eb85558.jpeg)
 
+内核提供了不同的函数来满足创建进程、线程和内核线程的需求. 它们都调用_do_fork函数实现,区别在于传递给函数的参数不同. do_fork的逻辑并不
+复杂,真正完成复杂任务的是copy_process.
+
 fork 是一个系统调用，对应的是 sys_call_table 中找到相应的系统调用 sys_fork.
 
 ```c
@@ -3872,19 +4759,67 @@ long _do_fork(struct kernel_clone_args *args)
 }
 ```
 
+copy_process的第一个参数clone_flags可以是多种标志的组合,它们在很大程度上决定了函数的行为:
+1. CLONE_VM: 与当前进程共享vm
+1. COONE_FS: 共享文件系统信息
+1. CLONE_FILES: 共享打开的文件
+1. CLONE_PARENT: 与当前进程共有相同的父进程
+1. CLONE_THREAD: 与当前进程同属一个线程组, 即创建的是线程
+1. CLONE_SYSVSEM: 共享sem_undo_list
+1. CLONE_VFORK: 新进程会在当前进程之前"运行", 见_do_fork函数
+1. CLONE_SETTLS: 设置新进程的TLS(thread local storage)
+1. CLONE_PARENT_SETTID: 创建新进程成功,则存储它的pid到parent_tidptr
+1. CLONE_CHILD_CLEARTID: 新进程退出时, 将child_tidptr指定的内存清零
+1. CLONE_NEWUTS: 设置ns
+1. CLONE_NEWIPC: 设置ns
+1. CLONE_NEWUSER: 设置ns
+1. CLONE_NEWPID: 设置ns
+1. CLONE_NEWNET: 设置ns
+
+抛开CLONE_VFORK等几个与资源管理没有直接关系的标志,其他的标志从名字上把它们分为两类:CLONE_XXX和CLONE_NEWXXX。一般在CLONE_XXX标志置1的情况下,新进程才会与当前进程共享相应的资源,CLONE_NEWXXX则相反.
+
 _do_fork 里面做的第一件大事就是 [copy_process()](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1841).
+
+新进程由当前进程创建,当前被作为参考模板。既然要创建进程,必然需要创建新的task_struct与之对应。copy_process在参数和权限等检查后,调用dup_task_struct创建新进程的task_struct.
 
 它的[dup_task_struct(current, node)](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1937), 主要做了下面几件事情:
 1. 调用 alloc_task_struct_node 分配一个 task_struct 结构
 1. 调用 alloc_thread_stack_node 来创建内核栈，这里面调用 __vmalloc_node_range 分配一个连续的 THREAD_SIZE 的内存空间，赋值给 task_struct 的 void *stack 成员变量
+
+	内核栈与thread_info的关系密切.
+
+	在3.10版本的内核中,thread_info对象存在于内核栈中. 内核栈默认情况下大小为8K字节,8K字节的开始(低地址)存放的是thread_info对象.
+
+	在5.05版本的内核中,CONFIG_THREAD_INFO_IN_TASK为真的情况下,thread_info变成了task_struct的一个字段. x86平台上该宏默认为真.
+
+	栈的增长方向是从高地址到低地址, 所以在end_of_stack(task_struct->stack)处写入0x57AC6E9D(STACK_END_MAGIC)可以检查栈溢出.
+
 1. 调用 arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)，将 task_struct 进行复制，其实就是调用 memcpy
+
+	arch_dup_task_struct与平台有关,但它一般至少要包含`*tsk=*orig`, 也就是将当前进程的task_struct的值复制给tsk,相当于给新的tsk继承了当前进程的值
 1. 调用 setup_thread_stack 设置 thread_info.
+
+	x86平台上已经将thread_info的作用弱化,setup_thread_stack实际为空.
 
 到这里，整个 task_struct 复制了一份，而且内核栈也创建好了.
 
 之后是设置权限[`retval = copy_creds(p, clone_flags);`](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1970):
 1. 调用 prepare_creds，准备一个新的 struct cred *new, 其实还是从内存中分配一个新的 struct cred 结构，然后调用 memcpy 复制一份父进程的 cred.
 1. 接着 p->cred = p->real_cred = get_cred(new)，将新进程的“我能操作谁”和“谁能操作我”两个权限都指向新的 cred.
+
+cred结构体表示进程安全相关的上下文(context),记录着进程的uid(user)、gid(group)和capability等信息.
+
+如果clone_flags的CLONE_THREAD标志置1(创建线程),新进程(实际是轻量级进程)与当前进程共享凭证。新进程的task_struct的cred字段已经指向目标cred(请注意,dup_task_struct函数已经复制了当前进程的task_struct到新进程,二者的字段的值相等),所以调用get_cred增加cred的引用计数即可返回.
+
+如果CLONE_THREAD标志没有置位,新进程需要拥有自己的凭证。首先调用prepare_creds创建cred,prepare_creds为新的cred申请内
+存,复制当前进程的cred给它赋值,并设置它的引用计数,第2步结束.
+
+CLONE_NEWUSER 表示需要创建新的user namespace, 很少使用,create_user_ns也只在定义了CONFIG_USER_NS的情况下才有意
+义,而CONFIG_USER_NS多数情况下是没有定义的(使用情况有限,比如vserver)。本书讨论CONFIG_USER_NS没有定义的情况,也
+就是不支持创建新的user namespace。这并不是意味着user namespace不存在,而是所有的cred使用同一个user namespace,init_user_ns.
+
+第4步,使用新的cred为新进程的task_struct的cred和real_cred字段赋值。real_cred和cred都指向cred对象,前者表示进程实际的凭证,后
+者表示进程当前使用的凭证。二者大多数情况下是一致的,少数情况下,cred字段会被临时更改.
 
 接下来，copy_process 重新设置进程运行的统计量:
 ```c
@@ -3893,17 +4828,40 @@ p->start_time = ktime_get_ns();
 p->real_start_time = ktime_get_boot_ns();
 ```
 
+utime: 进程在用户态下经历的节拍数. u=user
+utimescaled: 进程在用户态下经历的节拍数, 以处理器的频率为刻度
+stime: 进程在内核态下经历的节拍数. s=system
+stimescaled: 进程在内核态下经历的节拍数, 以处理器的频率为刻度
+gtime: 以节拍数计算的虚拟cpu运行时间. g=guest
+start_time: 起始时间
+real_start_time: 起始时间, 将系统睡眠时间计算在内
+
 接下来，copy_process 开始设置调度相关的变量:
 ```c
 retval = sched_fork(clone_flags, p);
 ```
 
 [sched_fork](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L2068) 主要做了下面几件事情：
-1. 调用 __sched_fork，在这里面将 on_rq 设为 0，初始化 sched_entity，将里面的 exec_start、sum_exec_runtime、prev_sum_exec_runtime、vruntime 都设为 0, 这几个变量涉及进程的实际运行时间和虚拟运行时间, 是否到时间应该被调度了，就靠它们几个
+1. 调用 __sched_fork，在这里面将 on_rq 设为 0，初始化 sched_entity(se, dl, rt)，将里面的 exec_start、sum_exec_runtime、prev_sum_exec_runtime、vruntime 都设为 0, 这几个变量涉及进程的实际运行时间和虚拟运行时间, 是否到时间应该被调度了，就靠它们几个
 1. 设置进程的状态 p->state = TASK_NEW
 1. 初始化优先级 prio、normal_prio、static_prio
+
+	如果task_struct的sched_reset_on_fork字段为1,需要重置( reset )新进程的优先级和调度策略等字段为默认值。sched_reset_on_fork的值是从当前进程复制来的,也就是说如果一个进程的sched_reset_on_fork为1,由它创建的新进程都会经历重置操作。p->sched_reset_on_fork = 0表示新进程不会继续重置由它创建的进程.
+
 1. 设置调度类，如果是普通进程，就设置为 p->sched_class = &fair_sched_class
 1. 调用调度类的 task_fork 函数，对于 CFS 来讲，就是调用 task_fork_fair. 在这个函数里，先调用 update_curr，对于当前的进程进行统计量更新，然后把子进程和父进程的 vruntime 设成一样，最后调用 place_entity，初始化 sched_entity. 这里有一个变量 sysctl_sched_child_runs_first，可以设置父进程和子进程谁先运行. 如果设置了子进程先运行，即便两个进程的 vruntime 一样，也要把子进程的 sched_entity 放在前面，然后调用 resched_curr，标记当前运行的进程 TIF_NEED_RESCHED，也就是说，把父进程设置为应该被调度，这样下次调度的时候，父进程会被子进程抢占. 
+1. `__set_task_cpu`建立新进程和CPU之间的关系, 设置task_struct的cpu字段
+
+copy_process接下来执行一系列copy动作复制资源.
+
+首先复制semundo, semundo与进程通信有关.
+
+如果clone_flags的CLONE_SYSVSEM标志被置位,新进程与当前进程共享sem_undo_list, 先调用get_undo_list获取undo_list,
+get_undo_list会先判断当前进程的undo_list是否为空,为空则申请一个新的undo_list赋值给当前进程并返回,否则直接返回。得到了undo_list
+后,赋值给新进程,达到共享的目的.
+
+如果CLONE_SYSVSEM标志没有置位,直接将新进程的undo_list置为NULL. 最后,线程并不具备独立的sem_undo_list,所以创建线程的时候
+CLONE_SYSVSEM是被置位的.
 
 接下来，copy_process 开始初始化与文件和文件系统相关的变量:
 ```c
@@ -3912,31 +4870,217 @@ retval = copy_fs(clone_flags, p);
 ```
 
 [copy_files](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1460) 主要用于复制一个进程打开的文件信息. 这些信息用一个结构 files_struct 来维护，每个打开的文件都有一个文件描述符. 在 copy_files 函数里面调用 dup_fd，在这里面会创建一个新的 files_struct，然后将所有的文件描述符数组 fdtable 拷贝一份.
+
+如果clone_flags的CLONE_FILES标志被置位,新进程与当前进程共享files_struct,增加引用计数后直接返回。CLONE_FILES没有被置位的情况下,copy_files调用dup_fd为新进程创建files_struct并复制当前值为其赋值.
+
+fdtable.max_fds字段表示进程当前可以打开文件的最大数量,默认值为NR_OPEN_DEFAULT , 等 于 BITS_PER_LONG 。 close_on_exec 和 open_fds指向两个位图,位图中的一位表示一个文件的信息,位的偏移量与文件的fd相等,前者表示文件的close on exec属性,后者表示文件的打开状态。full_fds_bits可以理解为指向一个高级位图。举个例子,假设BITS_PER_LONG等于32,当前进程max_fds等于32 × 3=96, 那么full_fds_bits只需要3个位,第0位置1表示fd等于[0, 31]的文件全部打开(full的含义),任何一个文件没有打开,则第0位清零,也就是full_fds_bits的1个位表示open_fds的32个位.
+
+files_struct结构体内嵌了fdtable和file指针数组,数组的元素数等于 BITS_PER_LONG , close_on_exec_init 、 open_fds_init 和full_fds_bits_init可以表达的位数也等于BITS_PER_LONG。看到这几点你也许猜到了两个结构体的另一层关系。默认情况下,也就是新建files_struct的情况下,它的fdt指向它的fdtab;fdtable的fd指向files_struct的fd_array,close_on_exec、open_fds和full_fds_bits指向files_struct的close_on_exec_init、open_fds_init和full_fds_bits_init, 这就是dup_fd中第1步的含义.
+
+这种预留内存的技巧可以快速满足多数需求,但如果进程打开的文件数超过NR_OPEN_DEFAULT,它就无法满足进程的需要了。这时候files_struct内嵌的fdtable、file指针数组和两个位图均不再使用,内核需要调用alloc_fdtable申请新的fdtable对象,并为它申请内存存放file指针和两种位图,最终更新max_fds字段的值并将fdtable对象赋值给files_struct的fdt字段,第2步正是该意图.
+
+表面上,按照当前进程使用文件的情况申请了fdtable,应该就可以满足条件,while循环岂不多此一举?实际上,在申请fdtable的时候,当前进程的文件使用情况可能已经发生变化,得到fdtable后需要判断是否能够应对这些变化.
+
+当前进程不是在创建新进程吗?文件使用情况怎么会变化?就像在copy_files函数中所说,files_struct是线程组共享的,即使当前进程无暇变动,其他线程所做的改动也会有影响。
+
+dup_fd需要复制当前进程的文件信息给新进程,第2步中先调用count_open_files通过open_fds字段指向的位图计算需要复制多少个文件的信息。有一个特殊情况需要考虑,当进程打开过的文件关闭了,可能会在位图中间留下一个0,因为位图中位的偏移量与文件的描述符fd是相等的,所以必须将中间的0也复制给新进程。所以count_open_files计算得到的open_files并不是已打开的文件的数量,而是总共需要复制多少位的数据,不要被open这个名字蒙蔽。另外,三个位图字段都是unsigned long*型的,所以位图操作也是以long为单位的(进1法),复制的位数也应该是BITS_PER_LONG的整数倍。
+
+第2步是复制之前的准备工作,第3步开始复制操作,首先由copy_fd_bitmaps函数复制三个位图,接下来for循环复制file指针(fd字段)。我们在文件系统的open一节分析过,打开一个需要三步,第一步是调用get_unused_fd_flags获取一个新的可用的文件描述符fd,第三步是调用fd_install建立fd和file对象的关系,第一步完成后fd就已经被标记为占用了,所以fd被占用并不表示文件已经被打开。所以for循环会判断fd是否对应有效的file,如果没有,清除fd的占用标记。
+
+第4步就是扫尾工作了,前面只复制了前open_files个文件的信息,还需要将剩余部分的文件信息清零,共max_fds-open_files个。
+
+dup_fd完成后,copy_files整个逻辑基本结束,将得到的新files_struct赋值给task_struct的files字段即可。一句话总结就是,新线程共享当前进程的文件信息,新进程复制当前进程的文件信息。共享和复制类似于传址与传值,共享意味着不独立,修改对彼此可见,类似函数传址;复制表示此刻相同,但此后彼此独立,互不干涉,类似函数传值.
+
 [copy_fs](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1440) 主要用于复制一个进程的目录信息. 这些信息用一个结构 fs_struct 来维护. 一个进程有自己的根目录和根文件系统 root，也有当前目录 pwd 和当前目录的文件系统，都在 fs_struct 里面维护. copy_fs 函数里面调用 copy_fs_struct，创建一个新的 fs_struct，并复制原来进程的 fs_struct.
+
+与copy_files的逻辑类似,如果clone_flags的CLONE_FS标志被置位,新进程与当前进程共享fs_struct,增加引用计数后直接返回. fs_struct表示进程与文件系统相关的信息,由task_struct的fs字段表示.
+
+如果CLONE_FS标志没有被置位,则调用copy_fs_struct函数创建新的fs_struct并复制old_fs的值给它,最后把它赋值给当前进程task_struct的fs字段.
 
 接下来，copy_process 开始初始化与信号相关的变量:
 ```c
 init_sigpending(&p->pending);
-retval = copy_sighand(clone_flags, p);
-retval = copy_signal(clone_flags, p);
+retval = copy_sighand(clone_flags, p); // 涉及sighand_struct结构体,由tast_struct的sighand字段指向, sighand可理解为signal handler
+retval = copy_signal(clone_flags, p); // 涉及signal_struct结构体,由tast_struct的signal字段指向,表示进程当前的信号信息
 ```
 
 copy_sighand 会分配一个新的 sighand_struct, 最主要的是维护信号处理函数，在 copy_sighand 里面会调用 memcpy，将信号处理函数 sighand->action 从父进程复制到子进程.
 
 init_sigpending 和 copy_signal 用于初始化，并且复制用于维护发给这个进程的信号的数据结构. copy_signal 函数会分配一个新的 signal_struct，并进行初始化.
 
+copy_sighand和copy_signal,前者采用的是复制,后者采用的是重置。从逻辑上是可以讲通的,sighand表示进程处理它的信号的手段,
+新进程复制当前进程的手段符合大多数需求;而signal是当前进程的信号信息,这些信号并不是发送给新进程的, 需要重置.
+
+最后, copy_sighand 和 copy_signal检查的标志分别为CLONE_SIGHAND和CLONE_THREAD,标志置1的情况下,不会复制或重置;标志没有置位的情况下,前者复制,后者重置.
+
 接下来，copy_process 开始复制进程内存空间. 
 ```c
 retval = copy_mm(clone_flags, p);
 ```
 
-进程都有自己的内存空间，用 mm_struct 结构来表示. copy_mm 函数中调用 dup_mm，分配一个新的 mm_struct 结构，调用 memcpy 复制这个结构. dup_mmap 用于复制内存空间中内存映射的部分. mmap 可以分配大块的内存，其实 mmap 也可以将一个文件映射到内存中，方便可以像读写内存一样读写文件，这个在内存管理那节我们讲.
+进程都有自己的内存空间，用mm_struct结构来表示.copy_mm函数中调用dup_mm，分配一个新的mm_struct结构，调用memcpy复制这个结构.dup_mmap用于复制内存空间中内存映射的部分.mmap可以分配大块的内存，其实mmap也可以将一个文件映射到内存中，方便可以像读写内存一样读写文件.
 
-好了，copy_process 要结束了，上面图中的组件也初始化的差不多了.
+task_struct的mm和active_mm两个字段与内存管理有关,它们都是指向mm_struct结构体的指针,前者表示进程所管理的内存的信息,后
+者表示进程当前使用的内存的信息. 所属不同,mm管理的内存至少有一部分是属于进程本身的;active_mm,进程使用的内存,可能不属于进程。二者有可能不一致???
 
-接下来，copy_process 开始分配 pid，设置 tid，group_leader，并且建立进程之间的亲缘关系.
+比如假设进程A借用了进程B的内存信息,进程B的mm_count加1。在进程A借用的这段时间,进程B是不能释放mm_struct的(mm_count等于0才可以释放),但如果进程B的线程组不再使用内存,它可以释放一部分内存资源.
 
-[_do_fork 做的]第二件大事 [`wake_up_new_task`](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/sched/core.c#L3012). 
+它们的关系可以由mmput函数完美地阐述. mm_users为0的时候释放的是aio、mmap和exe_file等,mm_count为0的时候,释放的是pgd、context和mm_struct本身。它们能够释放的,也是它们负责保护的。另外,mmdrop函数不一定非由mmput调用,其他模块可以单独调用它,如此进程的内存有了相对完整的管理方案.
+
+在创建线程的时候会将CLONE_VM标志置1,这种情况下copy_mm增加了mm_struct.mm_users的引用计数,然后赋值返回(第2步)。mm_users的作用其实就是表示共享当前内存资源的线程数,但此时mm_count并没有增加,也就是说一个线程组,实际上给mm_count带来的增益只是1,线程数增加对它没有影响。如果线程组的线程不再使用内存,mm_users减为0,会释放部分资源,mm_count的值减1.
+
+copy_mm的第1步,如果当前进程的mm字段为NULL,则直接返回, 因为内核线程不需要自己管理内存.
+
+第2步,调用dup_mm新建一个mm_struct,并复制当前进程的mm_struct的值。首先调用allocate_mm申请新的mm_struct对象,然后复制current->mm的字段的值给它(memcpy)。然后依次调用mm_init和dup_mmap等为新mm_struct对象的字段赋值.
+
+mm_init主要的作用是初始化mm_struct的一些字段,其复杂之处在于它调用了mm_alloc_pgd调用pgd_alloc创建pgd,赋值给mm_struct的pgd字
+段. pgd_alloc是平台相关的.
+
+PREALLOCATED_PMDS表示预先申请的用于存放pmd项的内存的页数,只在定义了CONFIG_X86_PAE的情况下才有意义,其他情况
+下为0。这是为什么呢?因为在使能PAE的情况下,物理上存在三级页表,分别对应pgd、pmd和pte。在禁用PAE的情况下,物理上存在二级
+(X86_32)或四(五)级页表(X86_64),前者对应pgd和pte,后者对应pgd、pud、pmd和pte,都不符合PREALLOCATED_PMDS的目的.
+
+PREALLOCATED_PMDS的值不会大于4,它的值取决于宏SHARED_KERNEL_PMD的值。我们知道4G虚拟空间中,内核只
+占最高的1G,所以4项pgd中,前三项对应的是用户空间,最后一项对应内核,SHARED_KERNEL_PMD决定进程是否共享最后这个pgd项
+指向的内存页--内核pmd页,也就是所谓的KERNEL_PMD。SHARED_KERNEL_PMD为1,意味着进程默认会共享内核pmd页,所
+以只需要预申请3页内存即可,PREALLOCATED_PMDS默认为3
+
+pgd_alloc在第1步中申请内存,用来存放pgd项。
+第2步,preallocate_pmds预申请存放pmd项的内存
+第3步,pgd_ctor复制内核对应的pgd项
+
+一个进程的所有pgd项存放在一页内存中,但只有内存中后部分的项才与内核对应,前面的部分对应的是用户空间,它们的分界点就是
+KERNEL_PGD_BOUNDARY,从第KERNEL_PGD_BOUNDARY项开始的项属于内核项,共KERNEL_PGD_PTRS项。
+PAGETABLE_LEVELS==3&&SHARED_KERNEL_PMD正是使能PAE后的默认情况,此时KERNEL_PGD_BOUNDARY等于3,
+KERNEL_PGD_PTRS等于1。clone_pgd_range从swapper_pg_dir复制KERNEL_PGD_PTRS个内核项到进程的pgd内存页,偏移量为KERNEL_PGD_BOUNDARY*sizeof(pgd_t)字节。swapper_pg_dir是系统第一个进程的pgd
+
+第2步申请得到的存放pmd项的内存页并没有与pgd产生关联,这就是第4步pgd_prepopulate_pmd的作用.
+
+所有的进程在该情况下都共享内核空间。X86_32禁用PAE和X86_64也是类似的,不过它们的PREALLOCATED_PMDS为0,用户空间使用的pgd没有设置,内核空间的pgd在第3步也完成了复制.
+
+唯一的例外是X86_32使能PAE但SHARED_KERNEL_PMD为0的这种情况,preallocate_pmds预申请了4页内存,第4页对应内核, pgd_prepopulate_pmd复制swapper_pg_dir的内核pmd页(不是pgd项)给它,然后将它的地址写入pgd的最后一项。这种情况的策略是复制, 而不是共享,新进程创建时内核的内存信息与idle进程一致,但随后各自相对独立,需要额外的机制保证它们的内容一致
+
+dup_mmap的作用是复制当前进程的内存映射信息给新进程.
+
+mm_struct的mmap字段是进程的vma(vm_area_struct对象)组成的链表的头,dup_mmap的for循环遍历当前进程的链表,把符合条件
+的vma复制给新进程。第1步申请新的vma,复制并赋值,第2步将vma插入新进程的链表的尾部,第3步将vma插入新进程的红黑树(红黑树
+的根为mm_struct的mm_rb字段),第4步复制当前进程该vma涉及的pgd 、 p4d 、 pud 、 pmd 和 pte 项 给 新 的 进 程 , 调 用 copy_page_range 完
+成.
+
+copy_mm分析完毕。一句话总结就是新线程与当前进程共享内存,新进程复制当前进程的内存映射信息(复制),与当前进程共享内存的内核部分(共享),用户空间部分二者相互独立(重置),copy_mm比前几个copy都复杂
+
+copy_namespaces实现比较简单,如下:
+第1步,根据标志检查是否需要新的namespace,如果不需要则返回
+第2步,验证权限,创建新的namespace需要admin的权限。
+第3步,调用create_new_namespaces创建新的nsproxy对象,create_new_namespaces会依次调用copy_mnt_ns、copy_utsname、copy_ipcs、copy_pid_ns、copy_cgroup_ns和copy_net_ns,它们再根据各自标志是否置位决定创建新的namespace还是共享当前进程的namespace.
+
+pid namespace由copy_pid_ns函数copy,它检查CLONE_NEWPID标志是否置位,没有置位则增加引用计数并返回,否则调用create_pid_namespace创建新的pid namespace.
+
+pidmap结构体有nr_free和page两个字段,page字段是一页用作位图内存的地址,该页中每一位均表示一个pid,nr_free字段表示还有多
+少空闲位。pid_namespace的pidmap字段是pidmap结构体组成的数组,第 2 步 申 请 了 一 页 内 存 给 数 组 的 第 一 个 元 素 , 共
+BITS_PER_PAGE(4096)个可用的位,可用的位不足时才会继续申请内存。
+
+pid_namespace按照父子关系分层级,由level字段表示,子namespace的level比父namespace的大1,第一个namespace为
+init_pid_ns(又称为全局pidnamespace),它的level为0。
+
+第3步创建的cache用作分配pid对象,pid结构体的numbers字段是一个数组,数组的元素数等于level+1,所以pid结构体并不是定长的,因此需要为其量身定制cache。第4步,字段赋值,置位pidmap[0]位图的0位,剩余可用位数减1,而pidmap数组余下的位图并没有分配内存,置其可用位数为BITS_PER_PAGE即可。除了init_pid_ns外,pid_namespace中的进程的id都是从1开始的,0位置1是为了防止有进程得到的id等于0。init_pid_ns是个特例,它的0进程是idle进程.
+
+有了pidnamespace,终于可以完整地介绍id、pid和task_struct的转换了.
+
+task_struct到pid:
+- task_pid(): 进程pid
+- task_tgid(): 进程所在的线程组的领导进程的pid
+- task_pgrp(): 进程所在的进程组的领导进程的pid
+- task_session():  进程所在的会话的领导进程的pid
+
+task_struct到id:
+- task_pid_nr(task)
+- task_pid_nr_ns(task, ns)
+- task_pid_vnr(task)
+- task_tgid_nr(task)
+- task_tgid_nr_ns(task, ns)
+- task_tgid_vnr(task)
+- task_pgrp_nr_ns(task, ns)
+- task_pgrp_vnr(task)
+- task_session_nr_ns(task, ns)
+- task_session_vnr(task)
+
+task_xxxid_nr(): 返回进程在全局pid namespace(init_pid_ns)中的id
+task_xxxid_nr_ns(): 返回进程在ns指定的pid namespace中的id
+task_xxxid_nr(): 返回进程在它当前的pid namespace中的id
+
+id到pid:
+- find_vpid(nr) : 在当前进程的namespace中查找id为nr的pid
+- find_get_pid(nr) : 在当前进程的namespace中查找id为nr的pid
+- find_pid_ns(nr, ns) : 在ns指定的pid namespace中查找id为nr的pid
+
+id到task_struct:
+- find_task_by_vpid(nr): 在当前进程的pid namespace中查找id为nr的进程
+- find_get_task_by_vpid(nr): 在当前进程的pid namespace中查找id为nr的进程
+- find_task_by_pid_ns(nr, ns): 在ns指定的pid namespace中查找id为nr的进程
+
+copy_io检查clone_flags的CLONE_IO标志,如果置位则共享当前进程task_struct的io_context,否则为新进程创建io_context并重置.
+
+copy_thread_tls与平台相关,它配置新进程的状态.
+
+> 3.10版内核中还没有定义copy_thread_tls,取而代之的是copy_thread. 5.05版内核中,已经去掉了ret_from_kernel_thread和ip字段。
+ret_from_kernel_thread的逻辑被并入ret_from_fork。ip字段的作用由新的结构体fork_frame实现,它的regs字段就是pt_regs,frame字段是
+inactive_task_frame类型,表示目前没有运行的进程的某些寄存器状态.
+
+copy_thread_tls在第1步中为sp和sp0字段赋值,sp紧挨着pt_regs或fork_frame对象,这也是进程使用内核栈的初始位置,内
+核栈可用的范围为它和STACK_END_MAGIC之间。第2步和第3步分别针对内核线程和其他进程对pt_regs对象和
+thread_struct对象赋值。需要注意以下几点。
+
+首先,p->thread.ip和frame->ret_addr是新进程执行的起点。
+
+其次,第3步中首先复制了当前进程的pt_regs对象的值给新进程,然后将其ax字段置为0,这是一个有趣的问题的答案。
+
+最后,childregs->sp=sp,sp参数实际是传递至do_fork的第二个参数,表示新进程的用户栈
+
+好了，copy_process要结束了，上面图中的组件也初始化的差不多了.
+
+接下来，copy_process开始分配pid，设置tid，group_leader，并且建立进程之间的亲缘关系.
+
+alloc_pid在p->nsproxy->pid_ns_for_children这个pid namespace中申请pid(并不一定是init_pid_ns).
+
+第1步,从进程的ns的cache中申请得到pid对象;第2步为pid的numbers 数 组 ( upid 类 型 ) 赋 值 。 从 ns 开 始 , 到 它 的 parent , 直 到
+init_pid_ns(level为0),申请id,返回给upid的nr字段,upid的ns字段则等于相应的namespace。也就是说,一个进程不仅在它所属的pid namespace中占用一个id,在该namespace的父namespace中,一直到init_pid_ns中,都占用一个id。
+
+copy_process中,进程的id等于pid_nr(pid),后者展开为pid->numbers[0].nr,也就是进程在init_pid_ns中的id,
+
+至于线程组id和tgid,如果创建的是进程,线程组id与进程的id相等;如果创建的是线程(CLONE_THREAD),新线程与当前进程属于同一个线程组,线程组id相同.
+
+如果新建的是线程,它的exit_signal为-1,同一个线程组内,只有一个领导进程,它的exit_signal大于等于0。按照时间顺序,第一个进
+程(非线程)就是领导进程,由它创建的线程都属于它的线程组(exit_signal=-1),但如果它退出,会由其他进程继承领导进程。
+thread_group_leader函数可以用来判断一个进程是否是线程组的领导进程,判断的依据就是p->exit_signal>=0.
+
+如果创建的是进程,group_leader就是它自己。如果创建的是线程( CLONE_THREAD ) , 它 与 当 前 进 程 属 于 同 一 个 线 程 组 , 它 的
+group_leader等于当前进程的group_leader(线程组的领导进程)。换个说法,当前进程有可能是线程,也有可能不是,如果不是,那领导
+进程就是它自己,否则领导进程就是它的领导进程。如果新进程是一个线程,它会在第4步被链接到领导进程的thread_group字段表示的链
+表中.
+
+第 2 步 , 设 置 新 进 程 的 父 进 程 , 如 果 clone_flags 的CLONE_PARENT 或 者 CLONE_THREAD 标 志 被 置 位 , 新 进 程 的
+real_parent被置为当前进程的real_parent,否则它的real_parent就是当前进程。也就是说,新进程的父进程不一定是当前进程,创造它的却不
+一定是它父亲,这与我们的常识并不一致。
+
+接下来的ptrace_init_task会设置新进程task_struct的parent字段,clone_flags的CLONE_PTRACE标志没有被置位的情况下,parent保持
+与real_parent一致,否则parent会被赋值为current->parent。
+
+第3步,建立线程组、进程组和会话关系。如果新进程是线程组的领导进程(exit_signal >= 0),copy_process将它链接到父进程的链表
+中,并调用3次attach_pid将进程链接到线程组、进程组和会话的链表中。有一点需要补充的是,既然新进程有可能继承当前进程的父进
+程,也可能以当前进程为父进程,那么新进程与当前进程可能有两种关系,一种是父子关系,一种是兄弟关系,它们可能同在父进程的链表中。
+
+请注意第3步的前提条件,新进程必须是线程组的领导进程,也就意味着它必须是一个进程,不能是线程。线程不会链接到进程组、会
+话和父进程的链表中。
+
+第4步,调用attach_pid,将其链接到pid的链表中,建立新进程和它的pid的关系.
+
+copy_process就此完毕,主要包括初始化、copys和一些杂项.
+
+copy_process 之 后 , _do_fork 会 调 用 wake_up_new_task 唤 醒 新 进程,这样新进程才会被调度执行。需要注意的是,唤醒后新进程并不
+一定马上执行,它和当前进程的执行顺序也无法保证。不过,clone_flags的CLONE_VFORK标志被置位的情况下,如果当前进程在新进程之前得到运行,它会执行wait_for_vfork_done等待新进程结束或者调用execve。所以,CLONE_VFORK所谓的新进程先“运行”指的是宏观意义上的运行
+
+[_do_fork]做的第二件大事 [`wake_up_new_task`](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/sched/core.c#L3012). 
 
 首先，我们需要将进程的状态设置为 TASK_RUNNING. [activate_task](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/sched/core.c#L3035) 函数中会调用 enqueue_task.
 
@@ -3951,6 +5095,15 @@ retval = copy_mm(clone_flags, p);
 在 check_preempt_wakeup 函数中，前面调用 task_fork_fair 的时候，设置 sysctl_sched_child_runs_first 了，已经将当前父进程的 TIF_NEED_RESCHED 设置了，则直接返回; 否则，check_preempt_wakeup 还是会调用 update_curr 更新一次统计量，然后 wakeup_preempt_entity 将父进程和子进程 PK 一次，看是不是要抢占，如果要则调用 resched_curr 标记父进程为 TIF_NEED_RESCHED.
 
 如果新创建的进程应该抢占父进程，因为 fork 是一个系统调用，从系统调用返回的时候，是抢占的一个好时机，如果父进程判断自己已经被设置为 TIF_NEED_RESCHED，就让子进程先跑，抢占自己.
+
+子进程得到执行后,它的起点为ret_from_fork, 它会根据子进程内核栈中保存的pt_regs继续执行。子进程的pt_regs是从父进程复制来的,而父进程的pt_regs是
+系统调用导致其切换到内核态时保存的,使它可以恢复到系统调用的下一条语句继续执行。既然是复制的,所以子进程从ret_from_fork退
+出到用户态后,也是接着系统调用的下一条语句继续执行。但是,子进程得到的fork的返回值是0,与父进程的不同,因为它的返回值已经
+被修改了childregs->ax=0.
+
+所以实际上子进程并没有调用fork,而是从fork系统调用返回, 这就是`fork调用一次,返回两次`.
+
+以前新进程从ret_from_fork退出就到了用户态, 但5.05版的内核中ret_from_fork包含了ret_from_kernel_thread的逻辑,所以从ret_from_fork退出后,进程可能处于用户态,也可能处于内核态.
 
 ## 线程的创建
 env: glibc 2.31
@@ -4013,6 +5166,8 @@ allocate_stack 主要做了以下这些事情:
 > 如果要在堆里面 malloc 一块内存，比较大的话，用 __mmap
 
 ### 内核态创建任务
+由于fork传递至_do_fork的clone_flags参数是固定的,所以它只能用来创建进程,内核提供了另一个系统调用clone,clone最终也调用_do_fork实现,与fork不同的是用户可以根据需要确定clone_flags, 因此可以使用它创建线程.
+
 ```c
 // https://elixir.bootlin.com/glibc/latest/source/nptl/pthread_create.c#L688
 pd->start_routine = start_routine;
@@ -4027,7 +5182,7 @@ retval = create_thread (pd, iattr, &stopped_start,
 			      STACK_VARIABLES_ARGS, &thread_ran);
 ```
 
-create_thread里面有很长的 clone_flags，需要留意, 然后就是 [ARCH_CLONE](https://elixir.bootlin.com/glibc/latest/source/sysdeps/unix/sysv/linux/createthread.c#L34)，其实调用的是 [__clone](https://elixir.bootlin.com/glibc/latest/source/sysdeps/unix/sysv/linux/x86_64/clone.S#L50).
+create_thread里面有很长的 clone_flags，里面的CLONE_THREAD意味着新线程和当前进程并不是父子关系, 然后就是 [ARCH_CLONE](https://elixir.bootlin.com/glibc/latest/source/sysdeps/unix/sysv/linux/createthread.c#L34)，其实调用的是 [__clone](https://elixir.bootlin.com/glibc/latest/source/sysdeps/unix/sysv/linux/x86_64/clone.S#L50).
 
 > x86_64只有__clone, 而不是__clone2.
 
@@ -4080,6 +5235,16 @@ SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
 }
 #endif
 ```
+
+clone系统调用最终也通过_do_fork实现,所以它与创建进程的fork的区别仅限于因参数不同而导致的差异.
+
+首先,vfork置位了CLONE_VM标志,导致新进程对局部变量的修改会影响当前进程,clone也置位了CLONE_VM,也有这个隐患
+吗?答案是没有的,因为新线程指定了自己的用户栈,由stackaddr指定。copy_thread函数的sp参数就是stackaddr,childregs->sp=sp修改了
+新线程的pt_regs,所以新线程在用户空间执行的时候,使用的栈与当前进程的不同,不会造成干扰。那为什么vfork不这么做,请参考vfork
+的设计意图.
+
+其次,fork返回了两次,clone也是一样,但它们都是返回到系统调用后开始执行,pthread_create如何让新线程执行start_routine的?
+start_routine是由start_thread函数间接执行的,所以我们只需要清楚start_thread是如何被调用的. start_thread并没有传递给clone系统调用,所以它的调用与内核无关,答案就在__clone函数中.
 
 复杂的标志位设定的影响:
 - 对于 [copy_files](https://elixir.bootlin.com/linux/v5.8-rc3/source/kernel/fork.c#L1460)，原来是调用 dup_fd 复制一个 files_struct 的，现在因为 CLONE_FILES 标识位变成将原来的 files_struct 引用计数加一
@@ -4186,3 +5351,210 @@ START_THREAD_DEFN
 __free_tcb 会调用 [__deallocate_stack](https://elixir.bootlin.com/glibc/latest/source/nptl/allocatestack.c#L788) 来释放整个线程栈，这个线程栈要从当前使用线程栈的列表 stack_used 中拿下来，放到缓存的线程栈列表 stack_cache 中.
 
 好了，整个线程的生命周期到这里就结束了.
+
+## 创建内核线程
+内核线程是一种只存在内核态的进程,它不会在用户态运行,多是一些内核中的服务进程。它们并不需要属于自己的内存,task_struct的mm字段为NULL,flags字段的PF_KTHREAD标志被置位表示它们的身份.
+
+copy_mm先判断当前进程task_struct的mm字段是否等于NULL,等于NULL则直接返回,不等于NULL则共享或者复制内存信息。也就是说,如果当前进程不是内核线程,由它创建的进程就不是内核线程,因为无论共享还是复制,mm字段都不等于NULL,所以内核线程必须由内核线程创建。另外,如果当前进程是内核线程,那么它创建的进程也是内核线程.
+
+第一个进程确实是内核线程,但是内核线程可以变成普通进程,执行do_execve即可.
+
+内核线程必须由内核线程创建,所以内核提供了一个内核线程kthreadd,由它来接受创建内核线程的请求,为其他模块创建内核线程, 而不是直接使用kernel_thread.
+
+kernel_thread也是通过调用_do_fork实现的.
+
+kernel_thread传递给_do_fork的第二个参数是fn,创建线程的时候,第二个参数是线程的用户栈地址,这并不矛盾。kernel_thread创建
+的是内核线程,所以copy_thread_tls函数中,frame->bx=sp,sp并没有被当作栈地址使用。另外,_do_fork的第3个参数arg,被赋值给了
+frame->di,也就是说bx存储的是内核线程要执行的函数的地址,di存放的是传递给函数的参数,它们最终都会被ret_from_kernel使用。
+kthreadd内核线程会执行kthreadd函数,该函数会循环等待其他模块创建内核线程的需求.
+
+它会查看kthread_create_list链表,链表上的每一个元素都表示一个需求,如果链表为空,则调用schedule让出CPU,否则遍历链表上的
+元素,调用create_kthread为它们创建内核线程.
+
+create_kthread调用kernel_thread创建内核线程: kernel_thread (kthread, create, CLONE_FS | CLONE_FILES | SIGCHLD),所以新的内核线程会以create为参数执行kthread函数.
+
+新内核线程执行kthread,kthread先通知kthreadd内核线程创建成功(complete(&create->done)),然后schedule等待唤醒,根据下一步指示 , 退 出 或 者 在 合 适 的 条 件 下 以 create->data 为 参 数 执 行 create->threadfn指向的回调函数。
+
+至此可以做总结了:首先,系统中的内核线程调用kernel_thread创建了kthreadd内核线程为我们服务。其次,kthreadd内核线程等待需
+求,并在需求到来时调用kernel_thread创建新的内核线程,该内核线程执行其他模块期待的回调函数, kthreadd和其他模块之间依靠kthread_create_info对象传递需求。所以内核提供的函数只需要根据其他模块的参数,产生kthread_create_info对象,将它链接到kthread_create_list链表,然后唤醒kthreadd内核线程即可. 如果成功,它们均返回新内核线程的task_struct指针.
+
+创建内核线程函数:
+- kthread_create: 创建内核线程
+- kthread_create_on_cpu: 创建内核线程
+- kthread_create_on_node: 创建内核线程
+- kthread_run: 创建内核线程, 并调用wake_up_process将它唤醒
+
+kernel_thread调用的是_do_fork,而后者会调用 wake_up_new_task唤醒新内核线程,但是它被唤醒后执行的是kthread函数,进而进入睡眠,所以前三个函数返回后,内核线程处于睡眠状态.
+
+## 特殊进程
+### idle
+第一个进程是idle进程,它不是动态创建的,程序员`固化`在系统中的[init_task](https://elixir.bootlin.com/linux/v6.6.29/source/init/init_task.c#L64)变量就是它的雏形. 系统初始化过程中,会设置init_task的相关成员.
+
+它是一个内核线程(PF_KTHREAD,mm为NULL), 拥有很多init_xxx的变量,特权满满.
+
+初始化完毕,idle会功成名就身退二线, 在此之前, 它拉起两个得力助手,其中一个是init进程,另一个就是内核线程一节介绍的kthreadd内核线程。kthreadd负责内核线程,init进程是第一个用户进程,负责其他进程.
+
+init进程和kthreadd都是idle进程在rest_init函数中调用kernel_thread
+创建的,所以init进程最初也是一个内核线程. 它被创建后,执行的函数是kernel_init, 里面有退出内核线程的逻辑.
+
+kernel_init调用kernel_init_freeable,后者调用do_basic_setup,继而调用do_initcalls。do_initcalls是一个有趣的话题,它按照如下顺序调
+用内核中的各种init(优先级递减).
+
+常见的module_init的优先级与device_initcall相等。实现的原理是编译内核的时候把所有init按照同优先级同组、优先级高的组在前的顺序放在一起,do_initcalls只需要像遍历函数数组一样遍历它们即可.
+
+第二点,kernel_init调用了do_execve执行可执行文件,导致init进程退出内核线程。可执行文件有/sbin/init、/etc/init、/bin/init和/bin/sh四
+个,优先级依次降低。init文件在一个基于Linux内核的操作系统中是极为重要的,一般启动操作系统服务进程,初始化应用程序执行环境都是由它完成的.
+
+## 进程退出
+进程始于fork,终于exit,它所拥有的资源在退出时被回收.
+
+### 退出方式
+进程退出方式是在main函数中使用return,属于正常退出。除此之外,调用exit和_exit也属于正常退出.
+
+```c
+#include <stdlib.h>
+
+[[noreturn]] void exit(int status);
+
+#include <unistd.h>
+
+[[noreturn]] void _exit(int status);
+
+#include <stdlib.h>
+
+[[noreturn]] void _Exit(int status);
+```
+
+_exit和_Exit是等同的,后者是c语言的库函数.
+
+exit和_exit的区别在于前者会回调由atexit和on_exit注册的函数(顺序与它们注册时的顺序相反),刷新并关闭标准IO流(stdin、
+stdout和stderr). exit也是c语言的库函数,最终由_exit完成.
+
+_exit由系统调用实现,早期的glibc中,调用的是exit系统调用,从glibc 2.3版本开始,会调用exit_group系统调用,线程组退出.
+
+如果atexit和on_exit注册的函数中有函数导致进程退出,后面的函数不会继续执行.
+
+与正常退出对应,异常退出常见的方式包含abort和被信号终止两种. abort也是一个c语言库函数,它发送SIGABRT信号到进程,如果信号被忽略或者捕获(处理),恢复信号的处理策略为SIG_DFL,再次发送SIGABRT信号,实在不行调用_exit退出进程。另外, 在程序中使用的assert也是调用abort实现的.
+
+### 退出过程
+exit和exit_group两个系统调用完成进程退出操作,前者调用do_exit,后者对线程组中其他线程发送SIGKILL信号强制它们退出(zap_other_threads),然后调用do_exit.
+
+do_exit用于完成进程退出的主要任务,它不仅仅为以上两个系统调用服务,其他模块也可以调用它。do_exit函数只有code一个参数, 会赋值给task_struct的exit_code字段,表示进程退出状态码.
+
+用户空间通过exit类函数触发系统调用时传递的参数status与code有一定的换算关系,code=(status&0xff)<<8,也就是说status的低8位有
+效,且code的低8位等于0,这可以与内核中直接调用do_exit退出的情况区分开,用以表明进程退出的原因.
+
+do_exit的逻辑比较清晰,它首先调用一系列的exit函数将资源归还给系统,包括exit_signals、exit_mm、exit_sem、exit_shm、exit_files、
+exit_fs 、 exit_task_namespaces 、 exit_thread 、 exit_notify 和exit_io_context等.
+
+exit_notify:
+第 1 步 , 调用forget_original_parent函数处理进程的子进程(线程),它的主要任务如下.
+
+( 1 ) 为 子 进 程 选 择 新 的 父 进 程 , 由 find_child_reaper 和find_new_reaper函数完成,优先选择与当前进程属于同一个线程组的
+进程,其次是祖先进程中,以PR_SET_CHILD_SUBREAPER为参数调用 prctl 将 自 己 设 为 child_subreaper 的 进 程 , 最 差 选 择 是 当 前
+pid_namespace中的child reaper进程,也就是init进程.
+
+(2)遍历父进程的子进程链表(parent->children),针对每一个子进程p(该链表不包括线程),更改它所管理的线程组中的线程的父
+进程(包括它自己),并将它插入父进程的链表中。如果它的状态是EXIT_ZOMBIE(p->exit_state),且它所属的线程组内没有其他线
+程,调用do_notify_parent(见下),由函数的返回值决定立即回收进程、还是等待它的父进程回收。
+
+(3)若进程的退出导致某些进程组变成孤儿进程组(orphaned pgrp),如果它们之前有被停止的工作(has_stopped_jobs,意味着有进程处于TASK_STOPPED状态),发送SIGHUP和SIGCONT信号给它们,由kill_orphaned_pgrp函数完成。SIGHUP是挂起信号,默认会终止进 程 , 但 是 处 于 TASK_STOPPED 状 态 的 进 程 只 能 接 收 SIGCONT 信号,配合SIGCONT信号,SIGHUP信号才会起作用。
+
+第2步,如果进程是线程组的领导进程,当线程组没有其他线程的情况下(请注意这个前提),调用do_notify_parent(期望发送给父进程的信号是tsk->exit_signal),函数返回值true时,进程的状态置为EXIT_DEAD,调用release_task回收进程;返回false时,进程状态置为
+EXIT_ZOMBIE,等待它的父进程回收。
+
+如果进程不是领导进程(是线程),处理方式与do_notify_parent函数返回true的情况一样。也就是说,线程是被直接回收的,只有进
+程才可以被置为EXIT_ZOMBIE状态,等待父进程回收。
+
+do_notify_parent负责以发送信号的方式将进程退出的事件通知父进程,如果父进程对事件不感兴趣,函数返回true,否则返回false。父
+进程是否感兴趣取决于进程发送的信号sig(进程退出时不同情况下发送的信号可能不同)和父进程的处理策略,以tsk表示进程.
+
+SIGCHLD的默认处理策略是SIG_IGN,所以只有父进程定义了sa_handler的情况下,子进程以SIGCHLD退出的时候才会被置为
+EXIT_ZOMBIE。
+
+执行完以上的各种exit后,do_exit会将进程的state字段置为TASK_DEAD,然后调用schedule进行进程切换,进程切换完毕后,被调度执行的进程在finish_task_switch函数中调用put_task_struct释放退出进程占用的资源.
+
+目前已经有三处回收进程资源的地方了:第一处,exit_notify会调用release_task回收线程和父进程不感兴趣的进程;第二
+处,子进程被置为EXIT_ZOMBIE被父进程回收;第三处,进程退出完成切换后,由替代者回收。前两处二选其一,第三处是必选项。为什么要回收两次呢?
+
+release_task解除进程与其他进程的关系,然后调用put_task_struct。所以真正被调用了两次的是put_task_struct函数,它会
+将进程的usage字段减1,字段值变为0的情况下才会释放task_struct等占用的资源。与一般的字段初始值为1不同,usage在进程被创建时初
+始值等于2,所以进程经得起两次put_task_struct.
+
+exit_notify的第1步的第2条任务,如果退出进程的子进程所在的线程组还有其他线程,即使它的状态是EXIT_ZOMBIE也不会
+被回收。首先,这是合理的,因为线程组中其他线程的group_leader字段都依然指向它,不应该被回收。其次,这种情况确实存在,比如一
+个进程创建了线程组后退出,等待父进程回收时父进程退出了,它被交给了init进程,init进程也不能马上回收它。那么它究竟在何时被回
+收呢?
+
+其实release_task中有一段代码处理这种情况. 当线程组中最后一个线程退出后(thread_group_empty),如果领导进程处于EXIT_ZOMBIE,调用do_notify_parent决定是否回收领导进程,如果是,repeat的过程会将它回收。也就是说,线程组的领导进程会在组内线程都退出时才会被回收.
+
+### 使用wait等待子进程
+父进程可以回收处于EXIT_ZOMBIE状态的进程, 使用的就是wait
+
+```c
+#include <sys/wait.h>
+
+pid_t wait(int *_Nullable wstatus);
+pid_t waitpid(pid_t pid, int *_Nullable wstatus, int options);
+
+int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options);
+				/* This is the glibc and POSIX interface; see
+					NOTES for information on the raw system call. */
+```
+
+除了以上三个之外,还有wait3和wait4,不过它们已经废弃了,不建议直接使用.
+
+wait是由wait4实现的(glibc),等待其中一个子进程退出即返回,wstatus存储着退出进程的退出状态码。
+waitpid等待子进程的状态发生变化,包括子进程退出、子进程被信号停止(stopped)和子进程收到信号继续(continued)。参数pid用
+于选择考虑的子进程.
+
+pid和子进程关系表:
+1. < -1 : 进程组id等于-pid的子进程
+1. -1 : 任意子进程
+1. 0 : 进程组id与当前进程的进程组id相等的子进程
+1. > 0: 进程的id等于pid的进程
+
+option的标志:
+- WNOHANG: 即使没有等到有子进程退出也返回
+- WUNTRACED: 有子进程stopped即可返回
+- WCONTINUED: 有子进程continued即可返回
+- _WNOTHREAD: 仅考虑当前进程的子进程, 不考虑同线程组内其他进程的子进程
+- _WCLONE: 置为表示只考虑clone的子进程, 否则只考虑非clone的子进程
+- _WALL: 无论clone还是非clone的子进程都考虑
+
+clone的进程指的是进程退出时不发送信号给父进程,或者发送给父进程的信号不是SIGCHLD的进程。fork得到的进程都不是clone的,
+fork传递给do_fork的第一个参数为SIGCHLD,会将进程的exit_signal字段设置为SIGCHLD.
+
+可以通过WUNTRACED和WCONTINUED标志控制waitpid是否考虑子进程stopped和continued的情况,子进程退出的情况(WEXITED)是默认必须考虑的,waitpid系统调用会自动将WEXITED置位。但是,使用waitpid时不可置位WEXITED标志,否则
+会出错(EINVAL)。
+
+waitid对参数的控制更加精细,idtype有P_ALL、P_PID和P_PGID三种,分别表示所有子进程、pid等于第二个参数id的子进程和进程组
+id等于id的子进程,P_ALL会忽略id,后两种id必须大于0。
+
+参数options除了waitpid可以接受的option外,还可以包括WNOWAIT和WEXITED,其中WEXITED、WSTOPPED和WCONTINUED三者至少选其一.
+
+第三个参数infop是输出参数,存储子进程状态变化的原因、状态和导致它状态产生变化的信号等信息。
+
+内核定义了wait4、waitpid和waitid三个系统调用,其中wait4和waitpid都是通过kernel_wait4实现的,三者的主要逻辑都在do_wait函数
+中。逻辑并不复杂,遍历每一个符号条件的子进程,询问它们的状态,由wait_task_zombie、wait_task_stopped和wait_task_continued判断
+它们是否符合WEXITED、WSTOPPED和WCONTINUED条件。如果没有返回条件的子进程,则在current->signal->wait_chldexit等待队列上
+等待子进程在状态变化时唤醒它.
+
+注意点:
+首先,在exit一节中讨论过,线程组的领导进程必须等到其他线程退出之后才能回收,所以即便子进程处于EXIT_ZOMBIE状态,在调
+用wait_task_zombie之前仍然需要判断线程组内其他线程是否已经退出。由delay_group_leader宏实现,线程组内还有其他线程的情况下宏
+为真。
+
+其次,wait_task_zombie在WNOWAIT标志没有置位的情况下,会调用release_task回收子进程。反过来讲,以WNOWAIT标志调用
+waitid,子进程并没有被回收,还需要wait。
+
+最后,根据exit一节的讨论,对子进程而言,如果它的父进程对SIGCHLD的处理方式是SIG_IGN,或者sa_flags字段置位了
+SA_NOCLDWAIT标志,do_notify_parent返回true,子进程会被回收。也就是说进程必须捕捉SIGCHLD,子进程才会在退出时报告。如果进
+程没有捕捉SIGCHLD,wait会等到所有子进程退出,得到错误(ECHILD).
+
+## FAQ
+### current
+内核定义了一个使用频率很高的宏current,它是指向当前进程的task_struct的指针.
+
+current的实现方式与平台有关,在x86上是通过每CPU变量实现的,变量的名字为current_task,类型为struct task_struct*,current通过
+获取当前CPU上变量的值得到.

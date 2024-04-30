@@ -34,13 +34,14 @@ linux驱动模型: kernel基于kobject将系统中的总线, 设备和驱动用`
 
 ```c
 // https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L64
+// kobject没有组织其children的字段,所以kobject无法完整地表达目录的层级结构
 struct kobject {
 	const char		*name; // 名称
-	struct list_head	entry; // 将kobject链接到kset的连接件
+	struct list_head	entry; // 将kobject链接到所属kset的连接件
 	struct kobject		*parent; //指向包含它的kset的内嵌kobject/其他kobject/NULl
 	struct kset		*kset; // 如果kobject已经链接到kset, 则指向它
 	const struct kobj_type	*ktype; // 类型
-	struct kernfs_node	*sd; /* sysfs directory entry */
+	struct kernfs_node	*sd; /* sysfs directory entry */ // 对应的kn, sd字段的原意是3.10版内核中的sysfs_dirent,5.05版内核并没有改掉它的名字.
 	struct kref		kref; // kobject的引用计数
 
 	unsigned int state_initialized:1; // 1: 已被初始化过
@@ -58,7 +59,7 @@ struct kobject {
 // https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L116
 struct kobj_type {
 	void (*release)(struct kobject *kobj); // 销毁方法. 不同类型的对象的release方法不同, 同一类型的则相同
-	const struct sysfs_ops *sysfs_ops;
+	const struct sysfs_ops *sysfs_ops; // 提供了show/store回调函数, 用于文件的IO
 	const struct attribute_group **default_groups;
 	const struct kobj_ns_type_operations *(*child_ns_type)(const struct kobject *kobj);
 	const void *(*namespace)(const struct kobject *kobj);
@@ -86,8 +87,8 @@ struct kobj_type {
 struct kset {
 	struct list_head list; // 保存在该kset里的所有kobject的链表
 	spinlock_t list_lock; // 用于遍历这个kset的所有kobject的自旋锁
-	struct kobject kobj; // 内嵌kobject
-	const struct kset_uevent_ops *uevent_ops; // uevent操作集合
+	struct kobject kobj; // 内嵌kobject, 使得它本身在sysfs文件系统中以一个目录的形式存在
+	const struct kset_uevent_ops *uevent_ops; // uevent操作集合. kset共用同一种uevent操作
 } __randomize_layout;
 
 // https://elixir.bootlin.com/linux/v6.6.13/source/include/linux/kobject.h#L133

@@ -1423,27 +1423,97 @@ shmfs 是一个共享内存文件系统，它允许多个进程共享同一块�
 - [**Ext4文件系统架构分析(一)**](https://www.cnblogs.com/alantu2018/p/8461272.html)
 - [**linux io过程自顶向下分析**](https://my.oschina.net/fileoptions/blog/3058792/print)
 - [ext2 - <<Linux内核探秘 深入解析文件系统和设备驱动的架构与设计>> 第13章]()
+- [EXT4文件系统的磁盘整体布局](https://bean-li.github.io/EXT4-packet-meta-blocks/)
 
 > ext4 dax特性: nvdimm(非易失性双列直插式内存模块=dram+nand+超级电容), 再使用PageCache缓存数据变得累赘, 因此dax不使用缓存而是直接访问设备.
 
+ext4的数据可以分为两类:
+1. metadata(元数据,包括文件系统的布局、文件的组织等信息)
+1. 文件的内容
+
+ext4按照块(block)为单位管理磁盘,一般情况下,块的大小为4KB. 为了减少碎片,并使一个文件的内容可以落在相邻的块中以便提高访问效率,ext4引入了block group,每个block group包含多个block,其中一个block用来存放它包含的block的使用情况,这个block中每个bit对应一个block,为0说明block空闲,为1
+则被占用。所以一个block group最多有4K×8=32,768个block,大小最大为32858×4K=128M.
+
 ![](/misc/img/fs/f81bf3e5a6cd060c3225a8ae1803a138.jpeg)
 
+block group布局:
+- Group 0 Padding
+
+	GROUP 0 PADDING是第一个block group特有的,它的前1024字节用于存放x86的启动信息等,其他的block group没有padding.
+
+- ext4 super block: 1 block
+
+	包含整个磁盘文件系统的信息,大小为1024字节
+- Group Descriptors: many blocks
+
+	包含所有block group的信息,占用的block数目由磁盘大小决定
+- Reserved GDT blocks: many blocks
+
+	RESERVED GDT BLOCKS 留作未来扩展文件系统,占多个block
+- Data Block Bitmap: 1 block
+
+	存放block group包含的block的使用情况的区域,占1个block
+- inode Bitmap: 1 block
+
+	INODE BITMAP与DATA BLOCK BITMAP的作用类似,只不过它描述的是inode的使用情况,占1个block
+- inode Table: many blocks
+
+	INODETABLE描述block group内的所有inode的信息,它占用的大小等于block group的inode的数目与inode大小的乘积.
+
+	注意: 这里所说的inode,指的是一个文件在磁盘中的信息,并不是内存中的inode结构体
+- Data blocks: many blocks
+
+	存放的是文件的内容
+
+EXT4 SUPER BLOCK和GROUP DESCRIPTORS理论上只需要一份就足够,但为了防止blockgroup 0坏掉而丢失数据,需要保持适当的冗余。如果ext4的sparse_super特性被使能,标号为0,1和3,5,7,9的整数次方的block group会各保留一份ext4 super block和Group Descriptors的拷贝;否则每一个block group都会保留一份.
+
+如果一个block group没有EXT4 SUPER BLOCK 和 GROUP DESCRIPTORS,它直接从DATA BLOCK BITMAP开始.
+
+ext4还有flexible block groups特性,它把几个相邻的block group组成一组,称之为flex_bg. 一个flex_bg中的所有block group的DATA BLOCK BITMAP、INODE BITMAP和INODE TABLE均存放在该flex_bg中的第一个block group中. flex_bg可以让一个flex_bg中除了第一个block group之外大多数可以只包含DATA BLOCKS(有些可能要包含冗余的EXT4 SUPER BLOCK 和 GROUP DESCRIPTORS 等信息),这样可以形成更大的连续的数据块,有利于集中存放大文件或metadata,提高访问效率.
+
+`dumpe2fs <device>`可以用来dump一个ext4文件系统super block 和各block group的信息:
+- First inode等于11, 是因为[0到10的inode号都被占用了,对应特殊文件](https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L310)
+
+
+ext4特性:
+- Meta Block Groups
+
+	block大小为4K的情况下,一个block group最大为128M,假设描述一个block group需要32字节(group descriptor),文件系统所有的group descriptors只能存在一个block group中,所以整个文件系统最大为128M/32 × 128M等于512T字节。
+
+	为了解决这个限制,从ext3就引入了META_BG, Meta BlockGroups 。引入META_BG特性后,整个文件系统会 被分成多个metablock groups,每一个metablock group包含多个block group,它们的group descriptors存储在第一个block group中。这样block group的数目就没有了128M / 32的限制,在32位模式下,文件系统最大为128M × 2^32等于512P字节.
+
+- Lazy Block Group Initialization
+
+	每个block group均包含DATA BLOCK BITMAP、INODE BITMAP和INODE TABLE. 格式化(mkfs)磁盘的时候,需要初始化这些block的数据,但这会使格式化的时间变得漫长.
+
+	Lazy Block Group Initialization可以有效解决这个问题,它实际上只是引入了三个标志: BLOCK_UNINIT 、 INODE_UNINIT 和 INODE_ZEROED:
+	- BLOCK_UNINIT标志表示DATABLOCKBITMAP没有被初始化
+	- INODE_UNINIT标志表示INODEBITMAP没有被初始化,
+	- INODE_ZEROED标志则表示INODETABLE已经初始化(参考ext_group_desc的bg_flags字段)
+
+	磁盘格式化过程中,对绝大多数block group 而言, 将BLOCK_UNINIT和INODE_UNINIT置位,将INODE_ZEROED清零, 就可以跳过1+1+512=514个block的初始化,消耗的时间会大大减少。在后续的使用过程中,内核负责根据情况更新这些标志.
+
+- bigalloc
+
+	块的默认大小是4K,如果一个文件系统是更多的较大文件,那么以多个块(一簇,cluster)为单元管理磁盘可以减少碎片化,也可以减少metadata占用的空间, 所以ext4引入了bigalloc. 用户在格式化磁盘的时候可以设置这个单元的大小(block cluster size),之后DATA BLOCK BITMAP的一位表示一个单元的状态. 当然,申请数据块也以一个单元作为最小单位, 即使文件需要的空间可能很小,甚至文件只是一个目录.
+
+
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L752
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L766
 /*
  * Structure of an inode on the disk
  */
 struct ext4_inode {
 	__le16	i_mode;		/* File mode */
-	__le16	i_uid;		/* Low 16 bits of Owner Uid */
-	__le32	i_size_lo;	/* Size in bytes */
+	__le16	i_uid;		/* Low 16 bits of Owner Uid */ // uid的低16位
+	__le32	i_size_lo;	/* Size in bytes */ // 文件大小的低32位
 	__le32	i_atime;	/* Access time */
 	__le32	i_ctime;	/* Inode Change time */
 	__le32	i_mtime;	/* Modification time */
-	__le32	i_dtime;	/* Deletion Time */
-	__le16	i_gid;		/* Low 16 bits of Group Id */
-	__le16	i_links_count;	/* Links count */
-	__le32	i_blocks_lo;	/* Blocks count */
+	__le32	i_dtime;	/* Deletion Time */ // 删除时间
+	__le16	i_gid;		/* Low 16 bits of Group Id */ // gid的低16位
+	__le16	i_links_count;	/* Links count */ // 硬连接的数量. 默认下, ext4不超过65000(EXT4_LINK_MAX)个硬链接
+	__le32	i_blocks_lo;	/* Blocks count */ // 占用的blk数目的低32位
 	__le32	i_flags;	/* File flags */
 	union {
 		struct {
@@ -1459,11 +1529,11 @@ struct ext4_inode {
 	__le32	i_block[EXT4_N_BLOCKS];/* Pointers to blocks */
 	__le32	i_generation;	/* File version (for NFS) */
 	__le32	i_file_acl_lo;	/* File ACL */
-	__le32	i_size_high;
+	__le32	i_size_high; // 文件大小的高32位
 	__le32	i_obso_faddr;	/* Obsoleted fragment address */
 	union {
 		struct {
-			__le16	l_i_blocks_high; /* were l_i_reserved1 */
+			__le16	l_i_blocks_high; /* were l_i_reserved1 */ // 占用的blk数目的高16位
 			__le16	l_i_file_acl_high;
 			__le16	l_i_uid_high;	/* these 2 fields */
 			__le16	l_i_gid_high;	/* were reserved2[0] */
@@ -1488,12 +1558,30 @@ struct ext4_inode {
 	__le32  i_ctime_extra;  /* extra Change time      (nsec << 2 | epoch) */
 	__le32  i_mtime_extra;  /* extra Modification time(nsec << 2 | epoch) */
 	__le32  i_atime_extra;  /* extra Access time      (nsec << 2 | epoch) */
-	__le32  i_crtime;       /* File Creation time */
+	__le32  i_crtime;       /* File Creation time */ // 文件创建时间
 	__le32  i_crtime_extra; /* extra FileCreationtime (nsec << 2 | epoch) */
 	__le32  i_version_hi;	/* high 32 bits for 64-bit version */
 	__le32	i_projid;	/* Project ID */
 };
 ```
+
+ext4_inode结构体描述文件(inode),block group的ext4_inode以数组的形式存放在它的INODE TABLE.
+
+ext4一个目录最多有64998个直接子目录;但如果文件系统支持EXT4_FEATURE_RO_COMPAT_DIR_NLINK (readonly-compatible
+feature的一种)特性,对直接子目录不再有数目限制.
+
+i_blocks_lo和i_blocks_high的值最终被转换为512字节大小的块的数目, 如果文件系统没有使能huge_file ( EXT4_FEATURE_RO_COMPAT_HUGE_FILE , readonly-compatible feature的一种)特性,文件占用i_blocks_lo个512字节块; 如果文件系统支持huge_file, 文件本身没有置位EXT4_HUGE_FILE_FL标志(i_flags字段),文件占用i_blocks_lo + (i_blocks_hi << 32)个512字节块;如果EXT4_HUGE_FILE_FL标志被置位,文件占用i_blocks_lo+(i_blocks_hi<<32)个block,以block大小等于4096为例,最终等于(i_blocks_lo+(i_blocks_hi<<32)) × 8个512字节块。以512字节为单位,是因为传统磁盘一个扇区大小为512字节.
+
+ext4中一个文件的inode(为了与VFS的inode结构体区分开,下文称之为inode_on_disk , 它不等同于ext4_inode)占用的空间可以比sizeof(struct ext4_inode)大,也可以比它小(只包含ext4_inode的前128-EXT4_GOOD_OLD_INODE_SIZE个字节的字段), 由ext4_super_block的s_inode_size字段表示,一般为256字节。256个字节中,ext4_inode仅占160个字节(3.10版内核中等于156),其余字节可以留作他用。i_extra_isize表示inode占用的超过128字节的大小,它的典型值等于sizeof (ext4_inode)-128=32。
+
+内核中,访问前128字节之外的字段时,需要先判断该字段是否在128+i_extra_isize范围内,由EXT4_FITS_IN_INODE宏实现,比如访问
+i_crtime。这主要是为了兼容老的内核,使用老的内核创建的ext4文件系统可能并没有新版内核定义的某些字段,访问之前需要确保合法。
+
+给定一个inode号为ino的文件,它所属的block group号为(ino - 1) /ext4_super_block->s_inodes_per_group , 它在block group内 的索引号index为(ino - 1) % ext4_super_block->s_inodes_per_group,所以文件的inode_on_disk 在 block group 的 INODE TABLE 的偏移量为index × ext4_super_block->s_inode_size字节. 没有 inode 0.
+
+i_block字段大小为60字节,与文件的内容有关,使用比较复杂. 此处介绍一种最简单的用法:一个符号链接文件,
+如果它链接的目标路径长度不超过59字节(最后一个字节为0),就可以将路径存入i_block字段.
+
 
 从这个数据结构中，可以看出，inode 里面有文件的读写权限 i_mode，属于哪个用户 i_uid，哪个组 i_gid，大小是多少 i_size_io，占用多少个块 i_blocks_io. ls 命令列出来的权限、用户、大小这些信息，就是从这里面取出来的.
 
@@ -2043,7 +2131,55 @@ __ext4_new_inode里面一个重要的逻辑就是，从文件系统里面读取 
 
 如果采用“一个块的位图 + 一系列的块”，外加“一个块的 inode 的位图 + 一系列的 inode 的结构”，最多能够表示 128M, 先把这个结构称为一个块组. 有 N 多的块组，就能够表示 N 大的文件.
 
-对于块组，同样也需要一个数据结构来表示为 [ext4_group_desc](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L324). 这里面对于一个块组里的 inode 位图 bg_inode_bitmap_lo、块位图 bg_block_bitmap_lo、inode 列表 bg_inode_table_lo，都有相应的成员变量.
+对于块组，同样也需要一个数据结构来表示为 [ext4_group_desc](https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L1289). 这里面对于一个块组里的 inode 位图 bg_inode_bitmap_lo、块位图 bg_block_bitmap_lo、inode 列表 bg_inode_table_lo，都有相应的成员变量.
+
+每一个block group都有一个group descriptor与之对应, 由ext4_group_desc结构体表示。没有使能META_BG的情况下,所有的
+group descriptors都按照先后以数组的形式存放在block group的GROUPDESCRIPTORS中,紧挨着EXT4 SUPER BLOCK.
+
+32位模式下,group descriptor大小为32字节;64位模式下,大小为64到1024字节。ext4_group_desc结构体本身大小为64字节,也就是
+说32位模式下,读写的只是它的前32字节包含的字段,64位模式下,除了它本身外,还可以包含其他信息. 64位模式下, group descriptor的大小由ext4_super_block的s_desc_size字段表示,32位模式下,该字段一般为0.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L1289
+/*
+ * Structure of a blocks group descriptor
+ */
+struct ext4_group_desc
+{
+	__le32	bg_block_bitmap_lo;	/* Blocks bitmap block */ // block group的block bitmap所在的block号的低32位
+	__le32	bg_inode_bitmap_lo;	/* Inodes bitmap block */ // block group的inode bitmap所在的block号的低32位
+	__le32	bg_inode_table_lo;	/* Inodes table block */ //  block group的inode table所在的block号的低32位
+	__le16	bg_free_blocks_count_lo;/* Free blocks count */ // 空闲的block数目
+	__le16	bg_free_inodes_count_lo;/* Free inodes count */ // 空闲的inde数目
+	__le16	bg_used_dirs_count_lo;	/* Directories count */ // 目录的数目
+	__le16	bg_flags;		/* EXT4_BG_flags (INODE_UNINIT, etc) */
+	__le32  bg_exclude_bitmap_lo;   /* Exclude bitmap for snapshots */
+	__le16  bg_block_bitmap_csum_lo;/* crc32c(s_uuid+grp_num+bbitmap) LE */
+	__le16  bg_inode_bitmap_csum_lo;/* crc32c(s_uuid+grp_num+ibitmap) LE */
+	__le16  bg_itable_unused_lo;	/* Unused inodes count */ // 没有被使用的inode table项的数目的低16位
+	__le16  bg_checksum;		/* crc16(sb_uuid+group+desc) */
+	__le32	bg_block_bitmap_hi;	/* Blocks bitmap block MSB */
+	__le32	bg_inode_bitmap_hi;	/* Inodes bitmap block MSB */
+	__le32	bg_inode_table_hi;	/* Inodes table block MSB */
+	__le16	bg_free_blocks_count_hi;/* Free blocks count MSB */
+	__le16	bg_free_inodes_count_hi;/* Free inodes count MSB */
+	__le16	bg_used_dirs_count_hi;	/* Directories count MSB */
+	__le16  bg_itable_unused_hi;    /* Unused inodes count MSB */
+	__le32  bg_exclude_bitmap_hi;   /* Exclude bitmap block MSB */
+	__le16  bg_block_bitmap_csum_hi;/* crc32c(s_uuid+grp_num+bbitmap) BE */
+	__le16  bg_inode_bitmap_csum_hi;/* crc32c(s_uuid+grp_num+ibitmap) BE */
+	__u32   bg_reserved;
+};
+```
+bg_flags字段可以是三种标志的组合:
+1. EXT4_BG_INODE_UNINIT(0x1): block group的INODE BITMAP没有初始化
+1. EXT4_BG_BLOCK_UNINIT(0x2): BLOCKBITMAP没有初始化
+1. EXT4_BG_INODE_ZEROED(0x4): INODE TABLE已经初始化
+
+
+bg_free_inodes_count_lo和bg_itable_unused_lo的用途不同,前者反映inode的使用情况,后者用在block group的INODE TABLE初始化过程
+中 , 如 果 已 使 用 的 项 数 ( ext4_super_block->s_inodes_per_group - bg_itable_unused)为0,只需要将整个INODE TABLE清零即可,否则要跳过已使用项占用的block.
+
 
 这样一个个块组，就基本构成了我们整个文件系统的结构. 因为块组有多个，块组描述符也同样组成一个列表，我们把这些称为块组描述符表.
 
@@ -2070,20 +2206,23 @@ __ext4_new_inode里面一个重要的逻辑就是，从文件系统里面读取 
 
 根据图中，每一个元块组包含 64 个块组，块组描述符表也是 64 项，备份三份，在元块组的第一个，第二个和最后一个块组的开始处. 这样化整为零，就可以发挥出 ext4 的 48 位块寻址的优势了，在超级块 ext4_super_block 的定义中，我们可以看到块寻址分为高位和低位，均为 32 位，其中有用的是 48 位，2^48 个块是 1EB，足够用了.
 
+ext4_super_block结构体表示文件系统的整体信息,它的对象存储在磁盘第1024字节,也就是布局中的EXT4 SUPER BLOCK部分。磁盘
+中 其 他 block group还会存储它的冗余拷贝. ext4_super_block的大小为1024字节.
+
 ```c
-// https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L1245
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L1289
 /*
  * Structure of the super block
  */
 struct ext4_super_block {
 /*00*/	__le32	s_inodes_count;		/* Inodes count */
-	__le32	s_blocks_count_lo;	/* Blocks count */
+	__le32	s_blocks_count_lo;	/* Blocks count */ // block的低32位
 	__le32	s_r_blocks_count_lo;	/* Reserved blocks count */
-	__le32	s_free_blocks_count_lo;	/* Free blocks count */
-/*10*/	__le32	s_free_inodes_count;	/* Free inodes count */
-	__le32	s_first_data_block;	/* First Data Block */
-	__le32	s_log_block_size;	/* Block size */
-	__le32	s_log_cluster_size;	/* Allocation cluster size */
+	__le32	s_free_blocks_count_lo;	/* Free blocks count */ 空闲的block的低32位
+/*10*/	__le32	s_free_inodes_count;	/* Free inodes count */ 可用的inode的低32位
+	__le32	s_first_data_block;	/* First Data Block */ 前1024个字节存放x86的启动信息, 如果block大小是1k, 应该是1, 其余情况一般是0
+	__le32	s_log_block_size;	/* Block size */ // block大小=2^(10+s_log_block_size)
+	__le32	s_log_cluster_size;	/* Allocation cluster size */ // bigalloc使能时, cluster大小=2^s_log_cluster_size, 否则其为0
 /*20*/	__le32	s_blocks_per_group;	/* # Blocks per group */
 	__le32	s_clusters_per_group;	/* # Clusters per group */
 	__le32	s_inodes_per_group;	/* # Inodes per group */
@@ -2097,7 +2236,7 @@ struct ext4_super_block {
 	__le16	s_minor_rev_level;	/* minor revision level */
 /*40*/	__le32	s_lastcheck;		/* time of last check */
 	__le32	s_checkinterval;	/* max. time between checks */
-	__le32	s_creator_os;		/* OS */
+	__le32	s_creator_os;		/* OS */ // linux=0
 	__le32	s_rev_level;		/* Revision level */
 /*50*/	__le16	s_def_resuid;		/* Default uid for reserved blocks */
 	__le16	s_def_resgid;		/* Default gid for reserved blocks */
@@ -2114,14 +2253,14 @@ struct ext4_super_block {
 	 * feature set, it must abort and not try to meddle with
 	 * things it doesn't understand...
 	 */
-	__le32	s_first_ino;		/* First non-reserved inode */
-	__le16  s_inode_size;		/* size of inode structure */
+	__le32	s_first_ino;		/* First non-reserved inode */ // 第一个非预留的indode, 一般是11
+	__le16  s_inode_size;		/* size of inode structure */ // ext4的inode的大小, 此inode并非VFS定义的inode
 	__le16	s_block_group_nr;	/* block group # of this superblock */
-	__le32	s_feature_compat;	/* compatible feature set */
-/*60*/	__le32	s_feature_incompat;	/* incompatible feature set */
-	__le32	s_feature_ro_compat;	/* readonly-compatible feature set */
+	__le32	s_feature_compat;	/* compatible feature set */ // 支持兼容(compatible)特性的标志
+/*60*/	__le32	s_feature_incompat;	/* incompatible feature set */ // 支持不兼容(incompatible)特性的标志
+	__le32	s_feature_ro_compat;	/* readonly-compatible feature set */ // 支持只读的兼容(readonly-compatible)特性的标志
 /*68*/	__u8	s_uuid[16];		/* 128-bit uuid for volume */
-/*78*/	char	s_volume_name[16];	/* volume name */
+/*78*/	char	s_volume_name[EXT4_LABEL_MAX];	/* volume name */
 /*88*/	char	s_last_mounted[64] __nonstring;	/* directory where last mounted */
 /*C8*/	__le32	s_algorithm_usage_bitmap; /* For compression */
 	/*
@@ -2141,13 +2280,13 @@ struct ext4_super_block {
 	__le32	s_hash_seed[4];		/* HTREE hash seed */
 	__u8	s_def_hash_version;	/* Default hash version to use */
 	__u8	s_jnl_backup_type;
-	__le16  s_desc_size;		/* size of group descriptor */
+	__le16  s_desc_size;		/* size of group descriptor */ // 64bit模式下, group descriptor的大小
 /*100*/	__le32	s_default_mount_opts;
 	__le32	s_first_meta_bg;	/* First metablock block group */
 	__le32	s_mkfs_time;		/* When the filesystem was created */
 	__le32	s_jnl_blocks[17];	/* Backup of the journal inode */
-	/* 64bit support valid if EXT4_FEATURE_COMPAT_64BIT */
-/*150*/	__le32	s_blocks_count_hi;	/* Blocks count */
+	/* 64bit support valid if EXT4_FEATURE_INCOMPAT_64BIT */
+/*150*/	__le32	s_blocks_count_hi;	/* Blocks count */ // block高32
 	__le32	s_r_blocks_count_hi;	/* Reserved blocks count */
 	__le32	s_free_blocks_count_hi;	/* Free blocks count */
 	__le16	s_min_extra_isize;	/* All inodes have at least # bytes */
@@ -2157,7 +2296,7 @@ struct ext4_super_block {
 	__le16  s_mmp_update_interval;  /* # seconds to wait in MMP checking */
 	__le64  s_mmp_block;            /* Block for multi-mount protection */
 	__le32  s_raid_stripe_width;    /* blocks on all data disks (N*stride)*/
-	__u8	s_log_groups_per_flex;  /* FLEX_BG group size */
+	__u8	s_log_groups_per_flex;  /* FLEX_BG group size */ // 一个flex_bg包含的block group的数目=2^s_log_groups_per_flex
 	__u8	s_checksum_type;	/* metadata checksum algorithm used */
 	__u8	s_encryption_level;	/* versioning level for encryption */
 	__u8	s_reserved_pad;		/* Padding to next 32bits */
@@ -2201,10 +2340,477 @@ struct ext4_super_block {
 	__u8    s_last_error_errcode;
 	__le16  s_encoding;		/* Filename charset encoding */
 	__le16  s_encoding_flags;	/* Filename charset encoding flags */
-	__le32	s_reserved[95];		/* Padding to the end of the block */
+	__le32  s_orphan_file_inum;	/* Inode for tracking orphan inodes */
+	__le32	s_reserved[94];		/* Padding to the end of the block */
 	__le32	s_checksum;		/* crc32c(superblock) */
 };
+
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L1480
+/*
+ * fourth extended-fs super-block data in memory
+ */
+struct ext4_sb_info {
+	unsigned long s_desc_size;	/* Size of a group descriptor in bytes */ // group descriptor占用磁盘空间大小, 32位模式下是32
+	unsigned long s_inodes_per_block;/* Number of inodes per block */ // 每个block包含的inode数
+	unsigned long s_blocks_per_group;/* Number of blocks in a group */ // 每个block group 包含的block数
+	unsigned long s_clusters_per_group; /* Number of clusters in a group */
+	unsigned long s_inodes_per_group;/* Number of inodes in a group */
+	unsigned long s_itb_per_group;	/* Number of inode table blocks per group */
+	unsigned long s_gdb_count;	/* Number of group descriptor blocks */ // group descriptor包含的block数
+	unsigned long s_desc_per_block;	/* Number of group descriptors per block */
+	ext4_group_t s_groups_count;	/* Number of groups in the fs */ // fs中block group数
+	ext4_group_t s_blockfile_groups;/* Groups acceptable for non-extent files */
+	unsigned long s_overhead;  /* # of fs overhead clusters */
+	unsigned int s_cluster_ratio;	/* Number of blocks per cluster */
+	unsigned int s_cluster_bits;	/* log2 of s_cluster_ratio */
+	loff_t s_bitmap_maxbytes;	/* max bytes for bitmap files */
+	struct buffer_head * s_sbh;	/* Buffer containing the super block */
+	struct ext4_super_block *s_es;	/* Pointer to the super block in the buffer */ // 指向ext4_super_block
+	struct buffer_head * __rcu *s_group_desc; // 指向一个指针数组, 该数组的elem指向group descriptors各block的数据
+	unsigned int s_mount_opt;
+	unsigned int s_mount_opt2;
+	unsigned long s_mount_flags;
+	unsigned int s_def_mount_opt;
+	unsigned int s_def_mount_opt2;
+	ext4_fsblk_t s_sb_block;
+	atomic64_t s_resv_clusters;
+	kuid_t s_resuid;
+	kgid_t s_resgid;
+	unsigned short s_mount_state;
+	unsigned short s_pad;
+	int s_addr_per_block_bits;
+	int s_desc_per_block_bits;
+	int s_inode_size; // inode_on_disk大小
+	int s_first_ino;
+	unsigned int s_inode_readahead_blks;
+	unsigned int s_inode_goal;
+	u32 s_hash_seed[4];
+	int s_def_hash_version;
+	int s_hash_unsigned;	/* 3 if hash should be unsigned, 0 if not */
+	struct percpu_counter s_freeclusters_counter;
+	struct percpu_counter s_freeinodes_counter;
+	struct percpu_counter s_dirs_counter;
+	struct percpu_counter s_dirtyclusters_counter;
+	struct percpu_counter s_sra_exceeded_retry_limit;
+	struct blockgroup_lock *s_blockgroup_lock;
+	struct proc_dir_entry *s_proc;
+	struct kobject s_kobj;
+	struct completion s_kobj_unregister;
+	struct super_block *s_sb; // 指向super_block
+	struct buffer_head *s_mmp_bh;
+
+	/* Journaling */
+	struct journal_s *s_journal;
+	unsigned long s_ext4_flags;		/* Ext4 superblock flags */
+	struct mutex s_orphan_lock;	/* Protects on disk list changes */
+	struct list_head s_orphan;	/* List of orphaned inodes in on disk
+					   list */
+	struct ext4_orphan_info s_orphan_info;
+	unsigned long s_commit_interval;
+	u32 s_max_batch_time;
+	u32 s_min_batch_time;
+	struct block_device *s_journal_bdev;
+#ifdef CONFIG_QUOTA
+	/* Names of quota files with journalled quota */
+	char __rcu *s_qf_names[EXT4_MAXQUOTAS];
+	int s_jquota_fmt;			/* Format of quota to use */
+#endif
+	unsigned int s_want_extra_isize; /* New inodes should reserve # bytes */
+	struct ext4_system_blocks __rcu *s_system_blks;
+
+#ifdef EXTENTS_STATS
+	/* ext4 extents stats */
+	unsigned long s_ext_min;
+	unsigned long s_ext_max;
+	unsigned long s_depth_max;
+	spinlock_t s_ext_stats_lock;
+	unsigned long s_ext_blocks;
+	unsigned long s_ext_extents;
+#endif
+
+	/* for buddy allocator */
+	struct ext4_group_info ** __rcu *s_group_info;
+	struct inode *s_buddy_cache;
+	spinlock_t s_md_lock;
+	unsigned short *s_mb_offsets;
+	unsigned int *s_mb_maxs;
+	unsigned int s_group_info_size;
+	unsigned int s_mb_free_pending;
+	struct list_head s_freed_data_list;	/* List of blocks to be freed
+						   after commit completed */
+	struct list_head s_discard_list;
+	struct work_struct s_discard_work;
+	atomic_t s_retry_alloc_pending;
+	struct list_head *s_mb_avg_fragment_size;
+	rwlock_t *s_mb_avg_fragment_size_locks;
+	struct list_head *s_mb_largest_free_orders;
+	rwlock_t *s_mb_largest_free_orders_locks;
+
+	/* tunables */
+	unsigned long s_stripe;
+	unsigned int s_mb_max_linear_groups;
+	unsigned int s_mb_stream_request;
+	unsigned int s_mb_max_to_scan;
+	unsigned int s_mb_min_to_scan;
+	unsigned int s_mb_stats;
+	unsigned int s_mb_order2_reqs;
+	unsigned int s_mb_group_prealloc;
+	unsigned int s_max_dir_size_kb;
+	/* where last allocation was done - for stream allocation */
+	unsigned long s_mb_last_group;
+	unsigned long s_mb_last_start;
+	unsigned int s_mb_prefetch;
+	unsigned int s_mb_prefetch_limit;
+	unsigned int s_mb_best_avail_max_trim_order;
+
+	/* stats for buddy allocator */
+	atomic_t s_bal_reqs;	/* number of reqs with len > 1 */
+	atomic_t s_bal_success;	/* we found long enough chunks */
+	atomic_t s_bal_allocated;	/* in blocks */
+	atomic_t s_bal_ex_scanned;	/* total extents scanned */
+	atomic_t s_bal_cX_ex_scanned[EXT4_MB_NUM_CRS];	/* total extents scanned */
+	atomic_t s_bal_groups_scanned;	/* number of groups scanned */
+	atomic_t s_bal_goals;	/* goal hits */
+	atomic_t s_bal_len_goals;	/* len goal hits */
+	atomic_t s_bal_breaks;	/* too long searches */
+	atomic_t s_bal_2orders;	/* 2^order hits */
+	atomic_t s_bal_p2_aligned_bad_suggestions;
+	atomic_t s_bal_goal_fast_bad_suggestions;
+	atomic_t s_bal_best_avail_bad_suggestions;
+	atomic64_t s_bal_cX_groups_considered[EXT4_MB_NUM_CRS];
+	atomic64_t s_bal_cX_hits[EXT4_MB_NUM_CRS];
+	atomic64_t s_bal_cX_failed[EXT4_MB_NUM_CRS];		/* cX loop didn't find blocks */
+	atomic_t s_mb_buddies_generated;	/* number of buddies generated */
+	atomic64_t s_mb_generation_time;
+	atomic_t s_mb_lost_chunks;
+	atomic_t s_mb_preallocated;
+	atomic_t s_mb_discarded;
+	atomic_t s_lock_busy;
+
+	/* locality groups */
+	struct ext4_locality_group __percpu *s_locality_groups;
+
+	/* for write statistics */
+	unsigned long s_sectors_written_start;
+	u64 s_kbytes_written;
+
+	/* the size of zero-out chunk */
+	unsigned int s_extent_max_zeroout_kb;
+
+	unsigned int s_log_groups_per_flex; // 同ext4_super_block的s_log_groups_per_flex
+	struct flex_groups * __rcu *s_flex_groups;
+	ext4_group_t s_flex_groups_allocated;
+
+	/* workqueue for reserved extent conversions (buffered io) */
+	struct workqueue_struct *rsv_conversion_wq;
+
+	/* timer for periodic error stats printing */
+	struct timer_list s_err_report;
+
+	/* Lazy inode table initialization info */
+	struct ext4_li_request *s_li_request;
+	/* Wait multiplier for lazy initialization thread */
+	unsigned int s_li_wait_mult;
+
+	/* Kernel thread for multiple mount protection */
+	struct task_struct *s_mmp_tsk;
+
+	/* record the last minlen when FITRIM is called. */
+	unsigned long s_last_trim_minblks;
+
+	/* Reference to checksum algorithm driver via cryptoapi */
+	struct crypto_shash *s_chksum_driver;
+
+	/* Precomputed FS UUID checksum for seeding other checksums */
+	__u32 s_csum_seed;
+
+	/* Reclaim extents from extent status tree */
+	struct shrinker s_es_shrinker;
+	struct list_head s_es_list;	/* List of inodes with reclaimable extents */
+	long s_es_nr_inode;
+	struct ext4_es_stats s_es_stats;
+	struct mb_cache *s_ea_block_cache;
+	struct mb_cache *s_ea_inode_cache;
+	spinlock_t s_es_lock ____cacheline_aligned_in_smp;
+
+	/* Journal triggers for checksum computation */
+	struct ext4_journal_trigger s_journal_triggers[EXT4_JOURNAL_TRIGGER_COUNT];
+
+	/* Ratelimit ext4 messages. */
+	struct ratelimit_state s_err_ratelimit_state;
+	struct ratelimit_state s_warning_ratelimit_state;
+	struct ratelimit_state s_msg_ratelimit_state;
+	atomic_t s_warning_count;
+	atomic_t s_msg_count;
+
+	/* Encryption policy for '-o test_dummy_encryption' */
+	struct fscrypt_dummy_policy s_dummy_enc_policy;
+
+	/*
+	 * Barrier between writepages ops and changing any inode's JOURNAL_DATA
+	 * or EXTENTS flag or between writepages ops and changing DELALLOC or
+	 * DIOREAD_NOLOCK mount options on remount.
+	 */
+	struct percpu_rw_semaphore s_writepages_rwsem;
+	struct dax_device *s_daxdev;
+	u64 s_dax_part_off;
+#ifdef CONFIG_EXT4_DEBUG
+	unsigned long s_simulate_fail;
+#endif
+	/* Record the errseq of the backing block device */
+	errseq_t s_bdev_wb_err;
+	spinlock_t s_bdev_wb_lock;
+
+	/* Information about errors that happened during this mount */
+	spinlock_t s_error_lock;
+	int s_add_error_count;
+	int s_first_error_code;
+	__u32 s_first_error_line;
+	__u32 s_first_error_ino;
+	__u64 s_first_error_block;
+	const char *s_first_error_func;
+	time64_t s_first_error_time;
+	int s_last_error_code;
+	__u32 s_last_error_line;
+	__u32 s_last_error_ino;
+	__u64 s_last_error_block;
+	const char *s_last_error_func;
+	time64_t s_last_error_time;
+	/*
+	 * If we are in a context where we cannot update the on-disk
+	 * superblock, we queue the work here.  This is used to update
+	 * the error information in the superblock, and for periodic
+	 * updates of the superblock called from the commit callback
+	 * function.
+	 */
+	struct work_struct s_sb_upd_work;
+
+	/* Ext4 fast commit sub transaction ID */
+	atomic_t s_fc_subtid;
+
+	/*
+	 * After commit starts, the main queue gets locked, and the further
+	 * updates get added in the staging queue.
+	 */
+#define FC_Q_MAIN	0
+#define FC_Q_STAGING	1
+	struct list_head s_fc_q[2];	/* Inodes staged for fast commit
+					 * that have data changes in them.
+					 */
+	struct list_head s_fc_dentry_q[2];	/* directory entry updates */
+	unsigned int s_fc_bytes;
+	/*
+	 * Main fast commit lock. This lock protects accesses to the
+	 * following fields:
+	 * ei->i_fc_list, s_fc_dentry_q, s_fc_q, s_fc_bytes, s_fc_bh.
+	 */
+	spinlock_t s_fc_lock;
+	struct buffer_head *s_fc_bh;
+	struct ext4_fc_stats s_fc_stats;
+	tid_t s_fc_ineligible_tid;
+#ifdef CONFIG_EXT4_DEBUG
+	int s_fc_debug_max_replay;
+#endif
+	struct ext4_fc_replay_state s_fc_replay_state;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L992
+/*
+ * fourth extended file system inode data in memory
+ */
+struct ext4_inode_info {
+	__le32	i_data[15];	/* unconverted */ // 与ext4_inode的i_block的数据意义相同
+	__u32	i_dtime;
+	ext4_fsblk_t	i_file_acl;
+
+	/*
+	 * i_block_group is the number of the block group which contains
+	 * this file's inode.  Constant across the lifetime of the inode,
+	 * it is used for making block allocation decisions - we try to
+	 * place a file's data blocks near its inode block, and new inodes
+	 * near to their parent directory's inode.
+	 */
+	ext4_group_t	i_block_group; // 包含文件的inode_on_disk的block group号
+	ext4_lblk_t	i_dir_start_lookup;
+#if (BITS_PER_LONG < 64)
+	unsigned long	i_state_flags;		/* Dynamic state flags */
+#endif
+	unsigned long	i_flags; // 与ext4_inode的i_flags意义相同
+
+	/*
+	 * Extended attributes can be read independently of the main file
+	 * data. Taking i_rwsem even when reading would cause contention
+	 * between readers of EAs and writers of regular file data, so
+	 * instead we synchronize on xattr_sem when reading or changing
+	 * EAs.
+	 */
+	struct rw_semaphore xattr_sem;
+
+	/*
+	 * Inodes with EXT4_STATE_ORPHAN_FILE use i_orphan_idx. Otherwise
+	 * i_orphan is used.
+	 */
+	union {
+		struct list_head i_orphan;	/* unlinked but open inodes */
+		unsigned int i_orphan_idx;	/* Index in orphan file */
+	};
+
+	/* Fast commit related info */
+
+	/* For tracking dentry create updates */
+	struct list_head i_fc_dilist;
+	struct list_head i_fc_list;	/*
+					 * inodes that need fast commit
+					 * protected by sbi->s_fc_lock.
+					 */
+
+	/* Start of lblk range that needs to be committed in this fast commit */
+	ext4_lblk_t i_fc_lblk_start;
+
+	/* End of lblk range that needs to be committed in this fast commit */
+	ext4_lblk_t i_fc_lblk_len;
+
+	/* Number of ongoing updates on this inode */
+	atomic_t  i_fc_updates;
+
+	/* Fast commit wait queue for this inode */
+	wait_queue_head_t i_fc_wait;
+
+	/* Protect concurrent accesses on i_fc_lblk_start, i_fc_lblk_len */
+	struct mutex i_fc_lock;
+
+	/*
+	 * i_disksize keeps track of what the inode size is ON DISK, not
+	 * in memory.  During truncate, i_size is set to the new size by
+	 * the VFS prior to calling ext4_truncate(), but the filesystem won't
+	 * set i_disksize to 0 until the truncate is actually under way.
+	 *
+	 * The intent is that i_disksize always represents the blocks which
+	 * are used by this file.  This allows recovery to restart truncate
+	 * on orphans if we crash during truncate.  We actually write i_disksize
+	 * into the on-disk inode when writing inodes out, instead of i_size.
+	 *
+	 * The only time when i_disksize and i_size may be different is when
+	 * a truncate is in progress.  The only things which change i_disksize
+	 * are ext4_get_block (growth) and ext4_truncate (shrinkth).
+	 */
+	loff_t	i_disksize;
+
+	/*
+	 * i_data_sem is for serialising ext4_truncate() against
+	 * ext4_getblock().  In the 2.4 ext2 design, great chunks of inode's
+	 * data tree are chopped off during truncate. We can't do that in
+	 * ext4 because whenever we perform intermediate commits during
+	 * truncate, the inode and all the metadata blocks *must* be in a
+	 * consistent state which allows truncation of the orphans to restart
+	 * during recovery.  Hence we must fix the get_block-vs-truncate race
+	 * by other means, so we have i_data_sem.
+	 */
+	struct rw_semaphore i_data_sem;
+	struct inode vfs_inode;
+	struct jbd2_inode *jinode;
+
+	spinlock_t i_raw_lock;	/* protects updates to the raw inode */
+
+	/*
+	 * File creation time. Its function is same as that of
+	 * struct timespec64 i_{a,c,m}time in the generic inode.
+	 */
+	struct timespec64 i_crtime;
+
+	/* mballoc */
+	atomic_t i_prealloc_active;
+	struct rb_root i_prealloc_node;
+	rwlock_t i_prealloc_lock;
+
+	/* extents status tree */
+	struct ext4_es_tree i_es_tree;
+	rwlock_t i_es_lock;
+	struct list_head i_es_list;
+	unsigned int i_es_all_nr;	/* protected by i_es_lock */
+	unsigned int i_es_shk_nr;	/* protected by i_es_lock */
+	ext4_lblk_t i_es_shrink_lblk;	/* Offset where we start searching for
+					   extents to shrink. Protected by
+					   i_es_lock  */
+
+	/* ialloc */
+	ext4_group_t	i_last_alloc_group;
+
+	/* allocation reservation info for delalloc */
+	/* In case of bigalloc, this refer to clusters rather than blocks */
+	unsigned int i_reserved_data_blocks;
+
+	/* pending cluster reservations for bigalloc file systems */
+	struct ext4_pending_tree i_pending_tree;
+
+	/* on-disk additional length */
+	__u16 i_extra_isize; // 与ext4_inode的i_extra_isize相同
+
+	/* Indicate the inline data space. */
+	u16 i_inline_off;
+	u16 i_inline_size;
+
+#ifdef CONFIG_QUOTA
+	/* quota space reservation, managed internally by quota code */
+	qsize_t i_reserved_quota;
+#endif
+
+	/* Lock protecting lists below */
+	spinlock_t i_completed_io_lock;
+	/*
+	 * Completed IOs that need unwritten extents handling and have
+	 * transaction reserved
+	 */
+	struct list_head i_rsv_conversion_list;
+	struct work_struct i_rsv_conversion_work;
+	atomic_t i_unwritten; /* Nr. of inflight conversions pending */
+
+	spinlock_t i_block_reservation_lock;
+
+	/*
+	 * Transactions that contain inode's metadata needed to complete
+	 * fsync and fdatasync, respectively.
+	 */
+	tid_t i_sync_tid;
+	tid_t i_datasync_tid;
+
+#ifdef CONFIG_QUOTA
+	struct dquot __rcu *i_dquot[MAXQUOTAS];
+#endif
+
+	/* Precomputed uuid+inum+igen checksum for seeding inode checksums */
+	__u32 i_csum_seed;
+
+	kprojid_t i_projid;
+};
 ```
+
+s_feature_compat、s_feature_incompat和s_feature_ro_compat比较拗口,其区别在于如果文件系统在它们的字段上置位了某些它们不支持
+的标志,产生的结果不同。s_feature_compat,仍然可以继续,不当作错 误 ;s_feature_incompat , 会当作错误, mount失败; s_feature_ro_compat,也会当作错误,但可以mount成只读文件系统。它们支持的标志集分别为EXT4_FEATURE_COMPAT_SUPP 、
+EXT4_FEATURE_INCOMPAT_SUPP和EXT4_FEATURE_RO_COMPAT_SUPP.
+
+ext4定义了几个中间的辅助数据结构,建立VFS的super_block和inode等数据结构和它们的关联关系:
+- ext4_sb_info
+- ext4_inode_info
+
+ext4_sb_info (ext4 super block infomation)结构体关联VFS 的super_block和ext4_super_block,同时它还保存了文件系统的一些通用信息.
+
+ext4_sb_info和ext4_super_block的很多字段相似(这里没有把二者放在一起,因为ext4_super_block、ext4_group_desc和ext_inode逻辑上更紧密),但也有些区别,前者的字段值很多是根据后者的字段计算得到的,比如s_inodes_per_block,就是通过block大小除以s_inode_size得到的. 虽然通过ext4_sb_info可以找到ext4_super_block,从而得到需要的值,但定义这些看似重复的字段可以省略重复的计算.
+
+super_block结构体的s_fs_info字段指向ext4_sb_info,EXT4_SB宏就是通过该字段获取ext4_sb_info的. ext4_sb_info的s_sb和s_es字段分
+别指向super_block和ext4_super_block,构成了VFS和ext4磁盘数据结构之间的通路.
+
+s_groups_count字段表示block group数,是由block总数除以每个block group的block数得到的,采用的是进一法。s_gdb_count则是根据
+s_groups_count的值除以s_desc_per_block得到,采用的同样是进一法. s_group_desc字段指向一个指针数组,数组的元素个数与s_gdb_count
+字段的值相等,每一个元素都指向GROUP DESCRIPTORS相应的block中的数据.
+
+由于group descriptor访问非常频繁,系统运行过程中,除非遇到意外错误或者对磁盘执行umount操作,各元素指向的内存数据会一直保持,以提高访问效率.
+
+VFS的inode结构体与ext4_inode结构体之间也需要一座桥梁,就是ext4_inode_info结构体.
+
+ext4_inode_info内嵌了inode,可以通过传递inode对象到EXT4_I宏来获得ext4_inode_info对象,但它并没有定义可以直接访问ext4_inode
+的字段,只是拷贝了后者的i_block和i_flags等字段;同时,inode结构体也包含了与ext4_inode字段类似的字段,比如i_atime、i_mtime和
+i_ctime等。所以它们三者的关系可以理解为ext4_inode_info内嵌了inode,二者一起“瓜分”了ext4_inode的信息.
 
 ## 目录的存储格式
 目录本身也是个文件，也有 inode. inode 里面也是指向一些块. 和普通文件不同的是，普通文件的块里面保存的是文件数据，而目录文件的块里面保存的是目录里面一项一项的文件信息. 这些信息称为 [ext4_dir_entry](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/ext4.h#L1245). 从代码来看，有两个版本，在成员来讲几乎没有差别，只不过第二个版本 ext4_dir_entry_2 是将一个 16 位的 name_len，变成了一个 8 位的 name_len 和 8 位的 file_type.
@@ -2504,6 +3110,9 @@ address_space表示地址空间, 其目的是将存储介质上(可能不连续�
 ### 挂载文件系统
 ref:
 - [linux多版本文件系统接口对比梳理](https://blog.csdn.net/m0_37637511/article/details/124328953)
+- [在linux 5.x的内核中，实际文件系统的挂载采用新的挂载API，引入了struct fs_context用于内部文件系统挂载的信息](https://cloud.tencent.com/developer/article/2074558)
+	
+	ext4挂载举例
 
 内核是不是支持某种类型的文件系统，需要先进行注册才能知道. 例如 ext4 文件系统，就需要通过 register_filesystem 注册到全局变量[file_systems](https://elixir.bootlin.com/linux/v5.12.9/source/fs/filesystems.c#L34)中，传入的参数是 ext4_fs_type，表示注册的是 ext4 类型的文件系统. 这里面最重要的一个成员变量就是 ext4_mount.
 
@@ -3077,6 +3686,213 @@ path_openat() 的最后一步是调用 [do_open](https://elixir.bootlin.com/linu
 
 
 [vfs_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L939) -> [do_dentry_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/open.c#L768) , do_dentry_open 里面最终要做的一件事情是，调用 f->f_op->open，也就是调用 [ext4_file_operations](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L884)的[ext4_file_open](https://elixir.bootlin.com/linux/v5.8-rc3/source/fs/ext4/file.c#L813). 另外一件重要的事情是将打开文件的所有信息，填写到 [struct file](https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L943https://elixir.bootlin.com/linux/v5.8-rc3/source/include/linux/fs.h#L943) 这个结构里面.
+
+### 目录结构
+ext4文件系统内部的文件层级结构的组织方式可通过ext4_lookup函数(ext4_dir_inode_operations.lookup)了解.
+
+目录也是文件,它也拥有属于自己的block,只不过普通文件的block存放的是文件的内容,目录的block中存放的是目录包含的子文件
+的信息. 注意, 无论是普通文件的内容,还是目录的子文件的信息,都是它们的数据,不属于metadata.
+
+ext4的目录有两种组织方式,第一种是线性方式,即每一个block都按照数组形式存放ext4_dir_entry或者ext4_dir_entry_2对象.
+
+ext4_dir_entry和ext4_dir_entry_2是可以兼容的.
+
+#### 线性目录
+```c
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4.h#L2286
+struct ext4_dir_entry {
+	__le32	inode;			/* Inode number */
+	__le16	rec_len;		/* Directory entry length */
+	__le16	name_len;		/* Name length */
+	char	name[EXT4_NAME_LEN];	/* File name */
+};
+
+...
+
+/*
+ * The new version of the directory entry.  Since EXT4 structures are
+ * stored in intel byte order, and the name_len field could never be
+ * bigger than 255 chars, it's safe to reclaim the extra byte for the
+ * file_type field.
+ */
+struct ext4_dir_entry_2 {
+	__le32	inode;			/* Inode number */
+	__le16	rec_len;		/* Directory entry length */ // dir entry的长度
+	__u8	name_len;		/* Name length */
+	__u8	file_type;		/* See file type macros EXT4_FT_* below */
+	char	name[EXT4_NAME_LEN];	/* File name */
+};
+```
+因为支持的名字最大长度为255,只需要一个字节即可表示,所以拆分ext4_dir_entry.name_len的两个字节,得到ext4_dir_entry_2的name_len和file_type
+
+结构体的0x7字节的值为0,结构体的类型为ext4_dir_entry,否则为ext4_dir_entry_2,它们的第一个字段inode表示对应文件的inode号,
+name_len字段表示文件名字的长度,name字段则表示文件的名字。一个entry占用磁盘空间包括结构体的前8个字节、文件的名字和额外的对齐三部分,值由rec_len字段表示。
+
+看到name和inode字段, 应该明白lookup的原理了,目录的所有子文件都对应一个entry,如果某个entry的name字段与我们查找的文
+件名字匹配,它的inode字段的值就是要查找的文件的inode号ino,有了ino就可以得到目标文件了.
+
+最后一个entry, 它的rec_len字段等于0xfd0=0x1000-0xc × 4,也就是说最后一个entry的rec_len等于block被前
+面所有entry占用后剩下的空间大小。这是为了方便插入新的entry,不需要累加各entry计算block已经被占用的空间,只需要查看最后一个entry即可.
+
+创建新文件是申请到可用的inode号,初始化,然后创建一个entry添加到目录的block的entry数组的末尾。只不过一个block满了,可能要申请新的block.
+
+#### 哈希树目录
+如果文件系统支持dir_index特性(EXT4_FEATURE_COMPAT_DIR_INDEX),目录有线性和哈希树两种选择,若它的ext4_inode的flags字段的EXT4_INDEX_FL置位,则它采用的是哈希树方式,否则是线性方式.
+
+一般情况下,目录的子文件不会太多,一个block足够满足它们的entry对磁盘空间的需要,搜索某一个entry的代价不会太大,但如果子
+文件多了起来,需要多个block的情况下,搜索一个entry可能要搜多个block,最坏的情况下,搜索一个不存在的entry,要把每一个block都遍
+历一遍,效率非常低。
+
+于是,ext文件系统引入了dir_index特性,它的主要目的就是为了解决在子文件太多的情况下,线性目录搜索效率低下的问题。dir_index根据子文件的名字,计算得到哈希值,根据哈希值来判断文件的entry可以存入哪个block,如果block满了,存入相关block,查找的时候同样根据这个哈希值查找相关的block(by ext4_dx_add_entry),不需要每一个block查找.
+
+某个目录选择的方式并不是一成不变的,一般情况下,目录的子文件的entry不超过一个block的情况下,选择线性方式;超过一个block,内核会自动切换成哈希树方式,更新它的block。ext4为哈希树目录定义了几个结构体,表示整个树结构。dx_root表示树的根.
+
+```c
+struct fake_dirent
+{
+	__le32 inode;
+	__le16 rec_len;
+	u8 name_len;
+	u8 file_type;
+};
+
+struct dx_countlimit
+{
+	__le16 limit;
+	__le16 count;
+};
+
+struct dx_entry
+{
+	__le32 hash;
+	__le32 block;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/namei.c#L246
+/*
+ * dx_root_info is laid out so that if it should somehow get overlaid by a
+ * dirent the two low bits of the hash version will be zero.  Therefore, the
+ * hash version mod 4 should never be 0.  Sincerely, the paranoia department.
+ */
+
+struct dx_root
+{
+	struct fake_dirent dot;
+	char dot_name[4]; // `.\0\0\0`
+	struct fake_dirent dotdot;
+	char dotdot_name[4]; // `..\0\0`
+	struct dx_root_info
+	{
+		__le32 reserved_zero;
+		u8 hash_version; // 计算文件名hash的hash方法
+		u8 info_length; /* 8 */ // info长度
+		u8 indirect_levels; // 树的深度
+		u8 unused_flags;
+	}
+	info;
+	struct dx_entry	entries[]; // 线性分别的dx_entry
+};
+
+struct dx_node
+{
+	struct fake_dirent fake;
+	struct dx_entry	entries[];
+};
+```
+
+dx_root存放在目录的第一个block,开头按照ext4_dir_entry_2的格
+式存入“.”和“..”两个文件的信息.
+
+0x18加上info.info_length就是entries的开始,entries[0]的block表示哈希值为0时,对应的block号,该号并不是基于
+磁盘的,而是文件的第几个block。由此开始,基于文件的block, 称之为逻辑block,其余block除非特别说明均为基于磁盘的。dx_entry
+有hash和block两个字段,分别表示哈希值和对应的block号。entries[0]的hash字段被拆分成dx_countlimit结构体的limit和count字段,表示
+dx_entry的数量限制和当前数量.
+
+info.indirect_levels表示树的深度,该字段的最大值为1,表示最多有一层中间结点。当它为0时,dx_entry的block字段对应的block中存放
+的是ext4_dir_entry_2的线性数组。当它等于1时,dx_root的dx_entry的block字段对应的block中存放的是dx_node对象.
+
+dx_node包含的dx_entry的block字段对应的block按照线性方式存放ext4_dir_entry_2.
+
+哈希树目录的结构比线性目录复杂得多,但最终还是ext4_dir_entry_2来表示一个子文件的entry,所以lookup和创建文件方
+面二者并没有本质不同,区别仅在于搜索和插入entry的位置计算方式不同.
+
+#### 硬链接
+建立一个硬链接,只不过在目标目录下插入了一个ext4_dir_entry_2对象,其inode字段的值与原文件的inode号
+相等,它们共享同一个ext4_inode。只要inode号相同,名字和路径无论怎么变,最终都是同一个文件.
+
+### 文件io
+文件的block是由ext4_inode的i_block字段表示的,该字段是个数组,长60字节(__le32[15]),用来表示文件的block时,有两种使用方式 : Direct/Indirect Map 和 Extent Tree (区段树). 如果文件的EXT4_EXTENTS_FL标记清零,使用的是前者,否则使用的是后者.
+
+#### 映射
+60个字节,如果每四个字节映射一个block号,最多只能有15个block。ext2和ext3开始,将60个字节分为两部分,数组的前12个元素共48个字节直接映射一个block,后三个元素分别采用1、2和3级间接映射。
+
+所谓间接映射就是,元素映射的block中存放的并不是文件的内容或者目录的子信息,而是一个中间的映射表(Indirect Block)。4096个字节,每四个字节映射一个下级block,可达4096/ 4 = 1024项。下级block中存放的是数据还是中间的映射表,由映射的层级决定。
+
+i_block[12]采用一级间接映射,i_block[12]到block_l1(level 1)完成了间接映射,所以block_l1映射的block中存放的是文件的数据。i_block[13]采用二级间接映射,i_block[13]到block_l1再到block_l2才能完成间接映射,所以block_l1映射的block中存放的是block_l2, block_l2映射的block中存放的是文件的数据。
+
+i_block[14]采用三级间接映射,所以block_l1映射的block中存放的是block_l2,block_l2映射的block中存放的是block_l3,block_l3映射的
+block中存放的才是文件的数据。
+
+每四个字节(__le32)映射一个block,采用的是直接映射,四个字节的整数值就是基于磁盘的block号,所以采用这种方式的文件,它的block(包括中间参与映射的block)都必须在2^32 block内。文件的逻辑block与项(4字节为一项)的索引值是一致的,比如文件的block 1对应i_block[1],block 20对应i_block[12]指向的block_l1的第8项(从第0项开始算起).
+
+#### 区段树
+ext4由Direct/Indirect Map切换到了Extent Tree,前者一个项对应一个block,比较浪费空间。Extent单词的意思是区间,不言而喻,Extent
+Tree就是一些表示block区间的数据结构组成的树。一个数据结构对应一个区间的block,而不再是Map中的一个项对应一个block的关系。
+Extent Tree有点特别,它的每一个中间结点对应的block存放的都是一棵树 ,ext4定义了ext4_extent_header 、 ext4_extent_idx 和ext4_extent三个结构体表示树根、中间结点和树叶,以下分别简称header、idx和extent.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4_extents.h#L63
+/*
+ * This is the extent on-disk structure.
+ * It's used at the bottom of the tree.
+ */
+struct ext4_extent {
+	__le32	ee_block;	/* first logical block extent covers */ // extent涵盖的文件的逻辑block区间的起始值
+	__le16	ee_len;		/* number of blocks covered by extent */ // extent涵盖的block的数量
+	__le16	ee_start_hi;	/* high 16 bits of physical block */ // extent指向的第一关block的block号的高16位
+	__le32	ee_start_lo;	/* low 32 bits of physical block */ // extent指向的第一关block的block号的低32位
+};
+
+/*
+ * This is index on-disk structure.
+ * It's used at all the levels except the bottom.
+ */
+struct ext4_extent_idx {
+	__le32	ei_block;	/* index covers logical blocks from 'block' */ // idx对应的逻辑block号
+	__le32	ei_leaf_lo;	/* pointer to the physical block of the next *
+				 * level. leaf or next index could be there */ // idx指向的block的block号的低32位
+	__le16	ei_leaf_hi;	/* high 16 bits of physical block */  // idx指向的block的block号的高16位
+	__u16	ei_unused;
+};
+
+
+// https://elixir.bootlin.com/linux/v6.6.29/source/fs/ext4/ext4_extents.h#L85
+/*
+ * Each block (leaves and indexes), even inode-stored has header.
+ */
+struct ext4_extent_header {
+	__le16	eh_magic;	/* probably will support different formats */ // 0xF30A
+	__le16	eh_entries;	/* number of valid entries */ // header后entry的数量
+	__le16	eh_max;		/* capacity of store in entries */ // header后entry的最大数目
+ 	__le16	eh_depth;	/* has tree real underlying blocks? */ // 树的中间节点的高度
+	__le32	eh_generation;	/* generation of the tree */ // ext4未使用
+};
+```
+ext4_extent_header结构体表示树根,共12个字节.
+
+第一个header对象存在i_block的前12个字节,后面48个字节可以存放idx或者extent,eh_entries字段表示某个header后跟随的entry的数
+量,eh_max字段表示header后跟随的entry的最大数量,eh_depth字段表示树的中间结点高度,如果为0,说明紧随其后的是extent,最大值为5.
+
+ext4_extent_idx结构体表示树的中间结点.
+
+ei_leaf_lo和ei_leaf_hi组成目标块的block号,共48位。块中包含的是中间结点还是树叶由header的eh_depth字段决定,eh_depth大于0为中
+间结点,等于0则为树叶。ei_block表示该idx涵盖的文件的逻辑block区间的起始值。
+
+ext4_extent结构体表示树叶,它指向文件的一个block区间
+
+extent表示的block区间是连续的,ee_len字段表示该区间的block数量,如果它的值不大于32768,extent已经初始化,实际的block数量与
+该值相等;如果大于32768,则extent并没有初始化,实际的block数量等于ee_len-32868。ee_start_hi和ee_start_lo组成起始块的block号,也是
+48位,所以采用Extent Tree的文件的block都应该在2^48 block内.
 
 ## 总结
 ![](/misc/img/fs/8070294bacd74e0ac5ccc5ac88be1bb9.png)

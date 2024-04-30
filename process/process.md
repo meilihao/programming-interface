@@ -309,12 +309,12 @@ Linux 用于mm_struct描述一个进程的地址空间.
 //https://elixir.bootlin.com/linux/v6.5.1/source/include/linux/mm_types.h#L598
 //简化
 struct mm_struct {
-        struct vm_area_struct *mmap; //虚拟地址区间链表VMAs, 用来描述一段虚拟地址空间
+        struct vm_area_struct *mmap; //虚拟地址区间链表VMAs的表头, 用来描述一段虚拟地址空间
         struct rb_root mm_rb;   //组织vm_area_struct结构的红黑树的根
         unsigned long task_size;    //进程虚拟地址空间大小
         pgd_t * pgd;        //指向MMU页表
         atomic_t mm_users; //多个进程共享这个mm_struct
-        atomic_t mm_count; //mm_struct结构本身计数 
+        atomic_t mm_count; //mm_struct结构本身计数
         atomic_long_t pgtables_bytes;//页表占用了多个页
         int map_count;      //多少个VMA
         spinlock_t page_table_lock; //保护页表的自旋锁
@@ -328,8 +328,9 @@ struct mm_struct {
 };
 ```
 
-在 copy_process 函数中被调用copy_mm, copy_mm 函数调用 dup_mm 函数，把当前进程的 mm_struct 结构复制到 allocate_mm 宏分配的一个 mm_struct 结构中。这样，一个新进程的 mm_struct 结构就建立了.
+mm_users和mm_count都是引用计数,但它们保护的对象不同,前者保护的是mm_struct涉及的部分内存资源,后者保护的是mm_struct对象本身和剩下的资源.
 
+在 copy_process 函数中被调用copy_mm, copy_mm 函数调用 dup_mm 函数，把当前进程的 mm_struct 结构复制到 allocate_mm 宏分配的一个 mm_struct 结构中。这样，一个新进程的 mm_struct 结构就建立了.
 
 在 Linux 系统中，可以说万物皆为文件，比如文件、设备文件、管道文件等。一个进程对一个文件进行读写操作之前，必须先打开文件，这个打开的文件就记录在进程的文件表中，它由 task_struct 结构中的 files 字段指向files_struct.
 ```c
@@ -1182,7 +1183,7 @@ PGID不会因领导进程退出而受到影响，且fork调用也不会改变PGI
 ```
 
 ## 会话(session)
-一个或多个**进程组**的集合.新建会话时，当前进程（会话中唯一的进程）成为会话首进程(session leader)，也是当前进程组的组长进程，其进程号为该会话的SID(session id).它通常是登录 shell，也可以是调用`setsid`成功新建会话的孤儿进程.
+一个或多个**进程组**的集合.新建会话时，当前进程（会话中唯一的进程）成为会话首进程(session leader)，也是当前进程组的组长进程，其进程号为该会话的SID(session id).它通常是始于用户登录 shell，也可以是调用`setsid`成功新建会话的孤儿进程.
 
 会话将进程组根据执行状态分为前台迸程组（foreground thread group）和后台进程组（background thread group）. 控制终端（controlle terminal）进程是会话与外界进行交互的"窗口", 它负
 责接收用户的输入.
