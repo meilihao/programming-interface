@@ -135,6 +135,8 @@ sh_flags会在`readelf -S xxx`的尾部显示:
     1. 在程序加载时， 每个常亮会获得一个固定的内存地址
 - .symtab:符号表,保存了符号信息, 基本信息可通过`readelf -s xxx`查看, 具体信息可通过`nm`或`readelf -s xxx`查看
 
+  symtab和strtabsection并不是必不可少的，它们是用来调试的，最终发布软件之前一般会将它们去除，执行`strip <elf_file>`就可以去掉它们.
+
   在链接中, 将函数和变量统称为符号(symbol), 函数名和变量名是符号名(symbol name).
   符号表中定义的每个符号有一个对应的值叫符号值. 对于变量和函数, 符号值就是它们的地址.
 
@@ -216,6 +218,8 @@ GCC通过`__attribute__((weak))`指令可将强符号的函数或变量定义为
 ### 可执行文件(Executable File)
 ELF 的第二种格式
 
+elf_file由内核加载执行, 内核不是以section为单位加载的文件内容的，而是以segment为单位。一个segment可以包含0或多个section，由ph描述（很多情况下，可以将一个ph理解为一个segment）.
+
 这个格式和.o 文件大致相似,还是分成一个个的 section,并且被节头表描述. 只不过这些section 是多个.o 文件合并过的. 但是这个文件已经是可以加载到内存里面执行的文件了,因而这些 section 被分成了需要加载到内存里面的代码段、数据段和不需要加载到内存里面的部分,**将小的 section 合成了大的段 segment**,并且在最前面加一个段头表
 (Segment Header Table). 在代码里面的定义为 `struct elf32_phdr 和 [struct elf64_phdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L255)`,这里面除了有对于段的描述之外,最重要的是 p_vaddr,这个是这个段加载到内存的虚拟地址. 在 ELF 头里面有一项 e_entry,也是个虚拟地址,是这个程序运行的入口.
 
@@ -240,15 +244,21 @@ typedef struct elf64_phdr {
 
 查看程序的虚拟地址空间: `cat /proc/self/maps | sort -n`. 更细节可参考: 《Linker && Loader》和《程序员的自我修养——链接、装载与库》.
 
+第一个ph是PHDR，本质上并不是一个segment，它仅包含了整个ph表的信息.
+第二个ph是interpreter, 包含了interpreter section.
+接着是若干LOAD segment，它们是加载可执行程序的关键
+
 #### 程序->进程
+内核支持的可执行文件不止elf一种，还包含script和aout等格式, 所有的格式都有一个linux_binfmt结构体变量与之对应，比 如elf_format、script_format和aout_format。必须调用register_binfmt等函数将它们链接到以formats变量为头的链表中，才能支持对应的格式.
+
 ```c
 // https://elixir.bootlin.com/linux/latest/source/include/linux/binfmts.h#L102
 // kernel定义用来加载二进制文件的对象
 struct linux_binfmt {
-	struct list_head lh;
+	struct list_head lh; // 将其连接到formats链表中
 	struct module *module;
-	int (*load_binary)(struct linux_binprm *);
-	int (*load_shlib)(struct file *);
+	int (*load_binary)(struct linux_binprm *); //加载文件
+	int (*load_shlib)(struct file *); // 加载共享库
 	int (*core_dump)(struct coredump_params *cprm);
 	unsigned long min_coredump;	/* minimal dump size */
 } __randomize_layout;
@@ -262,9 +272,153 @@ static struct linux_binfmt elf_format = {
 	.core_dump	= elf_core_dump,
 	.min_coredump	= ELF_EXEC_PAGESIZE,
 };
+
+// https://elixir.bootlin.com/linux/v6.6.30/source/include/linux/binfmts.h#L18
+/*
+ * This structure is used to hold the arguments that are used when loading binaries.
+ */
+struct linux_binprm {
+#ifdef CONFIG_MMU
+  struct vm_area_struct *vma; // 内存映射信息
+  unsigned long vma_pages;
+#else
+# define MAX_ARG_PAGES  32
+  struct page *page[MAX_ARG_PAGES];
+#endif
+  struct mm_struct *mm; // 管理内存
+  unsigned long p; /* current top of mem */
+  unsigned long argmin; /* rlimit marker for copy_strings() */
+  unsigned int
+    /* Should an execfd be passed to userspace? */
+    have_execfd:1,
+
+    /* Use the creds of a script (see binfmt_misc) */
+    execfd_creds:1,
+    /*
+     * Set by bprm_creds_for_exec hook to indicate a
+     * privilege-gaining exec has happened. Used to set
+     * AT_SECURE auxv for glibc.
+     */
+    secureexec:1,
+    /*
+     * Set when errors can no longer be returned to the
+     * original userspace.
+     */
+    point_of_no_return:1;
+  struct file *executable; /* Executable to pass to the interpreter */
+  struct file *interpreter;
+  struct file *file; // 关联的文件
+  struct cred *cred;  /* new credentials */ // 权限和身份
+  int unsafe;   /* how unsafe this exec is (mask of LSM_UNSAFE_*) */
+  unsigned int per_clear; /* bits to clear in current->personality */
+  int argc, envc; // args, 参数数量; envc, 环境变量的数量
+  const char *filename; /* Name of binary as seen by procps */
+  const char *interp; /* Name of the binary really executed. Most
+           of the time same as filename, but could be
+           different for binfmt_{misc,script} */
+  const char *fdpath; /* generated filename for execveat */
+  unsigned interp_flags;
+  int execfd;   /* File descriptor of the executable */
+  unsigned long loader, exec;
+
+  struct rlimit rlim_stack; /* Saved RLIMIT_STACK used during exec. */
+
+  char buf[BINPRM_BUF_SIZE];
+} __randomize_layout;
 ```
 
 ![](/misc/img/compile/465b740b86ccc6ad3f8e38de25336bf6.jpg)
+
+linux_binprm （binary parameter, 以下简称bprm），表示加载二进制文件需要使用的参数信息.
+
+文件的前128个字节包含它的身份标识，表明它的格式。一种格式在尝试加载文件前，需要先判断文件是否为期望的格式
+
+exec系列函数:
+```c
+#include <unistd.h>
+
+extern char **environ;
+
+int execl( const char *path, const char *arg, ...);
+int execlp( const char *file, const char *arg, ...);
+int execle( const char *path, const char *arg , ..., char * const envp[]);
+int execv( const char *path, char *const argv[]);
+int execvp( const char *file, char *const argv[]);
+int fexecve(int fd, char *const argv[], char *const envp[]);
+int  execve  (const  char  *filename,  char *const argv [], char *const
+       envp[]);
+int execveat(int dirfd, const char *pathname,
+                    char *const _Nullable argv[],
+                    char *const _Nullable envp[],
+                    int flags);
+```
+
+execve和execveat调用同名系统调用实现，二者的主要区别在于确定文件路径的方式不同。前者的filename参数直接给出文件路径，后者的filename以绝对路径给出时，dirfd被忽略，以相对路径给出时，dirfd 指出了路径所在的目录，dirfd等于AT_FDCWD表示进程的当前工作目录.
+
+其他的函数都是glibc包装，通过调用execve实现的. fexecve需要调用execve，所以它需要将参数fd转换成filename。proc文件系统提供了一项便利，访问/proc/self/fd/目录下对应的fd文件等同于访问目标文件.
+
+它的原理很简单, /proc/self是一个链接，目标目录是/proc进程id对应的目录.
+
+exec函数族可以接受的文件除了可执行文件外还可以是脚本文件，也就是经常看到的以`#! interpreter [optional-arg]`开头的文件, interpreter必须指向一个可执行文件，相当于执行`interpreter
+[optional-arg] filename arg...`
+
+#### 系统调用
+execve和execveat系统调用最终都调用__do_execve_file实现，在将处理权交给具体的fmt之前，`__do_execve_file`需要完成以下任务:
+1. 调用kzalloc申请为bprm内存。
+2. 调 用 prepare_bprm_creds 初 始 化 bprm 的 cred 字 段 ； 调 用do_open_execat打开文件，得到file，为bprm->file赋值；根据filename参数为bprm->filename赋值
+3. 调用bprm_mm_init设置当前进程的栈：调用mm_alloc申请mm_struct对象，赋值给bprm->mm，然后申请vm_area_struct对象赋值给 bprm->vma 。 这 是 bprm->mm 的 第 一 个 vma ， 它 的 vm_end 等 于STACK_TOP_MAX，大小等于PAGE_SIZE。STACK_TOP_MAX在x86平台上是3G，bprm->p被赋值为`vma->vm_end - sizeof(void *)`，用户栈始于此。请注意，此处仅仅是将得到的mm_struct赋值给bprm->mm，并没有改变进程的mm。
+4. 栈已准备就绪，接下来将计算参数的个数，调用prepare_arg_pages 为 bprm->argc 和 bprm->envc 赋 值 ， 然 后 调 用copy_strings将envp和argv等的内容按照顺序复制到用户栈中。
+5. 调用prepare_binprm完成cred相关的操作，并读取文件的前128个字节存入bprm->buf。如果文件置位了S_ISUID或者S_ISGID标志，进程可以获得文件所有者的权限
+
+准备工作已经完成，接下来需要各个fmt接手了 ，search_binary_handler函数会遍历formats链表，调用fmt的load_binary.
+如果成功调用load_binary，进程会执行新的程序，不会返回，失败则返回错误，继续尝试下一个fmt。所以，exec函数族执行成功的情况下也是不会返回的。
+
+exec函数族存在一个误区，很多人以为系统会创建一个新进程执行程序，但实际上并没有新进程出现，只不过原进程的栈、内存映射等被替换了而已，这个“新”应该理解为焕然一新.
+
+分析elf文件，也就是elf_format的load_binary，load_elf_binary函数。该函数比较复杂，下面的代码中仅保留了处理可执行文件
+（ET_EXEC）的逻辑，load_bias和total_size等变量在这种情况下等于0，但依然很复杂。理解elf文件的格式是理解它的前提，可以分为两部分理解。前6步是去旧, 7到14步是迎新.
+
+TODO: use elf64
+
+elfhdr是一个宏，32位平台上就是elf32_hdr，函数的loc变量包含了两个elf32_hdr，elf_ex对应当前可执行文件，interp_elf_ex对应解释器文件，也就是本例中的/lib/ld-linux.so.2。第1步，将bprm->buf赋值给loc->elf_ex.
+
+第2步，检查文件的头，是否以"\177ELF"开头，确保文件是elf格式，除此之外还有平台和文件本身的检查，此处省略。
+第3步，申请sizeof(struct elf_phdr) * elf_ex->e_phnum大小的内存，读 取 文 件 的 ph 表 存 入 其 中 ， 32 位 平 台 上 elf_phdr 就 是 上 节 介 绍 的
+elf32_phdr。在本例中，也就是读取9个ph，成功后elf_phdata变量指向该ph数组。
+第4步，遍历elf_phdata数组，找到描述解释器的segment，也就是本例中的INTERP，它的偏移量等于0x154，大小等于0x13。读取这部分 字 符 到 elf_interpreter 字 符 串 数 组 ， 得 到 “/lib/ld-linux.so.2” ，open_exec打开elf_interpreter文件得到interpreter，读取它的elf32_hdr，存入loc->interp_elf_ex。当然，如果可执行文件是静态链接的，是没有解释器的，也就不需要这步。
+第5步，如果需要解释器文件，确保它是elf格式的，然后读取它的ph表，成功后interp_elf_phdata变量指向它的ph数组。
+第6步，去旧。调用de_thread注销线程组内其他线程（进程），替换进程的内存描述符current->mm为bprm->mm，替换mm->exe_file为bprm->file，调用do_close_on_exec将置位了O_CLOEXEC标志的文件
+关闭。
+
+第7步，调用flush_signal_handlers还原进程处理信号的策略，如果某信号当前的处理策略不是SIG_IGN，则更改为SIG_DFL.
+第8步，调用commit_creds使bprm->cred生效。第9步，调整进程的用户栈，我们在do_execveat_common的第3和第 4 项 任 务 中 ， 已 经 确 定 了 栈 起 始 于`STACK_TOP_MAX-
+sizeof(void*) `， 并 已 将 参 数 等 复 制 到 栈 中 ， 此 处 做 最 终 的 调 整 。randomize_stack_top在进程的PF_RANDOMIZE标志置1的情况下，在STACK_TOP（32位平台上与STACK_TOP_MAX相等）的基础上做一个随机的改动（一般为8M以内），作为栈的最终起始地址stack_top。随机的栈，是为了防止被黑客攻击。
+
+setup_arg_pages 会 根 据 新 的 stack_top ， 更 新 bprm->p ， 如 果stack_top 和 原 来 的 栈 起 始 地 址 不 同 ， 需 要 调 用 shift_arg_pages 更 新bprm->vma以及和它相关的页表，保证新旧栈的内容不变（不需要重新复制参数信息）。
+
+第10步，真正的加载过程开始了，只需要加载LOAD segment.
+
+所谓的加载，实际就是内存映射，将segment映射到固定的虚拟地址上（MAP_FIXED）. 当然，elf_map在映射的过程中要考虑对齐问题.
+
+第 11 步 ， 设 置 进 程 brk 的 起 点 current->mm->start_brk 和 current->mm->brk，它们的值决定于elf_brk，以PAGE_SIZE对齐的情况下，在本例中它的值等于0x0804B000（进1法）。elf_bss是未初始化段的起始地址，它虽然没有占用elf_f的物理空间，但也是占用内存的，比如u_init_data占用了0x804a024地址，elf_brk接着未初始化段结束的位置的下一区域（取决于对齐方式，默认是下一页）。
+
+第12步，加载解释器，由load_elf_interp函数完成。在本例中，加载的是/lib/ld-linux.so.2文件，它是一个共享文件，不需要固定映射，
+映射成功后返回文件被映射的起始地址elf_entry。interp_load_addr的含义 与 load_addr 类 似 ， elf_entry将值赋值给它后会加上loc->interp_elf_ex.e_entry，也就是/lib/ld-linux.so.2在内存中的地址加上入口代码的偏移量，这样elf_entry最终等于解释器的入口地址.
+
+如果不需要解释器，elf_entry则等于loc->elf_ex.e_entry.
+
+第13步，保存必要信息到用户栈，包括argc的值、argv和envp的值，此处保存的值才是读者熟悉的main函数中使用的参数。do_execveat_common的第4步中保存的是参数的内容，注意区分。另外还包括一些键值对，它们是程序正确执行的关键,可以在/proc/{进程号}/auxv文件中得到这些信息，使用xxd命令即可.
+
+AT_ENTRY保存的是elf_f的入口地址，这点尤为重要。在第12步中可以看到，本例中，开始执行的代码并不是elf_f的，而是解释器的
+入口代码，解释器执行完毕如何切换到elf_f执行的呢？依靠的就是此处保存到栈中的信息。
+
+第14步，万事俱备，start_thread使进程执行新的代码，该函数是平台相关的。x86平台上，它会修改pt_regs的ip为elf_entry，sp为bprm->p，这样系统调用返回用户空间的时候执行的就是elf_entry处的代码了。bprm->p此时的值是栈顶，也就是argc的位置.
+
+解释器的代码可以在glibc中找到，在本例中解释器的入口是_start，由汇编语言完成，它加载elf_f所需的库，然后找到elf_f的入
+口，执行elf_f.
+
+解释器找到elf_f入口的过程并不神秘，解释器执行时，esp寄存器的值等于bprm->p，也就是栈顶，将esp的值作为参数调用_dl_start函数，最终只需要根据该参数解析栈的布局即可得到elf_f入口了。glibc
+中的DL_FIND_ARG_COMPONENTS宏就是这个作用, 其中cookie就是栈顶，auxp就是键值对表，查找AT_ENTRY键对应的值即可.
 
 ### 共享对象文件（Shared Object）
 
@@ -272,6 +426,12 @@ static struct linux_binfmt elf_format = {
 
 基于动态连接库创建出来的二进制文件格式:
 - 多了一个.interp 的 Segment,这里面是 ld-linux.so(动态链接器), 即运行时的链接动作都是它做的
+
+  interpsection为程序指定解释器（interpreter），从编译和运行程序的角度讲，可执行程序和库有两种关系，一种是静态链接（编译的时候加入-static），编译时将所有依赖库包含在内，运行时不需要加载其他库. 另一种是动态链接，需要指定解释器在运行时加载需要的库.
+
+  interpsection实际存储的是一个字符串，指出解释器的路径, 比如`/lib64/ld-linux-x86-64.so.2`.
+
+interpsection实际存储的是一个字符串，指出解释器的路径
 - ELF 文件中还多了两个 section,一个是.plt,过程链接表(Procedure Linkage Table,PLT),一个是.got.plt,全局偏移量表(Global Offset Table,GOT)
 
 由于是运行时才去找,编译的时候,压根不知道被调用函数在哪里,所以就在 PLT 里面建立一项PLT[x]. 这一项也是一些代码,有点像一个本地的代理,在二进制程序里面,不直接调用
