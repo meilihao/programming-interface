@@ -3,6 +3,22 @@
 
 在System V IPC体系中，创建一个 IPC 对象都是 xxxget.
 
+XSI IPC源于System V,System V的三种IPC机制,后来收录在Unix的XSI(X/Open System Interface,称作X/Open系统接口)接口
+中,称之为XSI IPC.
+
+与POSIX IPC类似,XSI IPC也有semaphore(信号量)、shared memory(共享内存)和message queue(消息队列)三种,不过它们的
+接口风格与POSIX IPC的差别较大.
+
+这三种通信方式有很多相似之处,基本的设计思路也相同,都使用特定的数据结构作为载体, 称之为ipc对象.
+
+**与 System V IPC 接口不同，POSIX IPC 接口均为多线程安全接口**.
+
+**POSIX 在无竞争条件下，不需要陷入内核，其实现是非常轻量级的; System V 则不同，无论有无竞争都要执行系统调用，因此性能落了下风**.
+
+总体来说，System V IPC存在时间比较老，许多系统都支持，但是接口复杂，并且可能各平台上实现略有区别. **推荐用POSIX IPC**.
+
+TODO: clean XSI IPC.
+
 ## 管道模型
 管道是一种单向传输数据的机制，它其实是一段缓存，里面的数据只能从一端写入，从另一端读出. 如果想互相通信，就需要创建两个管道才行.
 
@@ -14,11 +30,29 @@
 # mkfifo hello
 ```
 
+代码用:
+```c
+#include <unistd.h>
+
+int pipe(int pipefd[2]);
+
+#define _GNU_SOURCE             /* See feature_test_macros(7) */
+#include <fcntl.h>              /* Definition of O_* constants */
+#include <unistd.h>
+
+int pipe2(int pipefd[2], int flags);
+```
+
+创建pipe的函数(用户空间)的原型如下,二者的区别仅在于第二个参数,pipe对应pipe2的flags参数为0的情况. 先调用pipe,然后
+再使用fcntl设置flags也是可以的,有效的标志仅限于O_CLOEXEC、O_NONBLOCK和O_DIRECT三种.
+
 管道以文件的形式存在，这也符合 Linux 里面一切皆文件的原则. 这个时候, 用ls 一下，可以看到，这个文件的类型是 p，就是 pipe 的意思.
 
 > 当命令向管道写入内容且内容没有被读出时, 该命令会被阻塞.
 
 管道的创建，需要通过这个系统调用`int pipe(int fd[2])`. 创建了一个管道 pipe，会返回两个文件描述符，这表示管道的两端，一个是管道的读取端描述符 fd[0]，另一个是管道的写入端描述符 fd[1].
+
+> 内核提供了pipe和pipe2两个系统调用,二者都调用do_pipe2实现.
 
 ```c
 // https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/pipe.c#L1028
@@ -95,6 +129,9 @@ static int __do_pipe_flags(int *fd, struct file **files, int flags)
 
 __do_pipe_flags里面调用了 create_pipe_files，然后生成了两个 fd, 其中fd[0]是用于读的，fd[1]是用于写的.
 
+创建的文件属于pipefs文件系统,它是一个只有简易结构的文件系统 , mount的时候(mount_pseudo函数)置位了SB_NOUSER标志
+(super_block的s_flags字段),意味着pipefs不能挂载到 mountpoint上.
+
 创建一个管道，大部分的逻辑其实都是在 [create_pipe_files](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/pipe.c#L912) 函数里面实现的. 命名管道是创建在文件系统上的, 但从这里可以看出，匿名管道，也是创建在文件系统上的，只不过是一种特殊的文件系统，创建一个特殊的文件，对应一个特殊的 inode，就是这里面的 [get_pipe_inode](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/pipe.c#L872).
 
 从 get_pipe_inode 的实现，可以看出，匿名管道来自一个特殊的文件系统 pipefs. 这个文件系统被挂载后，就得到了 struct vfsmount *pipe_mnt, 然后挂载的文件系统的 superblock 就变成了：pipe_mnt->mnt_sb.
@@ -132,13 +169,74 @@ const struct file_operations pipefifo_fops = {
 	.release	= pipe_release,
 	.fasync		= pipe_fasync,
 };
+
+// https://elixir.bootlin.com/linux/v6.6.30/source/include/linux/pipe_fs_i.h#L58
+/**
+ *	struct pipe_inode_info - a linux kernel pipe
+ *	@mutex: mutex protecting the whole thing
+ *	@rd_wait: reader wait point in case of empty pipe
+ *	@wr_wait: writer wait point in case of full pipe
+ *	@head: The point of buffer production
+ *	@tail: The point of buffer consumption
+ *	@note_loss: The next read() should insert a data-lost message
+ *	@max_usage: The maximum number of slots that may be used in the ring
+ *	@ring_size: total number of buffers (should be a power of 2)
+ *	@nr_accounted: The amount this pipe accounts for in user->pipe_bufs
+ *	@tmp_page: cached released page
+ *	@readers: number of current readers of this pipe
+ *	@writers: number of current writers of this pipe
+ *	@files: number of struct file referring this pipe (protected by ->i_lock)
+ *	@r_counter: reader counter
+ *	@w_counter: writer counter
+ *	@poll_usage: is this pipe used for epoll, which has crazy wakeups?
+ *	@fasync_readers: reader side fasync
+ *	@fasync_writers: writer side fasync
+ *	@bufs: the circular array of pipe buffers
+ *	@user: the user who created this pipe
+ *	@watch_queue: If this pipe is a watch_queue, this is the stuff for that
+ **/
+struct pipe_inode_info {
+	struct mutex mutex;
+	wait_queue_head_t rd_wait, wr_wait;
+	unsigned int head;
+	unsigned int tail;
+	unsigned int max_usage;
+	unsigned int ring_size;
+#ifdef CONFIG_WATCH_QUEUE
+	bool note_loss;
+#endif
+	unsigned int nr_accounted;
+	unsigned int readers; // 读者的数量
+	unsigned int writers; // 写者的数量
+	unsigned int files; // 引用该文件的file对象的数量
+	unsigned int r_counter;
+	unsigned int w_counter;
+	bool poll_usage;
+	struct page *tmp_page;
+	struct fasync_struct *fasync_readers;
+	struct fasync_struct *fasync_writers;
+	struct pipe_buffer *bufs; // pipe_buffer数组
+	struct user_struct *user;
+#ifdef CONFIG_WATCH_QUEUE
+	struct watch_queue *watch_queue;
+#endif
+};
 ```
+
+pipe的核心在于pipe_inode_info结构体, get_pipe_inode调用alloc_pipe_info(), 申请一个它的对象, 再将它赋值给inode的i_pipe字段.
+
+pipe_buffer结构体本身并不是buffer,在还没有确定用户需要多大的空间传递数据的情况下就申请16个buffer的设计也不合常理. 用到的时候一个pipe_buffer申请一页内存作为buffer,进程通信过程中写的是这些buffer,读的也是它们.
 
 get_pipe_inode 调用 new_inode_pseudo 函数创建一个 inode后开始填写 inode 的成员，这里和文件系统的很像. 但值得注意的是 [struct pipe_inode_info](https://elixir.bootlin.com/linux/v5.8-rc4/source/include/linux/pipe_fs_i.h#L57)，这个结构里面有个成员是 struct pipe_buffer *bufs. 可以知道，所谓的匿名管道，其实就是内核里面的一串缓存. 另外一个需要注意的是 [pipefifo_fops](https://elixir.bootlin.com/linux/v5.8-rc4/source/fs/pipe.c#L1181)，将来对于文件描述符的操作，在内核里面都是对应这里面的操作.
 
 回到 create_pipe_files 函数，创建完了 inode，还需创建一个 dentry 和它对应. dentry 和 inode 对应好了，就要开始创建 struct file 对象了. 先创建用于写入的，对应的操作为 pipefifo_fops；再创建读取的，对应的操作也为 pipefifo_fops. 然后把 private_data 设置为 pipe_inode_info. 这样从 struct file 这个层级上，就能直接操作底层的读写操作.
 
+pipe2系统调用建立了fd和file的关联,用户空间只需要直接使用得到的fd即可。两个进程随后的通信实际上就是操作文件的读端和写
+端,所以pipe的本质是两个进程读写同一个文件,只不过该文件没有路径,无法打开,只有“看得到”fd的进程才能使用它.
+
 至此，一个匿名管道就创建成功了. 如果对于 fd[1]写入，调用的是 pipe_write，向 pipe_buffer 里面写入数据；如果对于 fd[0]的读入，调用的是 pipe_read，也就是从 pipe_buffer 里面读取数据.
+
+使用pipe通信实际就是读写文件,也就是pipefifo_fops的read和write操作. pipefifo_fops的write操作最终调用的是pipe_write.
 
 但是这个时候，两个文件描述符都是在一个进程里面的，并没有起到进程间通信的作用，怎么样才能使得管道是跨两个进程的呢？还记得创建进程调用的 fork 吗？在这里面，创建的子进程会复制父进程的 struct files_struct，在这里面 fd 的数组会复制一份，但是 fd 指向的 struct file 对于同一个文件还是只有一份，这样就做到了，两个进程各有两个 fd 指向同一个 struct file 的模式，两个进程就可以通过各自的 fd 写入和读取同一个管道文件实现跨进程通信了.
 
@@ -158,8 +256,23 @@ get_pipe_inode 调用 new_inode_pseudo 函数创建一个 inode后开始填写 i
 
 ![](/misc/img/process/c042b12de704995e4ba04173e0a304e2.png)
 
-接下来，看命名管道. 命名管道需要事先通过命令 mkfifo，进行创建. 如果是通过代码创建命名管道，也有一个函数，但是这不是一个系统调用，而是 Glibc 提供的函数. 它的定义如下：
+接下来，看命名管道.
+
+FIFO是pipe的兄弟,又被称作命名管道。pipe为通信的进程创建了没有路径的特殊文件,所以进程间的关系需要有血缘关系,FIFO解
+决了这个问题,它创建有路径的(命名的)文件供进程使用.
+
+命名管道需要事先通过命令 mkfifo，进行创建. 如果是通过代码创建命名管道，也有一个函数，但是这不是一个系统调用，而是 Glibc 提供的函数. 它的定义如下：
 ```c
+#include <sys/types.h>
+#include <sys/stat.h>
+
+int mkfifo(const char *pathname, mode_t mode);
+
+#include <fcntl.h>           /* Definition of AT_* constants */
+#include <sys/stat.h>
+
+int mkfifoat(int dirfd, const char *pathname, mode_t mode);
+
 // https://elixir.bootlin.com/glibc/latest/source/sysdeps/posix/mkfifo.c#L25
 /* Create a named pipe (FIFO) named PATH with protections MODE.  */
 int
@@ -199,6 +312,8 @@ weak_alias (__xmknod, _xmknod)
 libc_hidden_def (__xmknod)
 ```
 
+并不存在mkfifo系统调用,它们是glibc通过mknod和mknodat实现的.
+
 Glibc 的 mkfifo 函数会调用 mknodat 系统调用, 创建一个字符设备的时候，也是调用的 mknod. 因此命名管道也是一个设备，因而我们也用 mknod.
 
 ```c
@@ -223,6 +338,30 @@ do_mknodat先是通过 user_path_create 对于这个管道文件创建一个 den
 
 ![](/misc/img/process/486e2bc73abbe91d7083bb1f4f678097.png)
 
+可以看到最终被创建的是FIFO类型的文件。mknod能够成功的前提是目录所属的文件系统为目录的inode定义了mknod操作(inode-
+>i_op->mknod)。一般文件系统定义该操作的时候,都要为特殊的文件(普通文件、目录、链接等文件除外的文件)提供特殊的文件操
+作 , 常 见 的 实 现 是 调 用 init_special_inode 函 数.init_special_inode给FIFO文件的文件操作为pipefifo_fops,多么熟悉,
+pipe的文件操作也是它.
+
+一 句 话 总 结 , mkfifo 创 建 了 一 个 文 件 , 它 的 文 件 操 作 为
+pipefifo_fops。
+
+pipefifo_fops的读写已经分析过了,在这方面FIFO和pipe没有区
+别。
+
+二者不同的是,pipe创建后,文件已经打开读写两端,相关的pipe_inode_info对象和buf也会被创建;但创建了FIFO文件后,使用它
+的进程还需要自行打开文件(fifo_open),pipe_inode_info对象和buf也是打开的过程中创建的。
+
+关于fifo_open有几点需要说明。
+
+首先,如果以只读方式打开FIFO文件,open会阻塞,等待有进程以写方式打开文件才返回(有可能被信号中断)。如果
+O_NONBLOCK标志被置位,即使没有写进程不等待,也直接返回;虽 然 open 没 有 出 错 , 但 写 进 程 不 一 定 存 在 , 直 接 读 有 可 能 触 发
+SIGPIPE,要确保有数据可读的情况下再读。
+
+其次,如果以只写方式打开FIFO文件,open会阻塞,等待有进程以读方式打开文件才返回(有可能被信号中断)。如果O_NONBLOCK标志被置位又没有读进程的情况下,返回错误.
+
+最后,以读写方式打开FIFO文件,不会出现阻塞.
+
 ## 消息队列模型
 创建一个消息队列，使用 msgget 函数. 这个函数需要有一个参数 key，这是消息队列的唯一标识，且应该是唯一的.
 
@@ -232,7 +371,130 @@ do_mknodat先是通过 user_path_create 对于这个管道文件创建一个 den
 
 收消息主要调用 msgrcv 函数: 第一个参数是 message queue 的 id，第二个参数是消息的结构体，第三个参数是可接受的最大长度，第四个参数是消息类型, 最后一个参数是 flag，IPC_NOWAIT 表示接收的时候不阻塞，直接返回.
 
+消息队列有一系列系统调用与之对应:
+```c
+		#include <fcntl.h>           /* For O_* constants */
+		#include <sys/stat.h>        /* For mode constants */
+		#include <mqueue.h>
+
+		mqd_t mq_open(const char *name, int oflag);
+		mqd_t mq_open(const char *name, int oflag, mode_t mode,
+						struct mq_attr *attr);
+		int mq_close(mqd_t mqdes);
+		int mq_unlink(const char *name);
+		int mq_getattr(mqd_t mqdes, struct mq_attr *attr);
+		int mq_setattr(mqd_t mqdes, const struct mq_attr *restrict newattr,
+						struct mq_attr *restrict oldattr);
+
+	    #include <signal.h>           /* Definition of SIGEV_* constants */
+        int mq_notify(mqd_t mqdes, const struct sigevent *sevp);
+
+	    int mq_send(mqd_t mqdes, const char msg_ptr[.msg_len],
+                     size_t msg_len, unsigned int msg_prio);
+		ssize_t mq_receive(mqd_t mqdes, char msg_ptr[.msg_len],
+                          size_t msg_len, unsigned int *msg_prio);
+
+		#include <time.h>
+		#include <mqueue.h>
+
+		int mq_timedsend(mqd_t mqdes, const char msg_ptr[.msg_len],
+						size_t msg_len, unsigned int msg_prio,
+						const struct timespec *abs_timeout);
+		ssize_t mq_timedreceive(mqd_t mqdes, char *restrict msg_ptr[.msg_len],
+                          size_t msg_len, unsigned int *restrict msg_prio,
+                          const struct timespec *restrict abs_timeout);
+```
+
+mq_open由glibc封装,参数name必须以“/”开始,经过参数检查后,舍去name的第一个字符(也就是name+1)调用mq_open系统调
+用。另外,内核并不接受name中出现“/”,所以传递给mq_open的函数只能是“/no_slash”形式.
+
+Linux以文件作为消息队列的载体,mq_open会在需要的情况下创建文件,返回的消息队列描述符实际上就是文件描述符。需要说明的
+是,POSIX并没有规定需要通过文件的方式实现消息队列,所以对消息队列描述符使用poll、select等虽然可行,但没有可移植性。
+
+mq_open的第4个参数struct mq_attr *attr表示消息队列的属性,在open阶段只有mq_maxmsg和mq_msgsize字段起作用,前者限制队列上
+消息的最大数目,后者限制消息的长度,发送长度超过mq_msgsize的消息会出错。它的mq_flags和mq_curmsgs字段open时会被忽略,后者表示队列上消息的当前数目。mq_getattr和mq_setattr可以用来获取或修改消息队列的属性,通过mq_getsetattr系统调用实现,mq_setattr功能有限,只能修改mq_flags的O_NONBLOCK标志,也会间接地更改文件的标志(file->f_flags)。
+
+如果mq_open的attr为NULL,则使用系统默认的mq_maxmsg和mq_msgsize值.
+
+mq_open创建或者打开的文件属于一个特殊文件系统,mqueue。它 定 义 了 一 个 内 嵌 inode 的 mqueue_inode_info 结 构 体 ( 以 下 简 称info ) , 创 建 文 件 的 时 候 由 mqueue_alloc_inode ( super_block->s_op->alloc_inode字段)返回它的对象.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.30/source/ipc/mqueue.c#L134
+struct mqueue_inode_info {
+	spinlock_t lock;
+	struct inode vfs_inode;
+	wait_queue_head_t wait_q; // 配合实现poll机制
+
+	struct rb_root msg_tree; // 消息队列红黑树
+	struct rb_node *msg_tree_rightmost;
+	struct posix_msg_tree_node *node_cache;
+	struct mq_attr attr;
+
+	struct sigevent notify;
+	struct pid *notify_owner;
+	u32 notify_self_exec_id;
+	struct user_namespace *notify_user_ns;
+	struct ucounts *ucounts;	/* user who created, for accounting */
+	struct sock *notify_sock;
+	struct sk_buff *notify_cookie;
+
+	/* for tasks waiting for free space and messages, respectively */
+	struct ext_wait_queue e_wait_q[2]; // 2个等待队列, 一个等待空间(send), 一个等待消息(receive)
+
+	unsigned long qsize; /* size of queue in memory (sum of all msgs) */
+};
+```
+
+e_wait_q 字 段 表 示 两 个 由 ext_wait_queue 对 象 组 成 的 链 表 ,e_wait_q[0]和e_wait_q[1]是链表的头。ext_wait_queue结构体的task字
+段表示等待的进程,msg字段表示发送给进程的消息。
+
+看到msg_tree你应该恍然大悟,消息最终肯定是由这棵红黑树来管理的了。msg_tree红黑树直接管理posix_msg_tree_node对象,每一个对象都管理一组消息,它们的顺序由其priority字段决定。priority表示某个消息的优先级,值越大优先级越高,由mq_send发送消息的时候指定,优先级高的消息会被优先接收.
+
+同一个优先级的多个消息会被插入posix_msg_tree_node的msg_list的链表中。
+
+消息由msg_msg结构体表示,它的m_list字段将它插入msg_list链表,m_type字段表示消息的优先级,m_ts字段表示消息的长度,next
+字段为msg_msgseg指针类型,是msg_msgseg组成的链表的头,msg_msgseg只有一个next字段指向下一个msg_msgseg对象。
+
+消息的内容是紧接着msg_msg和msg_msgseg对象存放的,记消息的长度为len,使用alloc_msg(len)可获得msg_msg对象。alloc_msg函数
+为消息申请内存,当len小于PAGE_SIZE-sizeof(structmsg_msg)(DATALEN_MSG宏)时,申请len+sizeof(structmsg_msg)个字节的
+内存即可,不需要使用msg_msgseg。如果len大于DATALEN_MSG,申请的第一页内存存储msg_msg对象和消息前DATALEN_MSG个字节,接下来的页存储msg_msgseg对象和消息的其余字节,每一页最多存储PAGE_SIZE-sizeof(structmsg_msgseg)(DATALEN_SEG宏)个字节.
+
+#### 发送消息
+mq_send和mq_timedsend用来发送消息,前者调用后者实现,后者超时会出错,前者是不限时版本,最终都通过mq_timedsend系统调用实现,主要完成以下任务。
+
+(1)参数检查,消息的优先级不能大于MQ_PRIO_MAX(32768),消息的长度不能大于info->attr.mq_msgsize等。
+
+(2)调用load_msg复制消息,它先调用alloc_msg申请足够的内存存储msg_msg、msg_msgseg对象和消息,然后将消息从用户空间复制
+到对应的内存中。
+
+(3)如果队列上消息已满(info->attr.mq_curmsgs==info->attr.mq_maxmsg),文件置位了O_NONBLOCK标志的情况下返回错
+误,没有置位的情况下则睡眠在info->e_wait_q[SEND].list链表上等待队列上消息被读取。
+
+(4)如果队列上消息未满,有进程等待接收消息(info->e_wait_q[RECV].list链表不为空)的情况下,调用pipelined_send唤醒
+链表上最后一个进程(e_wait_q的两个链表是有序的,按照进程优先级排序,高优先级在后)接收消息。没有进程等待接收消息的情况
+下,将消息按照优先级插入info->msg_tree红黑树中。
+
+需要说明的是第4条,如果发送消息时有进程等待接收,消息会被它直接“消化”掉,不算作队列中的消息,也就是说不会增加info->attr.mq_curmsgs字段的值。这是合理的,正如紧俏的商品,还没来得及放在货架上就被哄抢一空。
+
+#### 接收消息
+mq_receive和mq_timedreceive用来接收消息,二者的区别与mq_send和mq_timedsend的区别类似,它们最终都通过mq_timedreceive
+系统调用实现,主要完成以下任务。
+
+(1)参数检查,要读的消息的长度msg_len不能小于info->attr.mq_msgsize,msg_len是用户空间提供的,表示buffer的长度,过
+短有可能无法读完一整条消息。
+
+(2)如果队列上没有消息(info->attr.mq_curmsgs==0),文件置位了O_NONBLOCK标志的情况下返回错误,没有置位的情况下则睡
+眠在info->e_wait_q[RECV].list链表上等待消息。如果成功等到消息(有可能超时或者被信号打断),则将消息复制到用户空间。
+
+(3)如果队列上有消息,调用msg_get获得消息,然后将消息复制到用户空间。如果info->e_wait_q[SEND].list链表上有进程在等待,则找到最后一个进程(优先级最高),将它的消息插入队列并将其唤醒。
+
+
+
 ## 共享内存模型
+Linux实现shared memory的方式与semaphore类似,没有特殊的系统调用,由glibc封装的shm_open和shm_unlink. 它们参数name的命名方式与semaphore相同,shm_open的逻辑与sem_open也类似,不同的地方在于shm_open只是打开(创建)文件,并没有调用mmap映射文件,返回的参数也不同,shm_open返回的是文件描述符。另外,shm_open会将文件的FD_CLOEXEC标志置1.
+
+得到了文件描述符后,可以使用ftruncate和mmap操作文件获得共享内存.
+
 创建一个共享内存，调用 `int shmget(key_t key, size_t size, int shmflag)`: 第一个参数是 key，和 msgget 里面的 key 一样，都是唯一定位一个共享内存对象，也可以通过关联文件的方式实现唯一性, 第二个参数是共享内存的大小, 第三个参数如果是 IPC_CREAT，同样表示创建一个新的.
 
 如果一个进程想要访问这一段共享内存，需要将这个内存加载到自己的虚拟地址空间的某个位置，通过 `void *shmat(int  shm_id, const  void *addr, int shmflg)`，at就是 attach 的意思. 除非对于内存布局非常熟悉，否则可能会 attach 到一个非法地址. 所以，通常的做法是将 addr 设为 NULL，让内核自动选一个合适的地址, 返回值就是真正被 attach 的地方.
@@ -406,6 +668,22 @@ shmem_fault 会调用 shmem_getpage_gfp 在 page cache 和 swap 中找一个空�
 
 ## 信号量
 信号量和共享内存往往要配合使用. 信号量其实是一个计数器，主要用于实现进程间的互斥与同步，而不是用于存储进程间通信数据. **信号量以集合的形式存在的**.
+
+Linux实现的POSIX semaphore效率很高,主要得益于sem_wait和sem_post的实现方式:它们不涉及系统调用,而是通过利用原子操作直接操作内存实现的.
+
+内核中并没有sem_xxx类的系统调用,POSIX semaphore的函数都是glibc封装的,sem_open的实现分两步.
+
+第1步,根据传递的name(假设为“sem_target”)得到目标文件路径。为了可移植性,name命名的最佳方式为“/xxxx”,xxxx中不能出
+现“/”符号,最低的要求是“/”只能出现在开头,类似“/a/b”是不允许的。
+
+目标文件所在的目录并不是随意的,glibc会挑选tmpfs和shm类型的文件系统的挂载点,优先选择“/dev/shm”.
+
+第 2 步 , 如 果 “/dev/shm/sem_target” 不 存 在 且 sem_open 置 位 了O_CREAT标志,创建文件,然后调用mmap将文件映射到内存,映射
+后的虚拟地址就是信号量的地址。如果“/dev/shm/sem_target”文件已经存在,说明semaphore已经被创建且初始化,打开并映射文件即可。
+
+sem_open实际上也是通过共享内存实现的,不过这段内存的载体是文件。究竟采用有名信号量还是内存信号量,由具体的应用场景决
+定。线程间使用内存信号量比较合理,因为这种情况下只需要一个全局变量即可,不需要文件,也不需要内存映射。进程间使用有名信号
+量比较方便,但如果是父子进程(fork得到子进程会继承父进程映射的空间),使用父进程映射过的内存可以省去内存映射.
 
 可以将信号量初始化为一个数值，来代表某种资源的总体数量. 对于信号量来讲，会定义两种原子操作，一个是 P 操作，称为申请资源操作. 这个操作会申请将信号量的数值减去 N，表示这些数量被他申请使用了，其他人不能用了. 另一个是 V 操作，我们称为归还资源操作，这个操作会申请将信号量加上 M，表示这些数量已经还给信号量了，其他人可以使用了.
 

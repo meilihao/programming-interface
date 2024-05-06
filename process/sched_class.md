@@ -330,3 +330,14 @@ cfs_rq的红黑树比较的是sched_entity.vruntim,dl_rq的红黑树比较的则
 idle_sched_class作为优先级最低的sched_class,它的使命就是没有其他进程需要执行的时候占用CPU,有进程需要执行的时候让出
 CPU。它不接受dequeue和enqueue操作,只负责idle进程,由rq->idle指定。pick_next_task_idle返回rq->idle,check_preempt_curr_idle,则直接
 调用resched_curr(rq).
+
+当系统中没有其他调度类的进程执行时,轮到idle占用CPU,它执行cpu_idle_loop进入了无限循环。默认情况下, 它调用tick_nohz_idle_enter使系统进入dyntick-idle状态,等待need_resched为真,满足条件后调用tick_nohz_idle_exit退出dyntick-idle状态,然后调
+度其他进程执行。所以,idle实际上是在等待别的进程来抢占.
+
+dyntick-idle,编译内核的时候CONFIG_NO_HZ_COMMON默认为y,该情况下,无事可做时就会进入dyntick-idle状态。正常情况下,时钟中断会周期性地到来,一个tick接一个tick,但如果idle的时候还是处理周期性地时钟中断,势必会造成不必要的功耗。所以为了降低功耗,idle的时候会停止周期性的时钟中断,让下一个时钟中断在合理长的延迟后再到来。该特性的优点是省电,但需要注意的是,实时性要求较高的系统并不适用,因为进入和退出dyntick-idle状态都是有代价.
+的
+
+## 实时进程
+内核并没有提供直接创建实时进程的函数,实时进程由两个来源,普通进程以特定参数调用sched_setscheduler可以变成实时进程. 另外,实时进程创建的新进程也是实时进程(task_struct 的sched_reset_on_fork字段置1的情况除外).
+
+sched_setscheduler可以改变进程的调度策略、实时进程的优先级等。除了该函数外,内核还定义了同名的系统调用供用户空间使用, 它最终也调用sched_setscheduler实现.

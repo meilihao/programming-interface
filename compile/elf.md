@@ -6,7 +6,9 @@
 - [ELF文件格式](https://www.cntofu.com/book/114/Theory/ELF.md)
 - [**二进制文件是什么样的？**](https://www.tuicool.com/articles/QJBZ7br)
 
-ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
+ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二进制可执行可链接文件的格式, 可以分为三种类型可重定位的目标文件(Relocatable File,或者Object File)、可执行文件(Executable)和共享库(Shared Object,或者Shared Library).
+
+目前常见的Linux、 Android可执行文件、共享库（.so）、目标文件（ .o）以及Core 文件（吐核）均为此格式, 可通过`readelf -a xxx`查看.
 
 [GNU Binutils(GNU Binary Utilities)](https://www.gnu.org/software/binutils/binutils.html)软件包里包含了一系列生成、解析和处理ELF文件的命令行工具.
 
@@ -23,6 +25,8 @@ ELF (Executeable and Linkable Format,可执行与可链接格式)是linux 下二
 
 > 编译时生成的 .o（目标文件）以及链接后的 .so （共享库）均可通过链接视图解析
 > ELF 规格也允许定义一个解释器(ELF 程序头部的 PT_INTERP 元素)来运行程序. 如果定义了解释器,内核则基于指定解释器可执行文件的各段来构建进程映像,转而由解释器负责加载和执行程序.
+
+elf文件可以分为elf header(eh)、Program Header Table、Sections和Section Header Table几个部分.
 
 ELF 文件的头(elf header)是用于描述整个文件的, 包含了描述整个文件的基本属性, 可通过`readelf -h xxx`查看. 这个文件格式在内核中有定义,分别为 `[struct elf32_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L244) 和 [struct elf64_hdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L221)`:
 ```c
@@ -56,7 +60,7 @@ elf Magic(`7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00`) elf解析器(通常
 
 默认下gcc编译出的elf可执行文件被认为是linux/unix下程序， 因此在文件入口链接了`/lib64/ld-linux-x86-64.so.2`, 其入口是`_start`, 然后才是`_start`调用`main`.
 
-### proghdr
+### proghdr(ph)
 字段  含义  备注
 Type  段的类型，暗含了如何解析此段的内容 
 Offset  本段内容在文件的位置  
@@ -318,3 +322,6 @@ DWARF(Debugging With Attributed Record Formats, 最新版是实验性的v5, 常�
 解析efl section: `readelf -S -W b.o`/`objdump -h xxx` // Elf64_Shdr, Section部分主要存放的是机器指令代码和数据
 解析`.text`/`.data`/`.rodata`段: `objdump -s -d xxx`
 解析`.bss`段: `objdump -x -s -d xxx` // 打印出目标文件的符号表，通过符号表我们可以知道各个变量的存放位置
+
+### raw binary
+bin文件即raw binary, 可使用objcopy处理elf文件得到. 它去除了elf文件一些不必要的格式信息,可以直接执行, elf文件则需要加载器(loader)解析执行. 许多设备的固件(firmware)以及引导代码都是bin文件,上电后即开始执行代码,不需要完整的操作系统.
