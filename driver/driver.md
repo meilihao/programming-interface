@@ -13,6 +13,12 @@
 
 	**由很多编写驱动的模板**
 
+从逻辑角度来讲,驱动和设备是一对多的关系. 一个设备只能匹配一个驱动,一个驱动可以作用于多个设备. 比如某平台上有4条i2c总线,它们属于同一型号,那么它们会共享同一个i2c驱动.
+
+从驱动开发的角度来讲,在驱动中并没有直接为drv(device_driver)构建该链表,只是描述drv支持的device, 而是使用总线(bus_type)来建立drv和device的关系.
+
+> 极少情况下,drv链表上可能存在多个drv适合device,这肯定不是驱动工程师愿意看到的,因为device最终绑定的drv不一定是我们为它量身定制的那个. 解决方案是调整驱动加载的顺序,或者修改device使它不能与其他drv匹配(match).
+
 设备的创建就是在Linux内核中维护一些数据结构来对硬件设备进行描述.
 
 ![](/misc/img/driver/1771657-20201229232507268-1330517277.png)
@@ -407,7 +413,7 @@ struct device {
 	struct kobject kobj;
 	struct device		*parent; // 指向父设备
 
-	struct device_private	*p; // 执行设备私有数据
+	struct device_private	*p; // 设备私有数据
 
 	const char		*init_name; /* initial name of the device */
 	const struct device_type *type; // 指向所属设备类型的指针, 其中包含该类型设备公共的方法和成员
@@ -418,7 +424,7 @@ struct device {
 	void		*platform_data;	/* Platform specific data, device
 					   core doesn't touch it */ // 指向平台专有数据
 	void		*driver_data;	/* Driver data, set and get with
-					   dev_set_drvdata/dev_get_drvdata */
+					   dev_set_drvdata/dev_get_drvdata */ // 驱动保存并使用的数据
 	struct mutex		mutex;	/* mutex to synchronize calls to
 					 * its driver.
 					 */
@@ -620,14 +626,14 @@ struct device_driver {
 	bool suppress_bind_attrs;	/* disables bind/unbind via sysfs */ //1: 禁止通过sysfs进行绑定/解绑
 	enum probe_type probe_type;
 
-	const struct of_device_id	*of_match_table;
-	const struct acpi_device_id	*acpi_match_table;
+	const struct of_device_id	*of_match_table; // 对支持的设备的描述
+	const struct acpi_device_id	*acpi_match_table; // 同上
 
-	int (*probe) (struct device *dev); // 设备可用绑定到驱动, 则用来对设备进行初始化
+	int (*probe) (struct device *dev); // 设备可用绑定到驱动, 则用来对设备进行初始化. 即drv和device匹配成功时调用
 	void (*sync_state)(struct device *dev);
 	int (*remove) (struct device *dev); // 将设备从驱动解绑时被调用的回调函数
 	void (*shutdown) (struct device *dev); // 设备被断电时调用的回调函数
-	int (*suspend) (struct device *dev, pm_message_t state); // 设备进入到节能状态时调用的方法
+	int (*suspend) (struct device *dev, pm_message_t state); // 设备进入到节能状态(即睡眠)时调用的方法
 	int (*resume) (struct device *dev); // 设备恢复到正常状态时调用的方法
 	const struct attribute_group **groups; // 驱动独有的属性组
 	const struct attribute_group **dev_groups;
@@ -1822,22 +1828,403 @@ EXPORT_SYMBOL_GPL(platform_bus_type);
 1. 匹配ID表(platform_device设备名是否出现在platform_driver的ID表中)
 1. platform_device设备名与驱动名称
 
-对于ARM, 内核2.6时, platform_device的定义通常在BSP的板文件中定义, 将platform_device归纳为一个数组, 最终通过platform_add_devices()注册到系统中; 3.x开始倾向于根据设备树中的内容自动展开platform_device.
+platform_bus_type是虚拟的bus_type,很多平台自带的设备都会以它作为中介,调用platform_add_devices可以添加设备,调用platform_driver_register可以注册驱动
+
+对于ARM, 内核2.6时,platform_device的定义通常在BSP的板文件中定义, 将platform_device归纳为一个数组, 最终通过platform_add_devices()注册到系统中; 3.x开始倾向于根据设备树中的内容自动展开platform_device.
 
 ## 输入设备驱动
+input子系统有两大类使用场景:
+1. 第一类是协助完成设备驱动(device),适用于鼠标、键盘、电源按键和传感器等设备. 这类设备的共同点是数据量都不大, 比如多数传感器不会超过X/Y/Z三个维度的数据。它最基本的作用是报告数据给系统,如果在驱动中定义一些与它相关的文件,也可以作为控制设备的接口使用.
+1. 第二类是协助定义操作(handler)来处理input事件,设备报告给系统数据信息、报告一系列数据的结尾标志等都属于input事件
+
+一个input事件由input_value结构体表示,它的type、code和value三个字段分别表示事件的类型、事件码和值.
+
+内核提供了几个函数方便驱动和其他模块使用input子系统,根据使用场景可以将它们分为两类,一类与device相关,另一类与handler相关。device类的函数一般在驱动中使用,handler类的函数更多出现在对input事件感兴趣的模块中.
+
 input是一个虚拟设备, 在linux中, 键盘, 鼠标, 触摸屏和游戏杆都是由input设备统一管理, 其初始化是[input_init](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/input/input.c#L2659), 注册input设备驱动是input_register_handler, input管理的设备和驱动匹配是input_match_device.
 
 input_allocate_device/input_free_device: 分配/释放一个输入设备. 分配返回一个input_dev
-
+input_register_handler/input_unregister_handler: 注册/取消input_handler
 input_register_device/input_unregister_device: 注册/销毁输入设备
-
+input_set_capability: 设置input_dev支持的事件和事件码
 input_event(): 报告指定type, code的输入事件
-input_report_key(): 报告键值
-input_report_rel(): 报告相对坐标
-input_report_abs(): 报告绝对坐标
-input_sync(): 报告同步事件
+input_report_xxx()/input_sync(): 报告一个input事件, 均与device相关.
+ - input_report_key(): 报告键值
+ - input_report_rel(): 报告相对坐标
+ - input_report_abs(): 报告绝对坐标
+ - input_sync(): 报告同步事件
 
 input_event: 对于所有的输入事件, 内核统一用它描述.
+input_dev结构体定义了一个input设备, 可以把它理解为驱动的物理设备在input子系统中的抽象,设备的属性和数据的合理范围等都由它表示
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.30/source/include/linux/input.h#L137
+/**
+ * struct input_dev - represents an input device
+ * @name: name of the device
+ * @phys: physical path to the device in the system hierarchy
+ * @uniq: unique identification code for the device (if device has it)
+ * @id: id of the device (struct input_id)
+ * @propbit: bitmap of device properties and quirks
+ * @evbit: bitmap of types of events supported by the device (EV_KEY,
+ *	EV_REL, etc.)
+ * @keybit: bitmap of keys/buttons this device has
+ * @relbit: bitmap of relative axes for the device
+ * @absbit: bitmap of absolute axes for the device
+ * @mscbit: bitmap of miscellaneous events supported by the device
+ * @ledbit: bitmap of leds present on the device
+ * @sndbit: bitmap of sound effects supported by the device
+ * @ffbit: bitmap of force feedback effects supported by the device
+ * @swbit: bitmap of switches present on the device
+ * @hint_events_per_packet: average number of events generated by the
+ *	device in a packet (between EV_SYN/SYN_REPORT events). Used by
+ *	event handlers to estimate size of the buffer needed to hold
+ *	events.
+ * @keycodemax: size of keycode table
+ * @keycodesize: size of elements in keycode table
+ * @keycode: map of scancodes to keycodes for this device
+ * @getkeycode: optional legacy method to retrieve current keymap.
+ * @setkeycode: optional method to alter current keymap, used to implement
+ *	sparse keymaps. If not supplied default mechanism will be used.
+ *	The method is being called while holding event_lock and thus must
+ *	not sleep
+ * @ff: force feedback structure associated with the device if device
+ *	supports force feedback effects
+ * @poller: poller structure associated with the device if device is
+ *	set up to use polling mode
+ * @repeat_key: stores key code of the last key pressed; used to implement
+ *	software autorepeat
+ * @timer: timer for software autorepeat
+ * @rep: current values for autorepeat parameters (delay, rate)
+ * @mt: pointer to multitouch state
+ * @absinfo: array of &struct input_absinfo elements holding information
+ *	about absolute axes (current value, min, max, flat, fuzz,
+ *	resolution)
+ * @key: reflects current state of device's keys/buttons
+ * @led: reflects current state of device's LEDs
+ * @snd: reflects current state of sound effects
+ * @sw: reflects current state of device's switches
+ * @open: this method is called when the very first user calls
+ *	input_open_device(). The driver must prepare the device
+ *	to start generating events (start polling thread,
+ *	request an IRQ, submit URB, etc.). The meaning of open() is
+ *	to start providing events to the input core.
+ * @close: this method is called when the very last user calls
+ *	input_close_device(). The meaning of close() is to stop
+ *	providing events to the input core.
+ * @flush: purges the device. Most commonly used to get rid of force
+ *	feedback effects loaded into the device when disconnecting
+ *	from it
+ * @event: event handler for events sent _to_ the device, like EV_LED
+ *	or EV_SND. The device is expected to carry out the requested
+ *	action (turn on a LED, play sound, etc.) The call is protected
+ *	by @event_lock and must not sleep
+ * @grab: input handle that currently has the device grabbed (via
+ *	EVIOCGRAB ioctl). When a handle grabs a device it becomes sole
+ *	recipient for all input events coming from the device
+ * @event_lock: this spinlock is taken when input core receives
+ *	and processes a new event for the device (in input_event()).
+ *	Code that accesses and/or modifies parameters of a device
+ *	(such as keymap or absmin, absmax, absfuzz, etc.) after device
+ *	has been registered with input core must take this lock.
+ * @mutex: serializes calls to open(), close() and flush() methods
+ * @users: stores number of users (input handlers) that opened this
+ *	device. It is used by input_open_device() and input_close_device()
+ *	to make sure that dev->open() is only called when the first
+ *	user opens device and dev->close() is called when the very
+ *	last user closes the device
+ * @going_away: marks devices that are in a middle of unregistering and
+ *	causes input_open_device*() fail with -ENODEV.
+ * @dev: driver model's view of this device
+ * @h_list: list of input handles associated with the device. When
+ *	accessing the list dev->mutex must be held
+ * @node: used to place the device onto input_dev_list
+ * @num_vals: number of values queued in the current frame
+ * @max_vals: maximum number of values queued in a frame
+ * @vals: array of values queued in the current frame
+ * @devres_managed: indicates that devices is managed with devres framework
+ *	and needs not be explicitly unregistered or freed.
+ * @timestamp: storage for a timestamp set by input_set_timestamp called
+ *  by a driver
+ * @inhibited: indicates that the input device is inhibited. If that is
+ * the case then input core ignores any events generated by the device.
+ * Device's close() is called when it is being inhibited and its open()
+ * is called when it is being uninhibited.
+ */
+struct input_dev {
+	const char *name;
+	const char *phys;
+	const char *uniq;
+	struct input_id id;
+
+	unsigned long propbit[BITS_TO_LONGS(INPUT_PROP_CNT)];
+
+	unsigned long evbit[BITS_TO_LONGS(EV_CNT)]; // 位图, 描述设备支持的事件. absbit等字段表示对应事件的事件码,可以使用input_set_capability设置支持的事件和事件码. 也可以直接调用__set_bit直接修改这些位图达到同样的效果,但input_set_capability在设置事件码的同时,会设置事件,而__set_bit则不会
+	unsigned long keybit[BITS_TO_LONGS(KEY_CNT)];
+	unsigned long relbit[BITS_TO_LONGS(REL_CNT)];
+	unsigned long absbit[BITS_TO_LONGS(ABS_CNT)];
+	unsigned long mscbit[BITS_TO_LONGS(MSC_CNT)];
+	unsigned long ledbit[BITS_TO_LONGS(LED_CNT)];
+	unsigned long sndbit[BITS_TO_LONGS(SND_CNT)];
+	unsigned long ffbit[BITS_TO_LONGS(FF_CNT)];
+	unsigned long swbit[BITS_TO_LONGS(SW_CNT)];
+
+	unsigned int hint_events_per_packet;
+
+	unsigned int keycodemax;
+	unsigned int keycodesize;
+	void *keycode;
+
+	int (*setkeycode)(struct input_dev *dev,
+			  const struct input_keymap_entry *ke,
+			  unsigned int *old_keycode);
+	int (*getkeycode)(struct input_dev *dev,
+			  struct input_keymap_entry *ke);
+
+	struct ff_device *ff;
+
+	struct input_dev_poller *poller;
+
+	unsigned int repeat_key;
+	struct timer_list timer;
+
+	int rep[REP_CNT];
+
+	struct input_mt *mt;
+
+	struct input_absinfo *absinfo;
+
+	unsigned long key[BITS_TO_LONGS(KEY_CNT)];
+	unsigned long led[BITS_TO_LONGS(LED_CNT)];
+	unsigned long snd[BITS_TO_LONGS(SND_CNT)];
+	unsigned long sw[BITS_TO_LONGS(SW_CNT)];
+
+	int (*open)(struct input_dev *dev); // 打开设备
+	void (*close)(struct input_dev *dev); // 关闭设备
+	int (*flush)(struct input_dev *dev, struct file *file);
+	int (*event)(struct input_dev *dev, unsigned int type, unsigned int code, int value);
+
+	struct input_handle __rcu *grab; // 不为空时, 限定仅该input_handle关联的input_handler可以处理设备产生的事件
+
+	spinlock_t event_lock;
+	struct mutex mutex;
+
+	unsigned int users;
+	bool going_away;
+
+	struct device dev; // 表明是一个设备
+
+	struct list_head	h_list; // 用来实现和input_handler之间多对多的关系
+	struct list_head	node; // 将其链到input_dev_list为头的链表中
+
+	unsigned int num_vals; // 设备当前需要报告的事件的数量
+	unsigned int max_vals; // 设备能够缓冲事件的最大数量即缓冲区容量
+	struct input_value *vals; // 存储设备报告的事件的缓冲区
+
+	bool devres_managed;
+
+	ktime_t timestamp[INPUT_CLK_MAX];
+
+	bool inhibited;
+};
+
+// https://elixir.bootlin.com/linux/v6.6.30/source/include/linux/input.h#L310
+/**
+ * struct input_handler - implements one of interfaces for input devices
+ * @private: driver-specific data
+ * @event: event handler. This method is being called by input core with
+ *	interrupts disabled and dev->event_lock spinlock held and so
+ *	it may not sleep
+ * @events: event sequence handler. This method is being called by
+ *	input core with interrupts disabled and dev->event_lock
+ *	spinlock held and so it may not sleep
+ * @filter: similar to @event; separates normal event handlers from
+ *	"filters".
+ * @match: called after comparing device's id with handler's id_table
+ *	to perform fine-grained matching between device and handler
+ * @connect: called when attaching a handler to an input device
+ * @disconnect: disconnects a handler from input device
+ * @start: starts handler for given handle. This function is called by
+ *	input core right after connect() method and also when a process
+ *	that "grabbed" a device releases it
+ * @legacy_minors: set to %true by drivers using legacy minor ranges
+ * @minor: beginning of range of 32 legacy minors for devices this driver
+ *	can provide
+ * @name: name of the handler, to be shown in /proc/bus/input/handlers
+ * @id_table: pointer to a table of input_device_ids this driver can
+ *	handle
+ * @h_list: list of input handles associated with the handler
+ * @node: for placing the driver onto input_handler_list
+ *
+ * Input handlers attach to input devices and create input handles. There
+ * are likely several handlers attached to any given input device at the
+ * same time. All of them will get their copy of input event generated by
+ * the device.
+ *
+ * The very same structure is used to implement input filters. Input core
+ * allows filters to run first and will not pass event to regular handlers
+ * if any of the filters indicate that the event should be filtered (by
+ * returning %true from their filter() method).
+ *
+ * Note that input core serializes calls to connect() and disconnect()
+ * methods.
+ */
+struct input_handler {
+
+	void *private;
+
+	void (*event)(struct input_handle *handle, unsigned int type, unsigned int code, int value); // 处理input_dev报告的事件
+	void (*events)(struct input_handle *handle,
+		       const struct input_value *vals, unsigned int count); // 批量处理input_dev报告的事件
+	bool (*filter)(struct input_handle *handle, unsigned int type, unsigned int code, int value); // 过滤掉handler不感兴趣的事件
+	bool (*match)(struct input_handler *handler, struct input_dev *dev); // 判断handler与某input_dev是否匹配
+	int (*connect)(struct input_handler *handler, struct input_dev *dev, const struct input_device_id *id); // 绑定input_dev和handler
+	void (*disconnect)(struct input_handle *handle); // 取消input_dev和handler的绑定
+	void (*start)(struct input_handle *handle);
+
+	bool legacy_minors;
+	int minor;
+	const char *name;
+
+	const struct input_device_id *id_table; // 用来描述handler能够匹配的input_dev
+
+	struct list_head	h_list; // 用来实现和input_dev之间的多对多的关系
+	struct list_head	node; // 将其链接到input_handler_list为头的链表中
+};
+```
+
+input_dev支持的事件和事件码都有特定的含义,用户空间的程序可以利用它们识别不同的设备.
+
+input事件和事件码表:
+1. 鼠标
+
+	EV_KEY:BTN_MOUSE
+	EV_REL:REL_X
+	EV_REL:REL_Y
+1. 键盘
+
+	EV_KEY: [0, BTN_MISC), [KEY_OK, KEY_COUNT]
+1. 游戏手柄
+
+	EV_KEY: [BTN_MISC, BTN_MOUSE], [BTN_JOYSTIC, BTN_DIGI]
+1. 触摸屏
+
+	EV_KEY: BTN_TOUCH
+	EV_ABS:ABS_X
+	EV_ABS:ABS_Y
+	EV_ABS:ABS_MT_POSITION_X
+	EV_ABS:ABS_MT_POSITION_Y
+
+input_handler和input_dev是多对多的关系,通过input_handle 实现,input_handle是一个辅助结构体.
+
+
+input子系统有两个核心的问题,第一个是input_dev和input_handler是如何关联起来的,第二个是input_handler如何处理input_dev报告的事件。前者的答案隐藏在input_register_device和input_register_handler函数中.
+
+input_register_device,它的主要逻辑如下.
+(1)设置input_dev支持EV_SYN。EV_SYN是所有input_dev默认需要支持的,它表示设备产生的一组事件的结束。input_dev报告
+EV_SYN事件之前,input子系统不会将事件交给handler处理,除非缓冲区不足。
+(2)计算input_dev需要的缓冲区的容量。赋值给max_vals字段,申请缓冲区,大小等于max_vals*sizeof(structinput_value)。
+(3)调用device_add添加设备。函数成功执行后,一般会出现两个sysfs目录,一个在我们为input_dev指定的父设备(input->dev.parent)下,另一个在/sys/class/input下(实际是软链接),名字为input加数字,该数字由0开始递增,一般情况下第n个调用input_allocate_device申请的input_dev对应的名字就是("input%lu",n-1)。
+(4)将input_dev插入input_dev_list链表。遍历input_handler_list链表,调用input_attach_handler为input_dev绑定input_handler。
+
+input_attach_handler先调用input_match_device判断input_dev和input_handler是否匹配,有两个判断依据。
+首先,input_dev要与input_handler的id_table字段定义的id表中的某个input_device_id匹配。input_device_id也定义了evbit、keybit等位图字段,表示它感兴趣的input_dev至少要支持哪些事件和事件码,比如led的input_handler的id表定义在input_leds_ids,其显示支持EV_LED事件的input_dev才可以与它匹配.
+
+其次,如果input_handler定义了match,match函数返回值为真表示二者匹配。
+
+如 果 它 们 匹 配 成 功 , input_attach_handler 继 续 调 用 handler 的connect尝试将二者绑定。connect由handler自行定义,但有一个任务必
+须完成,那就是初始化一个input_handle,调用input_register_handle建立input_dev和input_handler的关系。
+
+同样的,input_register_handler函数用来注册input_handler,它遍历input_dev_list链表上的input_dev,匹配并绑定它们.
+
+input_dev和input_handler绑定完毕,前者即可报告事件给后者处理.
+
+input_report_xxx和input_sync都是调用input_event实现的,后者判断input_dev是否支持该类型的事件,如果支持则调用input_handle_event继续处理事件.
+
+input_handle_event首先调用input_get_disposition决定对事件的处理策略,如果事件码(code)和值(value)不在input_dev支持的范围内,忽略事件,否则将事件按照先后顺序存入input_dev的vals字段表示的缓冲区中.
+
+如果收到了{EV_SYN, SYN_REPORT, 0}事件,或者需要报告的事件(input_dev->num_vals)过多导致缓冲区(input_dev->max_vals)将要不足,调用input_pass_values函数将事件交给绑定的input_handler处理,然后将input_dev->num_vals清零.
+
+缓冲区将满的情况属于被动报告,input子系统会自动添加一个{EV_SYN, SYN_REPORT, 1}事件表达它的“不情愿”。在用户空间收到此事件时应该明白收到的并不是一组完整的事件,而是“未完待
+续”.
+
+input_pass_values对绑定的input_handler调用input_to_handler报告事件,如果input_dev的grab不为空,仅grab对应的input_handler得到报告,否则遍历每一个与input_dev关联的input_handler。input_handler如果定义了filter,对每一个事件回调filter函数决定是否过滤掉它,过滤掉的事件对后续的input_handler不可见。如果存在没有被过滤的事件,回调input_handler的events或者event函数处理事件。events批量处理事件,优先级更高,没有定义它的情况下,才会使用event逐一处理事件.
+
+事件报告的流程分析完毕,但并没有看到用户空间获取事件的过程,实际上此处并没有遗漏关键细节,完成该过程的是一个万能的input_handler即evdev_handler.
+
+evdev_handler是万能的,因为它的id_table对匹配的input_dev没有任何要求,定义如下。从逻辑上讲,任何一个input_dev产生的事件都是希望最终能够告知系统的,这是evdev_handler的功能,所以它被设计为万能是情理之中的.
+
+evdev模块定义了evdev和evdev_client(以下简称client)两个关键的结构体,前者关联input子系统.
+
+```c
+// https://elixir.bootlin.com/linux/v6.6.30/source/drivers/input/evdev.c#L28
+struct evdev {
+	int open;
+	struct input_handle handle;
+	struct evdev_client __rcu *grab; // 如果不为NULL, 事件仅通过该client
+	struct list_head client_list; // client组成的链表的头
+	spinlock_t client_lock; /* protects client_list */
+	struct mutex mutex;
+	struct device dev;
+	struct cdev cdev;
+	bool exist;
+};
+
+struct evdev_client {
+	unsigned int head;
+	unsigned int tail;
+	unsigned int packet_head; /* [future] position of the first element of next packet */ // head, tail, packet_head是缓冲区中事件的位置指示
+	spinlock_t buffer_lock; /* protects access to buffer, head and tail */
+	wait_queue_head_t wait;
+	struct fasync_struct *fasync;
+	struct evdev *evdev;
+	struct list_head node; // 将client链接入evdev->client_list链表中
+	enum input_clock_type clk_type;
+	bool revoked;
+	unsigned long *evmasks[EV_CNT];
+	unsigned int bufsize; // 缓冲区的大小, 单位是sizeof(input_event)
+	struct input_event buffer[]; // 缓冲区, 紧挨着client存放
+};
+```
+
+evdev内嵌了input_handle,也就是说它关联着input_dev和evdev_handler.从client_list字段可知,evdev和evdev_client是一对多的关系.
+
+evdev_client结构体关联用户空间的操作.
+
+evdev_handler的connect为evdev_connect函数,与input_dev绑定时被调用,它主要完成两个任务,一个就是前面提到的建立input_dev和
+evdev_handler的关系,另一个是注册evdev->dev,该dev被初始化为一个字符设备,名字为("event%d",dev_no),dev_no由计算得来(以0为
+例)。函数成功后,会创建三个文件:/sys/class/input/event0目录(实际是软链接)、/dev/input/event0文件和input_dev设备目录的子目录
+(比如/sys/devices/..../input0/event0)。
+
+/dev/input/event0是一个字符文件,文件操作为evdev_fops,它是用户空间使用input子系统的一个窗口.
+
+evdev_fops的open为evdev_open函数,它的主要任务是创建一个client,申请缓冲区,将它挂载到evdev->client_list链表上。文件的evdev是如何获取的呢?使用open时传递的inode参数,调用container_of(inode->i_cdev,structevdev,cdev)即可。
+
+open结束后,evdev和client的关系已经确立,多次open会有多个client与evdev关联,每个client拥有自己的缓冲区,彼此相对独立.
+
+evdev_handler定义了evdev_events处理input_dev的事件,evdev_events获得evdev(input_handle是函数的参数,它的private字段为evdev),然后遍历它的client_list链表上的client,调用evdev_pass_values函数将事件“复制”到它们的缓冲区.
+
+需要说明的是,client的缓冲区中存放的是input_event,input_dev报告的事件是input_value,前者除了事件本身外,还添加了时间信息, 在用户空间既可以获取事件内容,也可以获得事件到达client的时间。该时间一般会被当作事件产生的时间,应用在很多场景中,比如计算手指在手机屏幕上滑动的速度.
+
+client“复制”事件后,读取event0文件即可读到它们,由evdev_read函数实现。更有趣的是,我们可以写event0文件,模拟设备报告一个事件,该事件同样会报告给系统,由evdev_write函数实现.
+
+采用input子系统实现的驱动产生的input文件的名字是动态的,也就是/sys/class/input/inputX和/sys/class/input/eventX中的X可能是系统启动时确定的.
+
+确定X,有两种方案可以选择:
+1. 遍历/sys/class/input/input*下的name文件,与指定的name匹配,匹配成功的X即为目标值,eventX中使用同样的X,/dev/input/eventX也使用同样的X。这种方案一般是可行的
+
+	```c
+	// 确定inputX
+	dev_set_name()
+	// 确定eventX
+	minor = input_get_new_minor()
+	dev_set_name(&evdev->dev, "event%d", minor)
+	```
+
+	两个步骤并不是原子操作,也就是说一个驱动确定了inputX之后,另一个驱动插入两个操作也是有可能的,所以就有可能同一个驱动造成inputX和eventX中的X不一致的情况,只不过概率较小. 这不是一个完善的方案,但依然介绍它的原因是该方案目前已经在很多平台中使用
+1. 遍历/dev/input/event*文件,使用ioctl操作(EVIOCGNAME)获取它们的名字,匹配成功的X即为目标值
+
+### example
 
 [drivers/input/keyboard/gpio_keys.c](https://elixir.bootlin.com/linux/v6.6.22/source/drivers/input/keyboard/gpio_keys.c)基于input架构实现了一个通用的GPIO按键驱动, 它基于platform_driver架构.
 
