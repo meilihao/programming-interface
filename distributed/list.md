@@ -33,11 +33,13 @@
 ## 实现
 - [oceanbase/src/logservice/palf/election](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE_BP3/src/logservice/palf/election)
 
+	- [OceanBase原生分布式数据库内核实战进阶版.pdf](https://obcommunity-private-oss.oceanbase.com/prod/blog/2023-09/%E4%BB%8E0%E5%88%B01%20OceanBase%E5%8E%9F%E7%94%9F%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E5%BA%93%E5%86%85%E6%A0%B8%E5%AE%9E%E6%88%98%E8%BF%9B%E9%98%B6%E7%89%88.pdf)
 	- [开源数据库OceanBase代码导读](https://www.zhihu.com/column/c_1386628099518402560)
 	- [OceanBase 数据库源码解读之模块结构](https://developer.aliyun.com/article/785281)
 	- [Oceanbase PaxosStore 源码阅读](https://zhuanlan.zhihu.com/p/395197545)
 	- [oceanbase源码阅读（1）程序启动](https://wangcy6.github.io/post/plan/oceanbase_day1/)
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
+	- [OBCE V3.0教材: 07_第七章_OceanBase高可用_V3.0.pdf](https://mdn.alipayobjects.com/huamei_22khvb/afts/file/A*PIj4T6BIPtwAAAAAAAAAAAAADiGDAQ/07_%E7%AC%AC%E4%B8%83%E7%AB%A0_OceanBase%E9%AB%98%E5%8F%AF%E7%94%A8_V3.0.pdf)
 - [PolarDB-X]()
 
 	- [PolarDB-X 三副本存储引擎](https://zhuanlan.zhihu.com/p/535496764)
@@ -56,7 +58,12 @@ ref:
 
 	- [DCF](https://docs.opengauss.org/zh/docs/3.1.1/docs/CharacteristicDescription/DCF.html)
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
-- [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.0.0_CE_BP3/src/logservice/palf)
+
+	最新版本VERSION已删除, 信息在CMakeLists.txt了
+- [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.3.0_CE_BETA/src/logservice/palf)
+
+	- [多副本日志同步](https://www.oceanbase.com/docs/community-observer-cn-10000000000901312)
+	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
 - [浅析华为Cantian引擎](https://www.modb.pro/db/1701776671271636992)
 
 	- [【创新项目探索】浅析openEuler Cantian引擎](https://www.openeuler.org/zh/blog/20230915-Cantian/20230915-Cantian.html)

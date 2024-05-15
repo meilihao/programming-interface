@@ -16,6 +16,8 @@
 - [bpf_study](https://github.com/DavadDi/bpf_study)
 
 ## kernel
+- [linux_kernel_wiki](https://github.com/0voice/linux_kernel_wiki)
+- [linux-insides-zh](https://github.com/hust-open-atom-club/linux-insides-zh)
 - [《Linux 内核编码风格》官方手册最新中译本](https://linux.cn/article-13494-1.html)
 - [Linux-0.12内核学习资料汇总+Linux 内核 0.12 完全注释](https://zhuanlan.zhihu.com/p/630740573)
 

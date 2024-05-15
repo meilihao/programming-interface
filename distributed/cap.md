@@ -506,12 +506,27 @@ Raft协议中，一个节点有三个状态：Leader、Follower和Candidate，�
 采取随机时间的目的是避免多个Followers同时发起选举，而同时发起选举容易导致所有Candidates都未能获得多数Followers的投票（脑裂，比如各获得了一半的投票，谁也不占多数，导致选举无效需重选），因而延迟随机时间可以提高一次选举的成功性
 
 ## FAQ
+### paxos vs raft
+ref:
+- [OBCE V3.0教材: 07_第七章_OceanBase高可用_V3.0.pdf](https://mdn.alipayobjects.com/huamei_22khvb/afts/file/A*PIj4T6BIPtwAAAAAAAAAAAAADiGDAQ/07_%E7%AC%AC%E4%B8%83%E7%AB%A0_OceanBase%E9%AB%98%E5%8F%AF%E7%94%A8_V3.0.pdf)
+
+1. 两者都是分布式共识协议
+1. 现有paxos, 功能完备但实现复杂, 后有简化版的raft及其实现
+1. raft不允许事务日志空洞(即要求事务日志顺序发送, 顺序应用), paxos允许(事务日志乱序发送, 顺序应用), 因此理论上高并发下paxos的延时和吞吐量都优于raft
+1. paxos和raft都对节点网络延时和时钟同步有要求. 网络抖动时, 理论上paxos抗干扰能力强于raft, 可自行恢复, 对性能的波动相对较小
+1. raft算法认为各副本都是对等的, 因此选举时不具有对任何副本的倾向性, 但工程实践中, 出于更合理的利用系统硬件资源以及负载均衡的需求, 通常希望对leader所在的副本位置有所要求, raft无法满足要求
+
 ### Raft和Multi-Paxos的区别
 Raft是基于对Multi-Paxos的两个限制形成的：
-
-发送的请求的是连续的, 也就是说Raft的append 操作必须是连续的， 而Paxos可以并发 (这里并发只是append log的并发, 应用到状态机还是有序的).
-Raft选主有限制,必须包含最新、最全日志的节点才能被选为leader. 而Multi-Paxos没有这个限制，日志不完备的节点也能成为leader.
+1. 发送的请求的是连续的, 也就是说Raft的append 操作必须是连续的， 而Paxos可以并发 (这里并发只是append log的并发, 应用到状态机还是有序的).
+1. Raft选主有限制,必须包含最新、最全日志的节点才能被选为leader. 而Multi-Paxos没有这个限制，日志不完备的节点也能成为leader.
 
 Raft可以看成是简化版的Multi-Paxos.
 
-Multi-Paxos允许并发的写log,当leader节点故障后，剩余节点有可能都有日志空洞. 所以选出新leader后, 需要将新leader里没有的log补全,在依次应用到状态机里.
+Multi-Paxos允许并发的写log,当leader节点故障后，剩余节点有可能都有日志空洞. 所以选出新leader后, 需要将新leader里没有的log补全, 再依次应用到状态机里.
+
+### Basic-Paxos vs Multi-Paxos
+Basic-Paxos: 适用于单个提议的共识，步骤简单，但每次都需要完整的准备和接受阶段
+Multi-Paxos: 适用于一系列提议的连续共识，优化了性能，通过领导者选举减少了重复的准备阶段，提高了效率
+
+Multi-Paxos在需要对多个提议连续达成共识的场景中，因其更高的性能和效率，通常是更实际的选择. 而Basic-Paxos则适用于需要达成单一共识的场景.
