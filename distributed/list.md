@@ -60,6 +60,9 @@ ref:
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
 
 	最新版本VERSION已删除, 信息在CMakeLists.txt了
+
+	- [XFT: Reimplementing XPaxos in Go](https://medium.com/princeton-systems-course/xft-implementation-evaluation-5d57b25c5c5f)
+	- [x-paxos](https://github.com/rayaanshahid/x-paxos)
 - [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.3.0_CE_BETA/src/logservice/palf)
 
 	- [多副本日志同步](https://www.oceanbase.com/docs/community-observer-cn-10000000000901312)
