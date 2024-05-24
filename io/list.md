@@ -154,6 +154,7 @@
 
 ## 多活
 - [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)
+- [**五种业界主流存储双活架构设计方案特点分析，哪种更具优势？**](https://blog.51cto.com/u_15127582/2759016)
 
 ## bio
 - [Linux 通用块层 bio 详解](https://www.byteisland.com/linux-%E9%80%9A%E7%94%A8%E5%9D%97%E5%B1%82-bio-%E8%AF%A6%E8%A7%A3/)

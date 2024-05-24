@@ -11,6 +11,12 @@
 - [MySQL · 引擎特性 · RDS三节点企业版 一致性协议](http://mysql.taobao.org/monthly/2019/11/06/)
 - [阿里如何实现高性能分布式强一致的独立 Paxos 基础库？](https://mp.weixin.qq.com/s?__biz=MjM5MDE0Mjc4MA==&mid=2650997287&idx=1&sn=4b3ef76bb90c2e28e259802866dc934e)
 - [PolarDB-X 一致性共识协议 (X-Paxos)](https://developer.aliyun.com/article/781308)
+- [OceanBase为何采用paxos](https://blog.csdn.net/zxpoiu/article/details/115521494)
+- [Paxos算法和Raft算法之间的联系是什么？优势在哪？](https://cloud.tencent.com/developer/article/2170952)
+- [Paxos和Raft的前世今生](https://zhuanlan.zhihu.com/p/46531628)
+
+	PaxosStore是腾讯公司WXG基于Paxos实现的分布式一致性中间件
+- [深度比较Paxos和Raft](https://blog.csdn.net/zxpoiu/article/details/115524567)
 
 ## etcd
 - [etcd技术架构以及其内部的实现机制](https://zhuanlan.zhihu.com/p/566090538)
@@ -69,5 +75,7 @@ ref:
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
 - [浅析华为Cantian引擎](https://www.modb.pro/db/1701776671271636992)
 
+	- [Cantian引擎，分布式数据库可实现多节点并发读写同一库表的多主架构](https://e.huawei.com/cn/solutions/storage/all-flash-storage/oceandata)
+	- [数据库简史：多主数据库架构的由来和华为参天引擎的机遇](https://cloud.tencent.com/developer/article/2352446)
 	- [【创新项目探索】浅析openEuler Cantian引擎](https://www.openeuler.org/zh/blog/20230915-Cantian/20230915-Cantian.html)
 	- [openEuler/cantian](https://gitee.com/openeuler/cantian)
