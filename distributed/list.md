@@ -17,6 +17,10 @@
 
 	PaxosStore是腾讯公司WXG基于Paxos实现的分布式一致性中间件
 - [深度比较Paxos和Raft](https://blog.csdn.net/zxpoiu/article/details/115524567)
+- [将 paxos 和 raft 统一为一个协议: abstract-paxos](https://zhuanlan.zhihu.com/p/488629044)
+- [共识协议：切主后的困境 - 日志恢复和幽灵复现](https://zhuanlan.zhihu.com/p/652849109)
+
+	其他文章也值得一看
 
 ## etcd
 - [etcd技术架构以及其内部的实现机制](https://zhuanlan.zhihu.com/p/566090538)
@@ -46,13 +50,17 @@
 	- [oceanbase源码阅读（1）程序启动](https://wangcy6.github.io/post/plan/oceanbase_day1/)
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
 	- [OBCE V3.0教材: 07_第七章_OceanBase高可用_V3.0.pdf](https://mdn.alipayobjects.com/huamei_22khvb/afts/file/A*PIj4T6BIPtwAAAAAAAAAAAAADiGDAQ/07_%E7%AC%AC%E4%B8%83%E7%AB%A0_OceanBase%E9%AB%98%E5%8F%AF%E7%94%A8_V3.0.pdf)
+	- [【数据库】从系统架构上描述 OceanBase 的高可用与容灾](https://blog.csdn.net/qq_40948559/article/details/125154366)
 - [PolarDB-X]()
 
 	- [PolarDB-X 三副本存储引擎](https://zhuanlan.zhihu.com/p/535496764)
 	- [第七节：X-Paxos 三副本与高可用](https://edu.aliyun.com/course/316505/lesson/15168)
+	- [云原生数据库PolarDB分布式版（PolarDB-X）原理导读](https://openpolardb.com/blog/detail?id=32023062116873389487049628&creator=52c1dfde391f4f63b5f84e0654c06137&tabData=blog)
+	- [PolarDB-X 从入门到实战](https://developer.aliyun.com/ebook/download/7674)
 
 ## Distributed Consensus Framework
 ref:
+- [干货长文：从业界实现剖析共识协议本质 - PolarFS，Oceanbase，PhxPaxos](https://zhuanlan.zhihu.com/p/662811049)
 - [OceanBase的一致性协议为什么选择 Paxos 而不是 Raft?](modb.pro/db/27698)
 - [Have we reached consensus on consensus?](https://tanxinyu.work/have-we-reached-consensus-on-consensus/)
 	- [**Have we reached consensus on consensus? pptx**](https://vevotse3pn.feishu.cn/file/boxcnBKfW8q9E61Bfi314R0hOfe)
@@ -62,14 +70,20 @@ ref:
 
 - [opengauss : Distributed Consensus Framework](https://gitee.com/opengauss/DCF)
 
-	- [DCF](https://docs.opengauss.org/zh/docs/3.1.1/docs/CharacteristicDescription/DCF.html)
+	- [DCF](https://docs-opengauss.osinfra.cn/zh/docs/5.0.0/docs/AboutopenGauss/DCF.html)
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
 
-	最新版本VERSION已删除, 信息在CMakeLists.txt了
+	最新版本VERSION已删除, 信息在CMakeLists.txt了, 可结合部分[号称史上最晦涩的算法Paxos，如何变得平易近人？](https://developer.aliyun.com/article/156281)代码阅读.
 
-	- [XFT: Reimplementing XPaxos in Go](https://medium.com/princeton-systems-course/xft-implementation-evaluation-5d57b25c5c5f)
-	- [x-paxos](https://github.com/rayaanshahid/x-paxos)
-- [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.3.0_CE_BETA/src/logservice/palf)
+	- [**PolarDB-X存储节点三副本: 架构介绍、源码导读和搭建案例**](https://www.modb.pro/db/657955)
+	- [PolarDB-X 基于 X-Paxos 一致性协议的高可用](https://developer.aliyun.com/article/1040149)
+	- [An Interpretation of PolarDB-X Source Codes (Extra): How to Implement a Paxos](https://www.alibabacloud.com/blog/an-interpretation-of-polardb-x-source-codes-extra-how-to-implement-a-paxos_599472)/[PolarDB-X 源码解读（番外）：如何实现一个 Paxos](https://zhuanlan.zhihu.com/p/490329189)
+	- ~~[XFT: Reimplementing XPaxos in Go](https://medium.com/princeton-systems-course/xft-implementation-evaluation-5d57b25c5c5f)~~
+	- ~~[x-paxos](https://github.com/rayaanshahid/x-paxos), XFT和olarDB-X 一致性共识协议 (X-Paxos)不是同一东西~~
+	- [PolarDB-X: An Elastic Distributed Relational Database for Cloud-Native Applications](https://users.cs.utah.edu/~lifeifei/papers/icde22-polardbx.pdf)
+- [oceanbase paxos](https://github.com/oceanbase/oceanbase/tree/v4.3.1_CE_BETA/src/logservice/palf)
+
+	> PALF: Paxos Append-only Log File-system
 
 	- [多副本日志同步](https://www.oceanbase.com/docs/community-observer-cn-10000000000901312)
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)

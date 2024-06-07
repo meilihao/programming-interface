@@ -10,8 +10,15 @@
 - [Paxos Made Live]()
 
   Google 团队的 Paxos 实践总结
+- [**一文总结：分布式一致性技术是如何演进的？**](https://jiqizhixin.com/articles/2020-07-24-11)
+
+  EPaxos更适用于跨AZ跨地域场景，对可用性要求极高的场景，Leader容易形成瓶颈的场景.
+- [分布式一致性算法：Paxos 的企业级实战](https://www.modb.pro/db/429669)
+- [oldratlee/translations 论文翻译](https://github.com/oldratlee/translations)
 
 X-Paxos当前的算法基于[unique proposer的multi-paxos](https://mp.weixin.qq.com/s/EN09RG8c695iDm0edoM5mg), 大量理论和实践已经证明了基于 unique proposer 的 multi-paxos，性能好于 multi-paxos/basic paxos，当前成熟的基于 Paxos 的系统，大部分都采用了这种方式.
+
+> fast Paxos算法对Paxos算法进行了改进：其只允许一个进程处理写请求，解决了活锁问题，ZAB协议是Fast Paxos的一种工业实现算法.
 
 ## Paxos 算法
 
@@ -25,7 +32,9 @@ X-Paxos当前的算法基于[unique proposer的multi-paxos](https://mp.weixin.qq
   - 投票选举: 执行Basic Paxos
   - 优化Basic Paxos: 当领导者处于稳定状态时，省掉准备阶段，直接进入接受阶段
 
-  > 所有写请求都在主节点处理，限制了集群处理写请求的并发能力，约等于单机
+  > 所有写请求都在主节点处理，限制了集群处理写请求的并发能力，约等于单机.
+
+  Multi-Paxos与Basic Paxos的区别并不在于Multi（Basic Paxos也可以Multi），只是在同一Proposer连续提议时可以优化跳过Prepare直接进入Accept阶段，仅此而已.
 
 Basic Paxos 是经过证明的，而 Multi-Paxos 是一种思想，缺失实现算法的必须编程细节，这就导致，Multi-Paxos 的最终算法实现，是建立在一个未经证明的基础之上的，正确性是个问号.
 
@@ -105,8 +114,15 @@ Logger是一种特殊类型的Follower，不对外提供服务. Logger做两件�
 
 Learner没有投票权，不参加多数派的计算，仅从Leader同步已提交的日志，并回放到状态机. 在实际使用中，我们把Learner作为只读副本，用于应用层的读写分离.此外，X-Paxos支持Learner和Follower之间的节点变更，基于这个功能可以实现故障节点的迁移和替换.
 
+Leader本质: ，如果每个节点都争相 propose，每条日志都靠完整的一轮 paxos 共识，那么平均下来至少需要两个 RTT，这也太慢了; 可优化为只要第一次 accept 成功，后续不再走一轮完整的 basic paxos 流程，而是直接复用当前的 proposal_number，进行连续 accept 即可.
+
 ## example
 - [LiuzhouChan/go-paxos](https://github.com/LiuzhouChan/go-paxos)
+
+### PaxosStore
+Raft 和 Multi-Paxos 都使用了任期形式的 Leader. 好处是性能很高，缺点是在切主的时候会拒绝服务，造成可用性下降. 因此一般认为共识服务是 CP 类服务（CAP 理论）.
+
+一些团队为了提高可用性, 转而采用基础的 Paxos 算法，比如微信的 PaxosStore 都是用了每轮一个单独的 Paxos 这种策略.
 
 ## FAQ
 ### chubby vs zookeeper的一致性
@@ -128,3 +144,7 @@ Zookeeper集群的初始状态为x；Client A发起写操作将状态修改为y�
 - 由于客户端有序的保证，Client B可以在Read操作前加一条Write操作，来保证看到最新状态，为了避免这个不必要的Write操作Zookeeper提供Sync命令，相当于一条空的写操作。
 
 这也符合Zookeeper的设计思路：提供更高效更原子的操作，通过这些操作客户端可以自行组装满足各种需求，即便是对一致性要求更高的需求.
+
+### leaderless的multi-paxos
+ref:
+- [BIGO技术 | Paxos的工程实践与极致优化](https://juejin.cn/post/6854573221681823758)
