@@ -2,6 +2,11 @@
 ref:
 - [理解NVMe的内部实现原理，这一篇就够了](https://zhuanlan.zhihu.com/p/71932654)
 - [NVMe/FC Host Configuration for SUSE Linux Enterprise Server 15 SP1 with ONTAP](https://docs.netapp.com/us-en/ontap-sanhost/nvme_sles15_sp3.html)
+- [vhost-user-blk](https://vmsplice.net/~stefan/stefanha-fosdem-2023.pdf)
+- [基于SPDK的Ublk和Vduse的用户空间块服务](https://blog.csdn.net/weixin_37097605/article/details/137362344)
+- [基于 SmartX 分布式存储的 iSCSI 与两种 NVMe-oF 技术与性能对比](https://www.sworditsys.com/share/smartx/smartx-iscsi-nvme-of.html)
+
+    SmartX 分布式块存储 ZBS 提供 2 种存算分离架构下的数据接入协议，分别是 iSCSI 和 NVMe-oF。其中，iSCSI 虽然具有很多优势，但不适合支持高性能的工作负载，这也是 SmartX 选择支持 NVMe-oF 的原因之一.
 
 **spdk v21.10启用io_uring后iscsi_tgt和nvmf_tgt都存在问题无法使用见FAQ, 具体原因是liburing版本低, 升到2.1即可**
 

@@ -1,6 +1,7 @@
 # 分布式存储
 - [如何构建一个分布式块存储产品？| 上篇](https://www.infoq.cn/article/b2alhrwyx3hnh4iwf52q)
 - [如何构建一个分布式块存储产品？| 下篇](https://www.infoq.cn/article/hqia8vmedk4puxc9e85j)
+- [zStorage 为什么选择Raft协议？](https://www.modb.pro/db/1784751491692711936)
 
 从广泛意义上讲，分布式存储中通常需要解决三个问题，分别是元数据服务，数据存储引擎，以及一致性协议:
 - 元数据服务提供的功能一般包括：集群成员管理，数据寻址，副本分配，负载均衡，心跳，垃圾回收等等

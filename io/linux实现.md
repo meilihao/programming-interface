@@ -2915,17 +2915,6 @@ make_request_fn 执行完毕后，可以想象 bio_list_on_stack[0]可能又多�
 
 因此`q->mq_ops->queue_rq`<=>[struct blk_mq_ops scsi_mq_ops](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1842).queue_rq即[scsi_queue_rq](https://elixir.bootlin.com/linux/v5.8-rc4/source/drivers/scsi/scsi_lib.c#L1622)封装更加底层的指令，给设备控制器下指令，实施真正的 I/O 操作.
 
-## nbd
-nbd驱动的初始化在[nbd_init](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/block/nbd.c#L2527), 添加设备在[nbd_dev_add](https://elixir.bootlin.com/linux/v6.6.23/source/drivers/block/nbd.c#L1787).
-
-nbd_dev_add使用了add_disk()将nbd设备加入系统.
-
-linux通过块设备文件系统来管理块设备. 块设备文件系统的入口是bdev_cache_init, 它把块设备文件系统注册到内核.
-
-bdev_sops是块设备文件系统超级块的操作函数.
-
-打开块设备时实际使用的是块设备文件系统提供的blkdev_open by def_blk_fops.
-
 ## 回写
 linux写操作只是写数据到page cache, 真正的写磁盘由回写控制.
 

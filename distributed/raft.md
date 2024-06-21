@@ -8,6 +8,9 @@ ref:
 - [分布式理论 6 - 一致性协议Raft.md](https://github.com/loveincode/notes/blob/master/15%20-%20Distributed%20%E5%88%86%E5%B8%83%E5%BC%8F/%E5%88%86%E5%B8%83%E5%BC%8F%E7%90%86%E8%AE%BA/%E5%88%86%E5%B8%83%E5%BC%8F%E7%90%86%E8%AE%BA%206%20-%20%E4%B8%80%E8%87%B4%E6%80%A7%E5%8D%8F%E8%AE%AERaft.md)
 - [深入浅出etcd/raft](https://blog.mrcroxx.com/categories/%E6%B7%B1%E5%85%A5%E6%B5%85%E5%87%BAetcd/raft/)
 - [etcd教程(十五)---leader选取源码分析](https://www.lixueduan.com/posts/etcd/15-raft-leader-election/)
+- [simple-raft](https://github.com/nananatsu/simple-raft)
+    - [用go实现Raft](https://juejin.cn/post/7239238662692569148)
+
 
 Paxos 协议有一个很大的设计假设, 它要求支持多个投票, 也就是数据库里的多条日志之间是可以**乱序**提交的, 可以**并行**处理的. 但是 raft 协议的做了一个约束, 数据库的多个投票多条日志一定要按照**顺序执行**, 只能前一个日志被确认了才能确认后一个日志.
 
@@ -21,6 +24,11 @@ Paxos 协议有一个很大的设计假设, 它要求支持多个投票, 也就�
 1. 可用性问题
 
 	如果采用 Paxos 协议, 当一台机器新上线的时候很快就能提供服务了, 因为不需要等前面的数据确认它就能提供服务, 但是如果使用的是 raft 协议, 需要等前面的所有日志确认以后才能提供服务???(不是应是新节点补全数据后才提供访问吗?).
+
+其实将分布式系统中如何对某个值达成一致可分解成3个子问题:
+1. 如何选主（Leader Election）
+1. 如何把数据复制到各个节点上（Entity Replication）
+1. 如何保证过程是安全的（Safety）
 
 raft属于 Multi-Paxos 算法, 但做了一些简化和限制, 它将问题分解为:
 - leader election : leader选举

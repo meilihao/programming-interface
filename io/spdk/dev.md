@@ -25,3 +25,12 @@ SPDK提供了一套编程框架 (SPDK Application Framework)，用于指导软�
 1. 对CPU core和线程的管理
 1. 线程间的高效通信
 1. I/O的的处理模型以及数据路径(data path)的无锁化机制
+
+## example
+- [全闪分布式存储之PureFlash](https://cloud.tencent.com/developer/article/2363606)
+- [ceph-nvmeof](https://github.com/ceph/ceph-nvmeof)
+- [openebs/mayastor](https://github.com/openebs/mayastor)
+
+## FAQ
+### spdk repo版本
+- [/include/spdk/version.h](https://github.com/spdk/spdk/blob/master/include/spdk/version.h)

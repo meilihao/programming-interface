@@ -61,6 +61,9 @@
 - [通过 SPDK NVMe/TCP 进行的应用设备队列 (ADQ) 性能测试](https://www.intel.cn/content/www/cn/zh/customer-spotlight/cases/performance-testing-adq-nvme-tcp-spdk.html)
 
     部分测试配置(没有测试步骤)
+- [SPDK 用户态 IO 多路径软件 SUMP (SPDK-USERSPACE-MULTI-PATH)](https://gitlab.eduxiji.net/202318123111333/project1466467-176092/-/tree/main/)
+
+    - [educg-net-17067-1466467/project1466467-2025](https://gitlab.eduxiji.net/educg-group-17067-1466467/202318123111333-2025/-/tree/main):代码没上面新, 但可衍生浏览的项目多
 
 ## ntb
 - [SmartIO: Zero-overhead Device Sharing through PCIe Networking](/misc/pdf/io/ntb_SmartIO.pdf)
@@ -151,6 +154,12 @@
 - [WFS 文件存储系统 v1.0.1 发布](https://www.oschina.net/news/281930/wfs-go-1-0-1-released)
 - [go-nvme: An NVME/TCP target and client(initiator) in pure go](https://github.com/thirdmartini/go-nvme)
 - [Storage Awesome](https://wener.me/notes/service/storage/awesome)
+- [1000行代码实现简单EBS](https://gitee.com/zstorage/blog/blob/master/huangyan/bdev.md)
+
+    用了LSM Tree
+- [蚂蚁集团去中心化的高性能存储服务 LiteIO 正式开源](https://www.infoq.cn/article/1lmblffvzjmetqkaxdmd)
+
+    - [liteio repo](https://github.com/eosphoros-ai/liteio)
 
 ## 多活
 - [双活数据中心解决方案技术白皮书](https://www-file.huawei.com/~/media/CNBG/Downloads/Product/IT/cn/%E5%8D%8E%E4%B8%BA%E4%B8%9A%E5%8A%A1%E8%BF%9E%E7%BB%AD%E6%80%A7%E5%AE%B9%E7%81%BE%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%20%E5%8F%8C%E6%B4%BB%E6%95%B0%E6%8D%AE%E4%B8%AD%E5%BF%83%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%E6%8A%80%E6%9C%AF%E7%99%BD%E7%9A%AE%E4%B9%A6_HyperMetro.pdf)
@@ -184,4 +193,11 @@
     - [华为云计算IE面试笔记-fusionstorage相对于传统集中式存储的优势？](https://www.cnblogs.com/LongShineW/p/15334488.html)
 
         [FusionStorage是2/3副本机制](https://www.cnblogs.com/LongShineW/p/15334488.html), OceanStor Dorado是raid
-- [<<数据存储技术与实践>>]()
+- [<<数据存储技术与实践>>]()\
+- [一文了解 SmartX 超融合替代可行性与迁移方案](https://www.smartx.com/blog/2022/12/smartx-vs-nutanix-2/)
+    条带
+- [zStorage架构的性能设计思考](https://zhuanlan.zhihu.com/p/687526393)
+    数据分区(类似ceph):条带
+- [浅析 VMware 与 SmartX 超融合 I/O 路径差异及其影响](https://www.smartx.com/blog/2022/11/io-locality-vs-vmware/)
+
+    条带
