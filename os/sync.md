@@ -1,4 +1,7 @@
 # 同步原语
+ref:
+- [基本功 | 一文讲清多线程和多线程同步](https://my.oschina.net/meituantech/blog/11585606)
+
 ## 互斥锁
 这种任意时刻只允许至多一个线程访问的方式被称为互斥访问(mutual exclusion), 而保证互斥访问共享资源的代码区域被称为临界区(critical section).
 

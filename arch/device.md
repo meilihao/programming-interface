@@ -361,6 +361,8 @@ root可使用 mknod 命令创建设备文件.
 - [Advanced Sector Format of Block Devices](https://www.thomas-krenn.com/en/wiki/Advanced_Sector_Format_of_Block_Devices)
 - [512e and 4Kn Disk Formats](https://i.dell.com/sites/csdocuments/Shared-Content_data-Sheets_Documents/en/512e_4Kn_Disk_Formats_120413.pdf)
 - [机械硬盘避坑大法：一文搞懂 PMR 和 SMR 有什么区别](https://www.ithome.com/0/436/608.htm)
+- [vSphere 6.5 新功能 — 支持 512e 硬盘](https://blogs.vmware.com/china/2017/11/07/vsphere-6-5-%E6%96%B0%E5%8A%9F%E8%83%BD-%E6%94%AF%E6%8C%81-512e-%E7%A1%AC%E7%9B%98/)
+- [Advanced Format](https://wiki.archlinux.org/title/Advanced_Format)
 
 对于大多数现代磁盘，逻辑扇区大小小于物理扇区大小是正常的(通过`fdisk -l /dev/sd<N>`获取), 这就是最常用的[高级格式磁盘512e](https://en.wikipedia.org/wiki/Advanced_Format)的实现方式.
 
