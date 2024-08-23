@@ -67,6 +67,15 @@ Linux 内核有 400 多个系统调用，它使用了一个函数指针数组，
 ### 关联syscall及其实现
 在编译的过程中，需要根据 syscall_32.tbl 和 syscall_64.tbl 生成自己的 unistd_32.h 和 unistd_64.h, 生成方式在 arch/x86/entry/syscalls/Makefile 中. 该过程会使用两个脚本，其中 arch/x86/entry/syscalls/syscallhdr.sh，会在文件中生成 #define __NR_open；而arch/x86/entry/syscalls/syscalltbl.sh，会在文件中生成 __SYSCALL(__NR_open, sys_open). 这样，unistd_32.h 和 unistd_64.h 是对应的系统调用号和系统调用实现函数之间的对应关系. 在文件 `arch/x86/entry/syscall_32.c|arch/x86/entry/syscall_64.c`，定义了这样一个表，里面 include 了这个头文件，从而所有的 sys_ 系统调用都在这个表里面了.
 
+## close
+    关闭fd
+
+    当最后一个引用某文件的fd关闭后, 在内核中表示该文件的数据结构就会被释放, 与文件关联的inode也会被清除.
+
+## creat
+
+    O_WRONLY|O_CREATO_TRUNC, 经常使用, 以至于有专门的该系统调用. 新架构在glibc中实现creat(), 该系统调用因兼容性而保留.
+
 ## fork
 ![](/misc/img/5uugf8fxqg.png)
 
@@ -216,37 +225,102 @@ dup2()调用会默然忽略 newfd 关闭期间出现的任何错误故此, 编�
 > dup3()系统调用完成的工作与 dup2()相同,只是新增了一个附加参数 flag, 该flag仅支持O_CLOEXEC(让内核为新文件描述符设置 close-on-exec标志(FD_CLOEXEC).
 > fcntl(oldfd, F_DUPFD, startfd)与dup()和 dup2()功能类似.
 
-## open
+## [open](https://man7.org/linux/man-pages/man2/open.2.html)
 打开文件, 返回文件描述符
 
+内核为每个进程维护一个打开文件的列表(file table), 该表通过文件描述符(file descriptors, fds, 非负整数)进行索引, 每项包含一个打开文件的信息, 比如一个指向文件inode的指针和元数据等.
+
+子进程默认会继承父进程的file table拷贝, 子进程该表的变化(比如关闭文件)不影响父进程的file table.
+
+每个进程默认至少有3个文件描述符:0(stdin), 1(stdout), 2(stderr), 除非显式关闭它们. c标准库提供STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO宏来取代直接使用这些整数.
+
+fds还可以表示设备, 管道, 目录, 套接字等.
+
 flags:
-- O_CREAT : 必要时创建文件
-- O_DIRECT : 使用Direct I/O
-- O_TRUNC : 清空文件
-- O_APPEND : 已追加方式打开文件
-- O_RDONLY : 只读打开
-- O_WRONLY : 只写打开
-- O_RDWR : 读写打开
-- O_RSYNC : 与 O_SYNC 标志或 O_DSYNC 标志配合一起使用的,将这些标志对写操作的作用结合到读操作中(在读操作前完成写操作).
-- O_DSYNC : 要求写操作按照 synchronized I/O data integrity completion 来执行(类似于fdatasync())
-- O_SYNC : 同步打开, 遵从 synchronized I/O file integrity completion(类似于 fsync()函数), 但对性能的影响极大.
-- O_NONBLOCK : 非阻塞打开
-	
-	若 open()调用未能立即打开文件,则返回错误,而非陷入阻塞. 有一种情况属于例外,调用 open()操作 FIFO 可能会陷入阻塞.
-	调用 open()成功后,后续的 I/O 操作也是非阻塞的. 若 I/O 系统调用未能立即完成,则可能会只传输部分数据,或者系统调用失败,并返回 EAGAIN 或 EWOULDBLOCK 错误.
-	管道、 FIFO、套接字、设备(比如终端、伪终端)都支持非阻塞模式.(因为无法通过 open()来获取管道和套接字的文件描述符,所以要启用非阻塞标志,就必须fcntl()的F_SETFL)
-	由于内核缓冲区保证了普通文件 I/O 不会陷入阻塞,故而打开普通文件时一般会忽略 O_NONBLOCK 标志. 然而,当使用强制文件锁时, O_NONBLOCK标志对普通文件也是起作用的.
+    - O_RDONLY/O_WRONLY/O_RDWR, 必选其一
+    - O_APPEND
+
+        文件将以追加模式打开, 每次写操作前, 文件位置指针会被置于文件末尾, 即使文件被多开且并发写.
+    - O_ASYNC
+
+        当指定文件可写或者可读时产生一个信号(默认是SIGIO), 仅用于终端和套接字.
+    - O_CREAT
+ 
+        当文件name不存在时, 由内核创建; 如果文件已存在, 忽略该flag, 除非存在O_EXCL.
+    - O_DIRECT
+ 
+        打开文件用于Direct I/O, 此时请求长度, 缓冲区对齐, 和文件偏移量都必须是设备扇区的整数倍.
+    
+    - O_DIRECTORY
+
+        如果name不是目录, open()会失败
+    - O_EXCL
+
+        和O_CREAT联用时, 如果文件name已存在, open()会失败, 用于防止文件创建时出现竞争
+
+    - O_LARGEFILE
+    
+        给定文件打开时将使用64位偏移量, 这样大于2G的文件也能被打开. 64位架构默认使用了该flag
+
+    - O_NOCTTY
+
+        如果给出的name是一个终端设备(即/dev/tty), 它将不会成为这个进程的控制终端, 即使该进程目前没有控制终端.
+
+    - O_NOFOLLOW
+
+        如果name是一个符号链接, open()会失败. 通常, 会解析该链接并打开目标文件. 如果给出路径的其他部分是链接, 该调用仍可用
+    - O_NONBLOCK
+
+        如果可以, 文件将在非阻塞模式下打开. open() 或返回的文件描述符上的任何后续 I/O 操作都不会导致进程在I/O中阻塞(sleep). 只用于FIFO
+
+		若 open()调用未能立即打开文件,则返回错误,而非陷入阻塞. 有一种情况属于例外,调用 open()操作 FIFO 可能会陷入阻塞.
+		调用 open()成功后,后续的 I/O 操作也是非阻塞的. 若 I/O 系统调用未能立即完成,则可能会只传输部分数据,或者系统调用失败,并返回 EAGAIN 或 EWOULDBLOCK 错误.
+		管道、 FIFO、套接字、设备(比如终端、伪终端)都支持非阻塞模式.(因为无法通过 open()来获取管道和套接字的文件描述符,所以要启用非阻塞标志,就必须fcntl()的F_SETFL)
+		由于内核缓冲区保证了普通文件 I/O 不会陷入阻塞,故而打开普通文件时一般会忽略 O_NONBLOCK 标志. 然而,当使用强制文件锁时, O_NONBLOCK标志对普通文件也是起作用的.
+    - O_SYNC
+
+        打开文件用于同步I/O. 在数据写入存储前写操作不会完成. **一般的读操作已是同步, 因此对读操作无影响**. POSIX额外定义了O_DSYNC和O_RSYNC, 在linux上, 它们等同O_SYNC
+
+        O_SYNC会使总耗时增加一到两个数量级
+    O_TRUNC:
+
+        如果文件存在, 且是普通文件, 并允许写, 文件长度会被截断为0. 对FIFO或终端设备, 该flag会被忽略; 在其他文件类型上则没定义.
+
+[mode定义](https://www.gnu.org/software/libc/manual/html_node/Permission-Bits.html):
+- S_IRWXU 00700权限 = S_IRUSR | S_IWUSR | S_IXUSR，代表该文件所有者拥有读，写和执行操作的权限
+- S_IRUSR(S_IREAD) 00400权限，代表该文件所有者拥有可读的权限
+- S_IWUSR(S_IWRITE) 00200权限，代表该文件所有者拥有可写的权限
+- S_IXUSR(S_IEXEC) 00100权限，代表该文件所有者拥有执行的权限
+- S_IRWXG 00070权限 = S_IRGRP | S_IWGRP | S_IXGRP，代表该文件用户组拥有读，写和执行操作的权限
+- S_IRGRP 00040权限，代表该文件用户组拥有可读的权限
+- S_IWGRP 00020权限，代表该文件用户组拥有可写的权限
+- S_IXGRP 00010权限，代表该文件用户组拥有执行的权限
+- S_IRWXO 00007权限 = S_IROTH | S_IWOTH | S_IXOTH，代表其他用户拥有读，写和执行操作的权限
+- S_IROTH 00004权限，代表其他用户拥有可读的权限
+- S_IWOTH 00002权限，代表其他用户拥有可写的权限
+- S_IXOTH 00001权限，代表其他用户拥有执行的权限
+- S_ISUID : This is the set-user-ID on execute bit, usually 04000. See How Change Persona. 
+- S_ISGID : This is the set-group-ID on execute bit, usually 02000. See How Change Persona. 
+- S_ISVTX : This is the sticky bit, usually 01000.
+
+文件的最终权限是`mode&~umask`的结果.
 
 在glibc/intl/loadmsgcat.c, open 只是宏，实际工作的是 `__open_nocancel` 函数，其中会用 INLINE_SYSCALL_CALL 宏经过一系列替换，最终根据参数的个数替换成相应的 `internal_syscall##nr 宏`.
 
 ## sync()
-使包含更新文件信息的所有内核缓冲区(即数据块、指针块、元数据等)刷新到磁盘上. 在 Linux 实现中,sync()调用仅在所有数据已传递到磁盘上(或者至少高速缓存)时返回.
+使包含更新文件信息的所有内核缓冲区(即数据块、指针块、元数据等)刷新到磁盘上. 标准中没要求sync()是同步的, 但在 Linux 实现中,sync()调用仅在所有数据已传递到磁盘上(或者至少高速缓存)时返回.
+
+ > sync命令会使用`sync()`(I/O繁忙的系统上可能需要更长时间, 比如十几分钟), 但应用则使用fsync()和fdatasync().
 
 ## fsync()
-将使缓冲数据和与打开文件描述符 fd 相关的所有元数据都刷新到磁盘上. 调用 fsync()会强制使文件处于 [Synchronized I/O file integrity completion](/io/io.md) 状态.
+将fd的脏数据(缓冲数据和与打开文件描述符 fd 相关的所有元数据)都刷新到磁盘上(也可能在磁盘的缓存上), 同步请求. 调用 fsync()会强制使文件处于 [Synchronized I/O file integrity completion](/io/io.md) 状态.
+
+fsync()和fdatasync()能保证文件数据已写入磁盘, 但不一定确保包含该文件的目录项已写入磁盘, 推荐对该目录本身调用fsync().
+
+posix标准中fsync()是必须的, fdatasync()可选. 部分特殊fs可能只实现了fdatasync()
 
 ## fdatasync()
-类似于fsync(), 只是强制文件处于 synchronized I/O dataintegrity completion 的状态.
+类似于fsync(), 但不包括元数据, 只是强制文件处于 synchronized I/O dataintegrity completion 的状态.
 
 ## posix_fadvise()
 调用允许进程就自身访问文件数据时可能采取的模式通知内核:
@@ -280,7 +354,7 @@ O_APPEND、O_NONBLOCK、O_NOATIME、O_ASYNC 和 O_DIRECT. 系统将忽略对其�
 标志的修改操作. 但有些其他的 UNIX 实现允许 fcntl()修改其他标志,如 O_SYNC.
 
 ## pread()和 pwrite()
-完成与 read()和 write()相类似的工作,只是前两者会在 offset 参数所指定的位置进行文件 I/O 操作,而非始于文件的当前偏移量处,且它们不会改变文件的当前偏移量.
+完成与 read()和 write()相类似的工作,只是前两者会在 offset 参数所指定的位置进行文件 I/O 操作,而非始于文件的当前偏移量处,且**它们不会改变文件的当前偏移量**.
 
 对 pread()和 pwrite()而言,fd 所指代的文件必须是可定位的(即允许对文件描述符执行lseek()调用).
 
@@ -289,14 +363,24 @@ O_APPEND、O_NONBLOCK、O_NOATIME、O_ASYNC 和 O_DIRECT. 系统将忽略对其�
 ## lseek
 `lseek(fd, -5, SEEK_CUR)` # 将文件指针从当前位置前移5个B
 
+    更新文件指针位置
+
+    - SEEK_CUR: 当前位置+pos. 当pos=0, 返回当前位置
+    - SEEK_END: 文件长度+pos. 当pos=0, 返回末尾位置
+    - SEEK_SET: 设置位置为pos. 当pos=0, 返回起始位置
+
+    lseek()可用于创建空洞即稀疏文件
+
+    linux提供了两种read()和write()的变体来代替lseek(): pread()和pwrite(), 且它们不修改文件位置, 避免在使用lseek()时出现潜在竞争.
+
 ## preadv()和 pwritev()
 
 所执行的任务与 readv()和 writev()相同,但执行 I/O 的位置将由 offset 参数指定(类似于 pread()和 pwrite()系统调用).
 
 ## truncate()和 ftruncate()
-若文件当前长度大于参数 length,调用将丢弃超出部分,若小于参数 length,在linux上调用将在文件尾部添加一系列空字节.
+若文件当前长度大于参数 length,调用将丢弃超出部分,若小于参数 length,在linux上调用将在文件尾部添加一系列空字节即空洞
 
-ftruncate()不会修改文件偏移量.
+truncate()/ftruncate()不会修改文件偏移量.
 
 ## mkstemp()和 tmpfile()
 mkstemp()函数基于模板(模板参数采用路径名形式,其中最后 6 个字符必须为 XXXXXX, 这 6 个字符将被替换, 以保证文件名的唯一性,且修改后的字符串将通过 template 参数传回)生成一个唯一文件名并打开该文件,返回一个可用于 I/O 调用的文件描述符.
@@ -318,6 +402,26 @@ pathconf()和 fpathconf()之间唯一的区别在于对文件或目录的指定�
 lstat()所返回的信息针对的是符号链接自身(而非符号链接所指向的文件).
 
 系统调用stat()和lstat()无需对其所操作的文件本身拥有任何权限,但针对指定pathname 的父目录要有执行(搜索)权限.
+
+## read
+
+返回情况:
+- 0, EOF
+- 阻塞了, 因为没有可读取的数据. 这在非阻塞模式下不会发生
+- -1 + errno=EINTR: 当它未读取到任何一个字节前被一个信号打断, 需要重试
+- -1 + errno=EAGAIN: 读取会因没有可用的数据而阻塞, 读请求应该在之后重试, 只在非阻塞模式下发生
+- -1 + errno=其他值, 有错误
+
+## write()
+
+返回:
+- -1: 错误, 检查errno
+
+	errno:
+	- EAGAIN: 重试
+- nr < count: 可能的错误, errno未设置
+
+如果count>SSIZE_MAX, write()结果是未定义的
 
 ## utimensat()系统调用 和 futimens()库函数
 纳秒级精度设置时间戳.

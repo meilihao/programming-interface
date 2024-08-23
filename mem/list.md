@@ -19,6 +19,7 @@
 	ION是Android为了解决碎片化而引入的内存管理器,可以支持不同的内存分配方式. 在内核和用户空间中都可以使用它管理内存.
 
 ## next
+- [解读 Linux 内存管理新特性 Memory folios](https://cloud.tencent.com/developer/news/1159073)
 - [观察进程的内存占用情况](https://www.cnblogs.com/bravery/archive/2012/06/27/2560611.html)
 - [Linux 内核将弃用并删除 SLOB 内存分配器](https://www.oschina.net/news/217107/linux-wants-to-drop-slob)
 

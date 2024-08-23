@@ -181,6 +181,14 @@
 
 ## 路由
 - [VRF](https://tonydeng.github.io/sdn-handbook/linux/vrf.html)
+- [inux下策略路由的实现](https://abcdxyzk.github.io/blog/2018/07/23/kernel-ip_rule/)
+
+    在Linux下，策略性路由是由RPDB实现的, 主要文件:
+    - fib_hash.c
+    - fib_rules.c
+    - fib_sematic
+    - fib_frontend.c
+    - route.c
 
 ## 限速
 - [网卡限速 by github.com/magnific0/wondershaper (use tc)](https://www.cnblogs.com/Dy1an/p/12170515.html)
@@ -191,6 +199,7 @@
 ## 资源
 - [www.IPv6Plus.net/resources](https://github.com/IPv6Plus/IPv6Plus.github.io)
 - [跟着百哥学网络](https://www.bilibili.com/video/BV1bu4y1J76W)
+- [**图解网络**](https://www.xiaolincoding.com/network/)
 
 ## 产品
 - [分布式存储 ZBS 的自主研发之旅｜接入协议之 NVMe-oF](https://www.smartx.com/blog/2023/02/zbs-nvmeof/)

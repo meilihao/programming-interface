@@ -2746,6 +2746,8 @@ pci设备的resource文件,如果以_wc结尾,映射该文件得到的内存是W
 
 ## swap
 ### swappiness
+swappiness默认60, 较高时倾向于在内存中保留页缓存, 较低时更倾向于清理也缓存而不是进行交换.
+
 当kernel想释放一个分页时, 由两种选择:
 1. 从进程的内存中换出一个分页(swap_tendency >= 100)
 1. 从cache中丢弃一个分页(swap_tendency < 100)

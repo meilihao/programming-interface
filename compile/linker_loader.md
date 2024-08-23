@@ -7,7 +7,11 @@ linker和loader的最基本作用: 将更抽象的名字和更底层的名字绑
 
 ABI(Application Binary Interface)会影响ld的过程调用标准(Procedure Call Standard), 比如arm的APCS.
 
-> ABI定义了程序间二进制可移植性的标准.
+ABI定义了程序间二进制可移植性的标准. 它主要关注的问题有调用约定, 字节序, 寄存器使用, 系统调用, 链接, 库行为和二进制格式.
+
+> linux仅力图兼容两个最广泛的标准:POSIX和Single Unix Specification(SUS). 所有的核心POSIX标准简称为POSOX.1, 新版SUS已合并了POSIX标准, 因此SUS是POSOX.1的超集.
+
+> 不同linux发行版被linux基本规范(LSB)所标准化, 它扩展了POSIX和SUS, 添加了自己的标准.
 
 ```bash
 $ cat m.c
