@@ -1,4 +1,7 @@
 # list
+## base
+- [Linux文件系统十问](https://cloud.tencent.com/developer/article/1963183)
+
 ## zfs
 - [ZFS源代码剖析](https://docs.google.com/document/d/1mEp7qxAPCpjqjXQDaYtOQNMk8d5DSbob1DxlK9SIbkY/edit?pli=1)
 - [ZFS源代码之旅——ZAP模块分析（一）](https://blog.csdn.net/nofrish/article/details/7470972)

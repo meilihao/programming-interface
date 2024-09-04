@@ -201,3 +201,6 @@
 - [浅析 VMware 与 SmartX 超融合 I/O 路径差异及其影响](https://www.smartx.com/blog/2022/11/io-locality-vs-vmware/)
 
     条带
+
+## 硬件
+- [阿里平头哥主控终于量产！忆恒创源发布PBlaze7 7A40系列PCIe 5.0 SSD](https://news.mydrivers.com/1/1001/1001037.htm)

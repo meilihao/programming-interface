@@ -16,6 +16,9 @@
 - [bpf_study](https://github.com/DavadDi/bpf_study)
 
 ## kernel
+- [coder-kung-fu](https://github.com/yanfeizhang/coder-kung-fu)
+
+	- [深入理解Linux进程与内存](https://blog.csdn.net/weixin_51484460/article/details/141427807)
 - [linux_kernel_wiki](https://github.com/0voice/linux_kernel_wiki)
 - [linux-insides-zh](https://github.com/hust-open-atom-club/linux-insides-zh)
 - [《Linux 内核编码风格》官方手册最新中译本](https://linux.cn/article-13494-1.html)
