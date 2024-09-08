@@ -333,3 +333,167 @@ ip_local_deliver_finish 从数据包中读取协议，寻找注册在这个协�
 - tcp_v4_rcv : from tcp_protocol
 - udp_rcv : from udp_protocol
 - icmp_send
+
+## 内核与用户进程的协助
+在协议栈接收处理完输入包以后,要能通知到用户进程,让用户进程能够
+收到并处理这些数据, 两者的配合有很多种方案, 常见的有:
+1. 同步阻塞
+
+    一般在client端使用, 编程友好, 但性能差
+
+    > exmaple: java bio
+1. 多路IO复用
+
+    linux的epoll, 编写不直观, 但性能突出, 特别适用于高并发场景
+
+    > exmaple: java nio
+
+### socket
+`int sk = socket(AF_INET, SOCK_STREAM, 0);`调用成功后, 用户层面看到返回的是一个整数型的句柄,但其实内核在内部创建了一系列的socket相关的内核对象.
+
+![](/misc/img/net/socket_objects.png)
+
+实现:
+1. [`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1718)
+1. [`sock_create(family, type, protocol, &sock);`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1659)
+
+    sock create是创建socket的主要位置,其中sock_create 又调用了__sock_create
+1. [__sock_create](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1500)
+
+    首先调用sock_alloc来分配一个struct sock内核对象, 接着获取协议族的操作函数表 by `rcu_dereference(net_families[family])`, 并调用其create方法. 对于AF_INET协议族来说,执行到的是inet_create()
+
+1. [inet_create()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L251)
+
+    ```c
+    ...
+    sock->ops = answer->ops; // 将inet_stream_ops 赋到socket->ops
+	answer_prot = answer->prot; // 获得 tcpprot
+	answer_flags = answer->flags;
+	rcu_read_unlock();
+
+	WARN_ON(!answer_prot->slab);
+
+	err = -ENOMEM;
+	sk = sk_alloc(net, PF_INET, GFP_KERNEL, answer_prot, kern); // 分配 sock对象,并把 tCp_prot 赋到sock->sk_prot 上
+	if (!sk)
+		goto out;
+
+	err = 0;
+	if (INET_PROTOSW_REUSE & answer_flags)
+		sk->sk_reuse = SK_CAN_REUSE;
+
+	if (INET_PROTOSW_ICSK & answer_flags)
+		inet_init_csk_locks(sk);
+
+	inet = inet_sk(sk);
+	inet_assign_bit(IS_ICSK, sk, INET_PROTOSW_ICSK & answer_flags);
+
+	inet_clear_bit(NODEFRAG, sk);
+
+	if (SOCK_RAW == sock->type) {
+		inet->inet_num = protocol;
+		if (IPPROTO_RAW == protocol)
+			inet_set_bit(HDRINCL, sk);
+	}
+
+	if (READ_ONCE(net->ipv4.sysctl_ip_no_pmtu_disc))
+		inet->pmtudisc = IP_PMTUDISC_DONT;
+	else
+		inet->pmtudisc = IP_PMTUDISC_WANT;
+
+	atomic_set(&inet->inet_id, 0);
+
+	sock_init_data(sock, sk); // 对sock对象进行初始化
+    ...
+    ```
+
+    在inet_create中,根据类型SOCK_STREAM查找到对于TCP定义的操作方法实现集合inet_stream_ops和tcp_prot, 并把它们分别设置到socket->ops和sock->sk_prot上.
+
+    [sock_init_data()](https://elixir.bootlin.com/linux/v6.8/source/net/core/sock.c#L3427)将sock中的sk_data_ready函数指针进行了初始化, 设置为默认sock_defr_eadable.
+
+    当软中断上收到数据包时会通过调用sk_data_ready函数指针来唤醒在sock上等待的进程.
+    
+    至此,一个tcp对象(AF_INET协议族下的SOCK_STPEAM对象)就算创建完成了.
+
+### 同步阻塞
+![](/misc/img/net/BIO.png)
+
+![](/misc/img/net/recvfrom.png)
+
+libc recv会执行recvfrom系统调用. 进入系统调用后,用户进程就进入了内核态,执行一系列的内核协议层函数,然后到socket对象的接收队列中查看是否有数据,没有的话就把自己添加到socket对应的等待队列里. 最后让出CPU,操作系统会选择下一个就绪状态的进程来执行.
+
+> 重点是recvfrom最后是怎么把自己的进程阻塞掉的(假如没有使用O NONBLOCK标记)
+
+实现:
+- [`SYSCALL_DEFINE6(recvfrom, ...)`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L2256)
+
+    ```c
+    ...
+    sock = sockfd_lookup_light(fd, &err, &fput_needed); // 根据用户传入的fd找到socket对象
+	if (!sock)
+		goto out;
+
+	if (sock->file->f_flags & O_NONBLOCK)
+		flags |= MSG_DONTWAIT;
+	err = sock_recvmsg(sock, &msg, flags);
+    ...
+    ```
+1. [sock_recvmsg_nosec](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1043)
+
+    调用socket对象Ops里的recvmsg即inet_recvmsg()
+1. [inet_recvmsg()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L872)
+
+    `INDIRECT_CALL_2(sk->sk_prot->recvmsg,...)`: 调用socket对象里的sk_prot下的recvmsg方法, 即tcp_recvmsg()
+1. [tcp_recvmsg()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp.c#L2562)
+
+1. [tcp_recvmsg_locked()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp.c#L2317)
+
+    ```c
+    ...
+    do {
+		...
+		skb_queue_walk(&sk->sk_receive_queue, skb) { // 遍历接收队列接收数据
+			...
+		}
+
+        ...
+
+		if (copied >= target) {
+			/* Do not sleep, just process backlog. */
+			__sk_flush_backlog(sk);
+		} else { // 没有收到足够数据, 启用sk_wait_data阻塞当前进程
+			tcp_cleanup_rbuf(sk, copied);
+			err = sk_wait_data(sk, &timeo, last);
+			if (err < 0) {
+				err = copied ? : err;
+				goto out;
+			}
+		}
+    ...
+    ```
+
+    [sk_wait_data](https://elixir.bootlin.com/linux/v6.8/source/net/core/sock.c#L3013):
+    ```c
+    int sk_wait_data(struct sock *sk, long *timeo, const struct sk_buff *skb)
+    {
+        DEFINE_WAIT_FUNC(wait, woken_wake_function); // 当前进程(current)关联到所定义的等待队列项上
+        int rc;
+
+        add_wait_queue(sk_sleep(sk), &wait); // 调用sk_sleep获取sock对象下的wait
+        sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk); // 准备挂起,将进程状态设置为可打断 (INTERRUPTIBLE)
+        rc = sk_wait_event(sk, timeo, skb_peek_tail(&sk->sk_receive_queue) != skb, &wait); // 通过调用schedule timeout让出CPU,然后进行睡眠
+        sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+        remove_wait_queue(sk_sleep(sk), &wait);
+        return rc;
+    }
+    ```
+
+    ![/misc/img/net/](socket_block.png)
+
+    sk_wait_data实现:
+    1. 首先用DEFINE_WAIT_FUNCT宏定义了一个等待队列项wait, 在这个新的等待队列项上, 注册了回调函数woken_wake_function, 并把当前进程描述符current关联到其private成员上
+    1. 调用[sk_sleep](https://elixir.bootlin.com/linux/v6.8/source/include/net/sock.h#L2062)获取sock对象下的等待队列列表头wait_queue_head_t.
+    1. 调用add_wait_queue来把新定义的等待队列项wait插入sock对象的等待队列
+
+        这样后面当内核收完数据产生就绪事件的时候,就可以查找socket等待队列上的等待项,进而可以找到回调⻄数和在等待该socket就绪事件的进程了
+    1. 调用sk_wait_event让出CPU,进程将进入睡眠状态,这会导致一次进程上下文的开销,而这个开销是昂贵的,大约需要消耗几个微秒的CPU时间

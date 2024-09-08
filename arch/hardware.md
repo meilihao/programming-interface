@@ -314,3 +314,9 @@ RISC-V 架构定义了一些控制和状态寄存器( Control and Status Regist�
 RISC-V 架构目前虽然还没有定型的矢量( Vector )指令子集,但是从目前的草案中看, RISC-V 架构将使用可变长度的矢量, 而不是矢量定长的 SIMD 指 令集( 例如ARM 的 NEON 和 Intel 的 M孔1X ),从而能够灵活地支持不同的实现.
 
 RISC -V 架构支持第三方的扩展. 用户可以扩展自己的指令子集, RISC-V 预留了大量的指令编码空间用于用户的自定义扩展,同时还定义了 4条 Custom 指令可供用户直接使用.
+
+## bmc
+ref:
+- [OpenBMC 成服务器固件发展的 “事实标准”](https://www.oschina.net/news/310712)
+
+    阿里云自 2020 年逐步采用 OpenBMC 产品，通过四年的探索与实践，已经在 x86 和 ARM 平台中实现 OpenBMC 替代，并计划未来支持 RISC-V 等多元芯片平台
