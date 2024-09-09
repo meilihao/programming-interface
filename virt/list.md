@@ -5,6 +5,7 @@
 - [详解ZStack 高性能网络方案以及性能对比测试](https://www.zstack.io/recentnews/marketing_voice/2022/0704/2391.html)
 
 ## driver
+- [虚拟化技术 — VirtIO 虚拟设备接口标准](https://mp.weixin.qq.com/s?__biz=MzI3MDM0NjU3MA==&mid=2247486117&idx=1&sn=6ed2b543774e553093e33d29f8658e1f&chksm=ead33a80dda4b39609813bd1baffa9a4b45bc75284100d51eab6251ca1628e9494be78408caa&token=751397496&lang=zh_CN&scene=21#wechat_redirect)
 - [qemu backend block device driver in practice by qingcloud](/misc/pdf/virt/qingcloud_block_device_driver.pdf)
 
 ## image
