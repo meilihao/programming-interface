@@ -855,10 +855,14 @@ send过程
 
 1. 邻居子系统
 
-    [neigh_output()](https://elixir.bootlin.com/linux/v6.8/source/include/net/neighbour.h#L529)->[neigh_hh_output()](https://elixir.bootlin.com/linux/v6.8/source/include/net/neighbour.h#L489)->dev_queue_xmit()
+    [neigh_output()](https://elixir.bootlin.com/linux/v6.8/source/include/net/neighbour.h#L529)->[neigh_hh_output()](https://elixir.bootlin.com/linux/v6.8/source/include/net/neighbour.h#L489)/[neigh_resolve_output](https://elixir.bootlin.com/linux/v6.8/source/net/core/neighbour.c#L1543)->dev_queue_xmit()
 1.  网络设备子系统
 
-    [dev_queue_xmit()](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L3166) ->[__dev_queue_xmit()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L4259)-> [dev_hard_start_xmit()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3553)->xmit_one()->[netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L4994)->[__netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L4981)的`ops->ndo_start_xmit(skb, dev)`
+    [dev_queue_xmit()](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L3166) ->[__dev_queue_xmit()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L4259)
+    
+    __dev_queue_xmit:
+    - 有队列: [__dev_xmit_skb](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3748)->[__qdisc_run](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L410)->[qdisc_restart](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L388)->[sch_direct_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L314)->[dev_hard_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3553)
+    - 没有队列: [dev_hard_start_xmit()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3553)->xmit_one()->[netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L4994)->[__netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L4981)的`ops->ndo_start_xmit(skb, dev)`
 
 1. 驱动
 
@@ -1096,9 +1100,199 @@ nf_hook的dst_output会执行`skb_dst(skb)->output`即此函数会找到这个sk
 
 所以避免分片既杜绝了分片开销,也大大降低了重传率.
 
-ip_finish_output2会将包发给邻居子系统的neigh_output.
+ip_finish_output2通过[ip_neigh_for_gw()](https://elixir.bootlin.com/linux/v6.8/source/include/net/route.h#L373)->[__ipv4_neigh_lookup_noref](https://elixir.bootlin.com/linux/v6.8/source/include/net/arp.h#L22)(其第二个参数传入的是路由下一跳ip信息)查找arp, 如果找不到,则调用__neigh_create创建一个邻居, 然后将包发给邻居子系统的neigh_output.
 
 邻居子系统(`/net/core/neighbour.c`)是位于网络层和数据链路层中间的一个系统,其作用是为网络层提供个下层的封装,让网络层不必关心下层的地址信息,让下层来决定发送到哪个 MAC地址.
 
 在邻居子系统里主要查找或者创建邻居项,在创建邻居项的时候,有可能会发出实际的arp请求, 然后封装MAC 头,将发送过程再传递到更下层的网络设备子系统.
 
+有了邻居项以后, 此时仍然不具备发送ip报文的能力,因为目的MAC地址还未获取. 调用neigh_output继续传递skb by `READ_ONCE(n->output)(n, skb)`.
+
+n->output实际指向的是[neigh_resolve_output](https://elixir.bootlin.com/linux/v6.8/source/net/core/neighbour.c#L1543). 在这个函数内部有可能发出arp请求(by neigh_event_send)
+
+当获取到硬件MAC地址以后,就可以封装skb的MAC头了. 最后调用dev_queue_xmit将skb传递给Linux网络设备子系统.
+
+[dev_queue_xmit()](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L3166)->[__dev_queue_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L4259).
+
+__dev_queue_xmit:
+```c
+int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
+{
+	...
+
+	if (!txq)
+		txq = netdev_core_pick_tx(dev, skb, sb_dev); // 选择发送队列
+
+	q = rcu_dereference_bh(txq->qdisc); // 获取与此队列关联的排队规则
+
+	trace_net_dev_queue(skb);
+	if (q->enqueue) { // 如果有队列, 则__dev_xmit_skb继续处理
+		rc = __dev_xmit_skb(skb, q, dev, txq);
+		goto out;
+	}
+
+    // 没有队列的是回环设备和隧道设备
+	...
+}
+EXPORT_SYMBOL(__dev_queue_xmit);
+```
+
+netdev_core_pick_tx()发送队列的选择受XPS等配置的影响,而且还有缓存.
+
+大部分的设备都有队列(回环设备和隧道设备除外),所以现在进入[__dev_xmit_skb](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3748).
+
+__dev_xmit_skb有两套逻辑: 一种是可以bypass(绕过)排队系统,另外一种是正常排队(可通过tc命令查看).
+
+正常排队:
+```c
+rc = dev_qdisc_enqueue(skb, q, &to_free, txq); // 入队
+__qdisc_run(q); // 开始发送
+```
+
+[__qdisc_run](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L410):
+```c
+void __qdisc_run(struct Qdisc *q)
+{
+	int quota = READ_ONCE(dev_tx_weight);
+	int packets;
+
+    //循环从队列取出一个skb并发送
+	while (qdisc_restart(q, &packets)) {
+		quota -= packets;
+		if (quota <= 0) {
+			if (q->flags & TCQ_F_NOLOCK)
+				set_bit(__QDISC_STATE_MISSED, &q->state);
+			else
+				__netif_schedule(q); //将触发一次NET_TX_SOFTIRQ类型softirq
+
+			break;
+		}
+	}
+}
+```
+
+__qdisc_run()占用的是用户进程的系统态时间(sy). 只有当quota用尽的时候才触发软中断进行发送.
+
+所以这就是为什么`/proc/softirqs`,一般NET_RX都要比NET_TX大得多的第二个原因. 对于接收来说, 都要经过 NET_RX软中断,而对于发送来说,只有系统
+态配额用尽才让软中断上.
+
+[qdisc_restart](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L388) 通过`skb = dequeue_skb(q, &validate, packets)`取出skb再调用[sch_direct_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/sched/sch_generic.c#L314)->[dev_hard_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3553)
+
+因此__qdisc_run有两种发送途径: 1, 直接发送; 2, 通过软中断发送
+
+发送网络包的时候系统态CPU用尽了, 会调用[__netif_schedule](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3100)触发一个软中断. 该函数会进入[__netif_reschedule](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3086), 此时软中断能访问到的softnet_data设置了要发送的数据队列,添加到output_queue里, 紧接着触发了NET_TX_SOFTIPRQ类型的软中断.
+
+软中断是由内核线程来运行的, 会进入net_tx_action(), 在该函数中能获取发送队列, 并也最终调用到驱动程序里的入口函数dev_hard_start_xmit.
+
+进入[net_tx_action()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L5125)后发送数据消耗的CPU就都显示在si里, 不会消耗用户进程的系统时间.
+
+net_tx_action:
+```c
+static __latent_entropy void net_tx_action(struct softirq_action *h)
+{
+	struct softnet_data *sd = this_cpu_ptr(&softnet_data); // 通过softnet_data获取发送队列
+
+	...
+
+	if (sd->output_queue) { //如果output_queue上有qdisc. 之前进程内核态在调用__netif_reschedlule的时候把发送队列写到softnet_data的output_queue里了
+		struct Qdisc *head;
+
+		local_irq_disable();
+		head = sd->output_queue; // 将head指向第一个qdisc
+		sd->output_queue = NULL;
+		sd->output_queue_tailp = &sd->output_queue;
+		local_irq_enable();
+
+		rcu_read_lock();
+
+		while (head) { // 遍历qdsics列表
+			struct Qdisc *q = head;
+			spinlock_t *root_lock = NULL;
+
+			head = head->next_sched;
+
+			/* We need to make sure head->next_sched is read
+			 * before clearing __QDISC_STATE_SCHED
+			 */
+			smp_mb__before_atomic();
+
+			if (!(q->flags & TCQ_F_NOLOCK)) {
+				root_lock = qdisc_lock(q);
+				spin_lock(root_lock);
+			} else if (unlikely(test_bit(__QDISC_STATE_DEACTIVATED,
+						     &q->state))) {
+				/* There is a synchronize_net() between
+				 * STATE_DEACTIVATED flag being set and
+				 * qdisc_reset()/some_qdisc_is_busy() in
+				 * dev_deactivate(), so we can safely bail out
+				 * early here to avoid data race between
+				 * qdisc_deactivate() and some_qdisc_is_busy()
+				 * for lockless qdisc.
+				 */
+				clear_bit(__QDISC_STATE_SCHED, &q->state);
+				continue;
+			}
+
+			clear_bit(__QDISC_STATE_SCHED, &q->state);
+			qdisc_run(q); // 发送数据
+			if (root_lock)
+				spin_unlock(root_lock);
+		}
+
+		rcu_read_unlock();
+	}
+
+	xfrm_dev_backlog(sd);
+}
+```
+
+qdisc_run()->_ qdisc_ run(), 之后逻辑同上.
+
+dev_hard_start_xmit->[xmit_one](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3536)->[netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L3536)->[__netdev_start_xmit](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L4981)的`ops->ndo_start_xmit(skb, dev)`
+
+ndo_start xmit是网卡驱动要实现的一个函数,是在net_device_ops中定义的. 在igb网卡驱动源码中找到了net_device_ops函数是igb_xmit_frame. 在该函数里, 会将skb挂到RingBuffer上, 驱动调用完毕,数据包将真正从网卡发
+送出去.
+
+igb_xmit_frame->[igb_xmit_frame_ring](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/ethernet/intel/igb/igb_main.c#L6460)->[igb_tx_map](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/ethernet/intel/igb/igb_main.c#L6207)
+
+igb_tx_map将skb数据映射到网卡可访问的内存DMA区域.
+
+igb_tx_map:
+```c
+static int igb_tx_map(struct igb_ring *tx_ring,
+		      struct igb_tx_buffer *first,
+		      const u8 hdr_len)
+{
+	...
+
+	tx_desc = IGB_TX_DESC(tx_ring, i); // 获取下一个可用描述符指针
+
+	igb_tx_olinfo_status(tx_ring, tx_desc, tx_flags, skb->len - hdr_len);
+
+	size = skb_headlen(skb);
+	data_len = skb->data_len;
+
+	dma = dma_map_single(tx_ring->dev, skb->data, size, DMA_TO_DEVICE); // 为skb->data构造内存映射, 以允许设备通过DMA从ram中读取数据
+
+	tx_buffer = first;
+
+	for (frag = &skb_shinfo(skb)->frags[0];; frag++) { // 遍历该数据包的所有分片, 为skb的每个分片生成有效映射
+		...
+	}
+
+	/* write last descriptor with RS and EOP bits */ // 设置最后一个descriptor
+	cmd_type |= size | IGB_TXD_DCMD;
+	tx_desc->read.cmd_type_len = cpu_to_le32(cmd_type);
+
+	...
+}
+```
+
+当所有需要的描述符都已建好,且skb的所有数据都映射到DMA地址后,驱动就会进入到它的最后一步,触发真实的发送.
+
+当数据发送完以后,其实工作并没有结束, 因为内存还没有清理. 当发送完成的时候,网卡设备会触发一个硬中断来释放内存.
+
+**无论硬中断是因为有数据要接收,还是发送完成通知, 从硬中断触发的软中断都是NET_RX_SOFTIRQ. 它是软中断统计中RX要高于TX的一个原因**.
+
+[igb_clean_tx_irq](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/ethernet/intel/igb/igb_main.c#L8255)清理了skb, 解除了DMA映射, 到了这一步,传输才算是基本完成了. 因为传输层需要保证可靠性,所以其实skb还没有删除. 它得等收到对方的ACK之后才会真正删除,那个时候才算彻底发送
+完毕.
