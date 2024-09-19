@@ -1296,3 +1296,63 @@ static int igb_tx_map(struct igb_ring *tx_ring,
 
 [igb_clean_tx_irq](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/ethernet/intel/igb/igb_main.c#L8255)清理了skb, 解除了DMA映射, 到了这一步,传输才算是基本完成了. 因为传输层需要保证可靠性,所以其实skb还没有删除. 它得等收到对方的ACK之后才会真正删除,那个时候才算彻底发送
 完毕.
+
+相关疑问:
+1. 在监控内核发送数据消耗的CPU时,应该看sy还是si?
+
+    在网络包的发送过程中,用户进程(在内核态) 完成了绝大部分的工作,甚至连调用驱动的工作都干了. 只当内核态进程被切走前才会发起软中断. 发送过程中,绝大部分(90%)以上的开销都是在用户进程内核态消耗掉的.
+
+    只有一少部分情况才会触发软中断 (NET_TX类型),由软中断 ksoftirad内核线程来发送.
+
+    所以,在监控网络IO对服务器造成的CPU开销的时候,不能仅看si,而是应该把sisy都考虑进来.
+1. `/proc/softirqs`,为什么NET_RX要比NET_TX大得多的多?
+
+    1. 当数据发送完以后,通过硬中断的方式来通知驱动发送完毕. 但是硬中断无论是有数据接收,还是发送完毕,触发的软中断都是NET_RX_SOFTIRQ,并不是NET_TX_SOFTIRQ.
+    1. 对于读来说,都是要经过NET_Rx软中断的,都走ksoftiraa内核线程. 而对于发送来说,绝大部分工作都是在用户进程内核态处理了,只有系统态配额用尽才会发出NET_TX,让软中断上.
+1. 发送网络数据的时候都涉及哪些内存拷⻉操作?
+
+    这里的内存拷贝,只特指待发送数据的内存拷贝.
+
+    第一次拷贝操作是在内核申请完skb之后,这时候会将用户传递进来的buffer里的数据内容都拷贝到skb. 如果要发送的数据量比较大,这个拷贝操作开销还是不小的.
+
+    第二次拷贝操作是从传输层进入网络层的时候,每一个skb都会被克隆出来一个新的副本. 目的是保存原始的skb,当网络对方没有发回ACK的时候,还可以重新发送,以实现TCP中要求的可靠传输. 不过这次只是浅拷贝,只拷贝skb描述符本身,所指向的数据还是复用的.
+
+    第三次拷贝不是必需的,只有当ip层发现skb大于MTU时才需要进行. 此时会再申请额外的skb,并将原来的skb拷贝为多个小的skb
+
+    TCP为了保证可靠性,第二次的拷贝根本就没法省. 如果包大于MTU,分片时的拷贝同样避免不了.
+1. 零拷贝到底是怎么回事?
+
+    拿sendfile系统调用来举例.
+
+    如果想把一个文件通过网络发送出去, 需先用 read系统调用把文件读取到内存,然后再调用send把文件发送出去.
+
+    假设文件之前从来没有读取过,那么read 硬盘上的数据需要经过两次拷贝才能到用户进程的内存: 第一次是从硬盘DMA到Page Cache, 第二次是从Page Cache拷贝到用户内存. 之后再调用send发送数据.
+
+    如果要发送的数据量比较大,那需要花费不少的时间在大量的数据拷贝上. sendfile就是内核提供的一个可用来减少发送文件时拷贝开销的一个技术方案. 在sendtile系统调用里, 数据不需要拷贝到用户空间, 在内核态就能完成发送处理, 这就显著减少了需要拷贝的次数.
+
+    sendfile: 硬盘->page cache->socket发送缓冲区->网卡
+
+    katka高性能的原因有很多,其中的重要原因之一就是采用了sendfile系统调用来发送网络数据包,减少了内核态和用户态之间的频繁数据拷贝.
+
+# local网络
+![](/misc/img/net/cross_host_net.png)
+
+发送数据进入协议栈到达网络层的时候,网络层入口函数是ip_queue_xmit. 在网络层里会进行路由选择,路由选择完毕,再设置一些IP头,进行一些netfilter的过滤,将包交给邻居子系统.
+
+对于本机网络IO来说,特殊之处在于在local路由表中就能找到路由项,对应的设备都将使用loopback网卡,也就是常说的lo设备.
+
+[ip_queue_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/ip_output.c#L547)->__ip_queue_xmit->[ip_route_output_ports](https://elixir.bootlin.com/linux/v6.8/source/include/net/route.h#L159)->[ip_route_output_flow](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/route.c#L2869)->[__ip_route_output_key](https://elixir.bootlin.com/linux/v6.8/source/include/net/route.h#L131)->[ip_route_output_key_hash](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/route.c#L2629)->[ip_route_output_key_hash_rcu](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/route.c#L2651)->[fib_lookup](https://elixir.bootlin.com/linux/v6.8/source/include/net/ip_fib.h#L310)
+
+在fib_lookup中将会对local和main两个路由表展开查询,并且先查询local后查main. 命令`ip route list table xxx`可以查看到这两个路由表, 这里只看local路由表, 因为本机网络IO查询到这个表就终止了. 因此对于目的是127.0.0.1的路由在local路由表中就能够找到.
+
+ip_route_output_key_hash_rcu中显示(by `res->type == RTN_LOCAL`), 对于本机的网络请求,设备将全部使用net->loopback_dev,也就是lo虚拟网卡.
+
+接下来的网络层仍然和跨机网络IO一样,最终会经过 ip_finish_output.
+
+本机网络IO需要进行IP分片吗? 因为和正常的网络层处理过程一样,会经过ip_finish_output(). 在这个函数中,如果skb大于MTU,仍然会进行分片. 只不过lo虛拟网卡的MTU比Ethernet要大很多. 通过`ip link/ifconfig`命令就可以查到, 物理网卡MTU一般为1500, 而lo虚拟接口是65535.
+
+用本机IP(例如192.168.x.y)和用127.0.0.1在性能上有差别吗? 其实选用哪个设备是路由相关函数ip_route_output_key_hash_rcu决定的. 在fib_lookup()里会查询到local路由表, 比如`local 192.168.88.236 dev eno1 proto kernel scope host src 192.168.88.236`. 看到eno1不要被它迷惑, 其实内核在初始化local路由表的时候,把local路由表里所有的路由项都设置成了RTN_LOCAL, 而不只是127.0.0.1. 这个过程是在设置本机IP的时候,调用[fib_inetaddr_event](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1432)->[fib_add_ifaddr](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1109)的`fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim, 0);`
+里完成设置的.
+
+
+
