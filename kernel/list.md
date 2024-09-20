@@ -17,3 +17,6 @@
 
 ## module
 - [The Linux Kernel Module Programming Guide](https://github.com/sysprog21/lkmpg)
+
+## news
+- [在长达 20 年之后，Real-Time Linux(PREEMPT_RT)合并到内核主线。从 Linux 6.12 开始，所有发行版都将包含实时 Linux 代码](https://www.oschina.net/news/312719/real-time-linux-merged-into-kernel-mainline)
