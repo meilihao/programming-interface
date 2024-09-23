@@ -183,6 +183,7 @@
     基于RDMA互联, 8坏7(OceanStor Dorado V6)
 
     - [构建新型数据基础设施 华为OceanStor Dorado V6重定义存储架构](https://server.zhiding.cn/server/2019/0814/3120409.shtml)
+- [华为发布了新一代OceanStor Dorado全闪存存储 2024.9](https://news.mydrivers.com/1/1004/1004644.htm)
 - [OceanStor Dorado V6 Technical Deep Dive Perm.pdf](/misc/pdf/io/4_OceanStor Dorado V6 Technical Deep Dive Perm.pdf)
 - [Huawei OceanStor Dorado V3 All Flash Storage Technical White Paper](https://objects.icecat.biz/objects/mmo_39230499_1509028620_8925_7785.pdf)
 - [FusionStorage]()

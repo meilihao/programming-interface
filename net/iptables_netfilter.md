@@ -18,3 +18,16 @@
 1. 规则太多
 
     netfilter 框架类似一套可以自由添加策略规则专家系统, 并没有对添加规则进行合并优化, 这些都严重依赖操作人员技术水平, 随着规模的增大, 规则数量n成指数级增长, 而报文处理又是0（n）复杂度, 最终性能会直线下降
+
+## flow
+ref:
+- [linux-ip](http://linux-ip.net/pages/diagrams.html)
+- [Netfilter hooks](https://wiki.nftables.org/wiki-nftables/index.php/Netfilter_hooks)
+- [netfilter数据流图](https://www.ichenfu.com/2018/09/09/packet-flow-in-netfilter/)
+
+![](/misc/img/net/Netfilter.jpg)
+![](/misc/img/net/netfilter_packet_flow.png)
+
+Netfilter 处理网络包的先后顺序：接收网络包，先 DNAT，然后查路由策略，查路由策略指定的路由表做路由，然后 SNAT，再发出网络包.
+
+iptables、ip rule、ip route关系: 一个包到达网络协议层，首先会被iptables的managle表打上标记（当然也可以不打），然后给ip rule匹配，找到对应的路由表，最后根据ip route table的路由表找到对应出口接口.

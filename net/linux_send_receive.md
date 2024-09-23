@@ -1351,8 +1351,39 @@ ip_route_output_key_hash_rcu中显示(by `res->type == RTN_LOCAL`), 对于本机
 
 本机网络IO需要进行IP分片吗? 因为和正常的网络层处理过程一样,会经过ip_finish_output(). 在这个函数中,如果skb大于MTU,仍然会进行分片. 只不过lo虛拟网卡的MTU比Ethernet要大很多. 通过`ip link/ifconfig`命令就可以查到, 物理网卡MTU一般为1500, 而lo虚拟接口是65535.
 
-用本机IP(例如192.168.x.y)和用127.0.0.1在性能上有差别吗? 其实选用哪个设备是路由相关函数ip_route_output_key_hash_rcu决定的. 在fib_lookup()里会查询到local路由表, 比如`local 192.168.88.236 dev eno1 proto kernel scope host src 192.168.88.236`. 看到eno1不要被它迷惑, 其实内核在初始化local路由表的时候,把local路由表里所有的路由项都设置成了RTN_LOCAL, 而不只是127.0.0.1. 这个过程是在设置本机IP的时候,调用[fib_inetaddr_event](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1432)->[fib_add_ifaddr](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1109)的`fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim, 0);`
+用本机IP(例如192.168.x.y)和用127.0.0.1在性能上有差别吗? 结论是没区别. 其实选用哪个设备是路由相关函数ip_route_output_key_hash_rcu决定的. 在fib_lookup()里会查询到local路由表, 比如`local 192.168.88.236 dev eno1 proto kernel scope host src 192.168.88.236`. 看到eno1不要被它迷惑, 因为**内核在初始化local路由表的时候,把local路由表里所有的路由项都设置成了RTN_LOCAL, 而不只是127.0.0.1**. 这个过程是在设置本机IP的时候,调用[fib_inetaddr_event](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1432)->[fib_add_ifaddr](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/fib_frontend.c#L1109)的`fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim, 0);`
 里完成设置的.
 
+所以即使本机IP不用127.0.0.1,内核在路由项查找的时候判断类型是RTN_LOCAL,仍然会使用net->loopback_dev,也就是lo虛拟网卡. 该场景可通过在lo上用tcpdump抓包验证.
 
+### 网络设备子系统
+网络设备子系统的入口函数是dev_queue_xmit(). 跨机发送过程时, 对于真的有队列的物理设备,该函数进行了一系列复杂的排队等处理后, 才调用dev_hard_start_xmit(), 从这个函数再进入驱动程序来发送. 在这个过程中,甚至还有可能触发
+软中断进行发送.
 
+但是对于启动状态的回环设备(q->enqueve 判断为false)来说,就简单多了. 没有队列的问题, 直接进入dev_hard_start _xmit. 接着进入回环设备的“驱动”里发送回调[loopback_xmit()](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/loopback.c#L69), 将skb"发送"出去.
+
+loopback_dev的回调函数集合是[loopback_ops](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/loopback.c#L156)
+
+所以对dev_hard_start_xmit调用实际上执行的是loopback 驱动里的[loopback_xmit()](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/loopback.c#L69).
+
+loopback_xmit()先在skb_orphan()中把skb上的socket指针去掉, 在调用__netif_rx()发送skb.
+
+注意: 在本机网络lo发送的过程中, 传输层下面的skb就不需要释放了, 直接给接收方传过去就行, 是省了一点点开销. 不过传输层的skb是节约不了, 还是要频繁地申请和释放.
+
+__netif_rx->netif_rx_internal()->enqueue_to_backlog(), 在enqueve_to_backog函数中,把要发送的skb插入 softnet_data->input_pkt_queue队列中并调用napi_schedule_rps来触发软中断.
+
+在跨机的网络包的接收过程中,需要经过硬中断,然后才能触发软中断. 而在本机的网络lo过程中, 由于其并不是真的过网卡, 所以网卡的发送过程、硬中断就都省去了,直接从软中断开始.
+
+发送过程触发软中断后,会进入软中断处理函数net_rx_action() ->[napi_poll](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L6635)->__napi_poll()的`work = n->poll(n, weight)`. 对于igb网卡, poll实际调用的是igb_ poll函数, 那么loopback网卡的poll函数是[process_backlog](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L5956), 它是在net_dev_init 中, [struct softnet_data 默认的poll 在初始化的时候设置成了 process_backlog()](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L11718).
+
+process_backlog的__skb_dequeue()会从sd->process_queue取下来包交给__netif_receive_skb()发往协议栈. 这样和前面发送过程的结尾处就对上了, 发送过程是把包放到了input_pkt_queue队列. 当`__skb_dequeue()`结束后还会通过skb_queue_splice_tail_init()把 sd->input_pkt_queue 里的skb合并到sd->process_queue 链表继续循环处理.
+
+__netif_receive_skb()之后的过程就又和跨机网络IO一致了, 发往协议栈的调用链是_netif_receive_skb ->__netif_receive_skb_core -> deliver_skb, 然后将数据包送入ip_rcv中. 网络层再往后是传输层,最后唤醒用户进程.
+
+### 总结
+1. 127.0.0.1的本地网络IO不需要经过网卡
+1. 本地网络数据包在内核中是什么走向,和外网发送相比流程上有什么差别?
+
+	总的来说,本机网络IO和跨机网络IO比较起来,确实是节约了驱动上的一些开销. 发送数据不需要进 RingBuffer的驱动队列,直接把skb 传给接收协议栈(经过软中断). 但是在内核其他组件上,可是一点儿都没少,系统调用、协议栈(传输层、网络层等)、设备子系统, 驱动整个走了一遍. 所以即使是本机网络IO,切忌误以为没啥开销就滥用.
+
+	如果想在本机网络IO上绕开协议栈的开销,也不是没有办法,但是要动用eBPF. 使用eBPF的sockmap和sk_redirect 可以达到真正不走协议栈的目的.

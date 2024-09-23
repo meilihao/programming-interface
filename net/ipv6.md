@@ -1,6 +1,7 @@
 # ipv6
 参考:
 - [系统管理指南：IP 服务](https://docs.oracle.com/cd/E24847_01/html/819-7058/toc.html)
+- [IPv6地址格式、ICMPv6、邻居发现NDP、DHCPv6、SLAAC、Path-MTU（PMTU）](http://www.max-shu.com/blog/?p=699)
 
 IPv6（IP version 6）是为了根本解决 IPv4 地址耗尽的问题而被标准化的网际协议. IPv6 的地址长度是16B(128 比特), 其特点:
 - 性能提升. 包首部长度采用固定的值（40字节）, 不再采用首部检验码. 简化首部结构，减轻路由器负担. **路由器不再做分片处理**.
