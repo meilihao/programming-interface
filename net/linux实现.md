@@ -2686,7 +2686,7 @@ bind 的逻辑相对比较简单，就到这里了.
 
 ## 解析 listen 函数
 ```c
-// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1867
 /*
  *	Perform a listen. Basically, we allow the protocol to do anything
  *	necessary for a listen, and if that works, we mark the socket as
@@ -2701,13 +2701,13 @@ int __sys_listen(int fd, int backlog)
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock) {
-		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
+		somaxconn = READ_ONCE(sock_net(sock->sk)->core.sysctl_somaxconn);
 		if ((unsigned int)backlog > somaxconn)
 			backlog = somaxconn;
 
 		err = security_socket_listen(sock, backlog);
 		if (!err)
-			err = sock->ops->listen(sock, backlog);
+			err = READ_ONCE(sock->ops)->listen(sock, backlog);
 
 		fput_light(sock->file, fput_needed);
 	}
@@ -2720,19 +2720,33 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 }
 ```
 
-在 listen 中，还是通过 sockfd_lookup_light，根据 fd 文件描述符，找到 struct socket 结构. 接着，我们调用 struct socket 结构里面 ops 的 listen 函数. 根据上面创建 socket 的时候的设定，调用的是 inet_stream_ops 的 listen 函数，也即调用 [inet_listen](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L196).
+用户态的socket文件描述符fd只是一个整数而已,内核是没有办法直接用的. 在 listen 中需要通过 sockfd_lookup_light()，找到 struct socket 结构. 接着获取系统里的net.core.somaxconn内核参数的值,和用户传入的backlog比较后, 取一个最小值(**该值和半连接队列、全连接队列都有关系**)传入下一步. 最后调用 struct socket 结构里面 ops 的 listen 函数. 根据上面创建 socket 的时候的设定，调用的是 [inet_stream_ops](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L1051) 的 listen 函数，也即调用 [inet_listen](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L229)->[__inet_listen_sk](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L190)
 
-如果这个 socket 还不在 TCP_LISTEN 状态，会调用 [inet_csk_listen_start](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/inet_connection_sock.c#L909) 进入监听状态.
+__inet_listen_sk()设置的sk_max_ack_backlog是全连接队列的最大⻓度, 是执行listen()时传入的min(backag,net.core.somaxconn)的那个值. 因此如果遇到了全连接队列溢出的问题, 想加大该队列长度,那么需要同时考虑执行listen函数时传入的backlog和net.core.somaxconn.
 
-inet_csk_listen_start里面建立了一个新的结构 [inet_connection_sock](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/inet_connection_sock.h#L87)，这个结构一开始是 struct inet_sock，inet_csk 其实做了一次强制类型转换，扩大了结构.
+同时如果这个 socket 还不在 TCP_LISTEN 状态，__inet_listen_sk()会调用 [inet_csk_listen_start](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_connection_sock.c#L1235) 进入监听状态.
+
+inet_csk_listen_start里面建立了一个新的结构 [inet_connection_sock](https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_connection_sock.h#L82)，这个结构一开始是 struct inet_sock，inet_csk()其实做了一次强制类型转换，扩大了结构. 接着`reqsk_queue_alloc(&icsk->icsk_accept_queue)`初始化了接收队列.
+
+> tcp_sock、inet_connection_sock、 inet_sock、 sock是逐层嵌套的关系, 类似面向对象里的继承. 对于TCP的socket来说, sock对象实际上是一个tcp_sock. 因此TCP中的sock对象随
+时可以强制类型转换为tcp_sock、 inet_connecion_sock、 inet_sock来使用.
 
 struct inet_connection_sock 结构比较复杂. 如果打开它，就能看到处于各种状态的队列，各种超时时间、拥塞控制等字眼.
 
 说TCP 是面向连接的，就是客户端和服务端都是有一个结构维护连接的状态，就是指这个结构.
 
-首先，inet_connection_sock中的 icsk_accept_queue 是干什么的呢？
+首先，inet_connection_sock中的 icsk_accept_queue 是一个[request_sock_queue](https://elixir.bootlin.com/linux/v6.8/source/include/net/request_sock.h#L175)类型的对象, 是内核用来接收客户端请求的数据结构, 平时说的全连接队列(accept队列)就在这个数据结构里实现的.
 
-在 TCP 的状态里面，有一个 listen 状态，当调用 listen 函数之后，就会进入这个状态，虽然写程序的时候，一般要等待服务端调用 accept 后，等待在哪里的时候，让客户端就发起连接. 其实服务端一旦处于 listen 状态，不用 accept，客户端也能发起连接. 其实 TCP 的状态中，没有一个是否被 accept 的状态，那 accept 函数的作用是什么呢？
+>![旧版3.10 icsk_accept_queue](/misc/img/net/icsk_accept_queue.png)
+> 新版request_sock_queue删除了半连接队列(syn请求队列)`struct listen_sock *listen_opt`.
+
+对于全连接队列来说,在它上面不需要进行复杂的查找工作,accept处理的时候只是先进先出地接受就好了. 所以全连接队列通过rskq_accept_head和rskq_accept_tail以链表的形式来管理.
+
+连接已满判断:
+1. 全连接[sk_acceptq_is_full()](https://elixir.bootlin.com/linux/v6.8/source/include/net/sock.h#L1004)
+1. 半连接[inet_csk_reqsk_queue_is_full()](https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_connection_sock.h#L284)
+
+在 TCP 的状态里面，有一个 listen 状态，当调用 listen 函数之后，就会进入这个状态，虽然写程序的时候，一般要等待服务端调用 accept 后，等待在那里的时候，让客户端就发起连接. 其实服务端一旦处于 listen 状态，不用 accept，客户端也能发起连接. 其实 TCP 的状态中，没有一个是否被 accept 的状态，那 accept 函数的作用是什么呢？
 
 在内核中，为每个 Socket 维护两个队列. 一个是已经建立了连接的队列，这时候连接三次握手已经完毕，处于 established 状态；一个是还没有完全建立连接的队列，这个时候三次握手还没完成，处于 syn_rcvd 的状态. 服务端调用 accept 函数，其实是在第一个队列中拿出一个已经完成的连接进行处理. 如果还没有完成就阻塞等待. 这里的 icsk_accept_queue 就是第一个队列.
 
@@ -2801,8 +2815,10 @@ inet_csk_accept 的实现，印证了上面讲的两个队列的逻辑. 如果 i
 
 三次握手一般是由客户端调用 connect 发起.
 
+客户端在执行connect函数的时候,把本地socket状态设置成了TCP_SYN_SENT, 选了一个可用的端口, 接着发出SYN握手请求并启动重传定时器.
+
 ```c
-// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1839
+// https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L2031
 /*
  *	Attempt to connect to a socket with the server address.  The address
  *	is in user space so we verify it is OK and move it to kernel space.
@@ -2821,17 +2837,19 @@ int __sys_connect_file(struct file *file, struct sockaddr_storage *address,
 	struct socket *sock;
 	int err;
 
-	sock = sock_from_file(file, &err);
-	if (!sock)
+	sock = sock_from_file(file);
+	if (!sock) {
+		err = -ENOTSOCK;
 		goto out;
+	}
 
 	err =
 	    security_socket_connect(sock, (struct sockaddr *)address, addrlen);
 	if (err)
 		goto out;
 
-	err = sock->ops->connect(sock, (struct sockaddr *)address, addrlen,
-				 sock->file->f_flags | file_flags);
+	err = READ_ONCE(sock->ops)->connect(sock, (struct sockaddr *)address,
+				addrlen, sock->file->f_flags | file_flags);
 out:
 	return err;
 }
@@ -2848,8 +2866,7 @@ int __sys_connect(int fd, struct sockaddr __user *uservaddr, int addrlen)
 		ret = move_addr_to_kernel(uservaddr, addrlen, &address);
 		if (!ret)
 			ret = __sys_connect_file(f.file, &address, addrlen, 0);
-		if (f.flags)
-			fput(f.file);
+		fdput(f);
 	}
 
 	return ret;
@@ -2862,15 +2879,71 @@ SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr,
 }
 ```
 
-connect 函数的实现一开始先根据 fd 文件描述符，找到 struct socket 结构. 接着，会调用 struct socket 结构里面 ops 的 connect 函数，根据前面创建 socket 的时候的设定，调用 inet_stream_ops 的 connect 函数，也即调用 [inet_stream_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L716).
+connect()会先根据 fd 文件描述符，找到 [struct socket](https://elixir.bootlin.com/linux/v6.8/source/include/net/sock.h#L341) 结构. 接着，会调用 struct socket 结构里面 ops 的 connect 函数，根据前面创建 socket 的时候的设定，调用 [inet_stream_ops](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L1051) 的 connect 函数，也即调用 [inet_stream_connect](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L743).
 
-在 inet_stream_connect -> [__inet_stream_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L606) 里面，会发现，如果 socket 处于 SS_UNCONNECTED 状态，那就调用 struct sock 的 sk->sk_prot->connect，也即 tcp_prot 的 connect 函数 [tcp_v4_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L197).
+在 inet_stream_connect -> [__inet_stream_connect](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L625) 里面，会发现，如果 socket 处于 SS_UNCONNECTED 状态(刚创建完毕的socket的状态)，那就调用 struct sock 的 sk->sk_prot->connect. 对于AF_INET的tcp socket来说, sk->sk_prot=tcp_prot, 因此connect()是[tcp_v4_connect](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L201).
 
-在 tcp_v4_connect 函数中，[ip_route_connect](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/route.h#L306) 其实是做一个路由的选择. 为什么呢？因为三次握手马上就要发送一个 SYN 包了，这就要凑齐源地址、源端口、目标地址、目标端口. 目标地址和目标端口是服务端的，已经知道源端口是客户端随机分配的，源地址应该用哪一个呢？这时候要选择一条路由，看从哪个网卡出去，就应该填写哪个网卡的 IP 地址. 接下来，在发送 SYN 之前，先将客户端 socket 的状态设置为 TCP_SYN_SENT, 然后初始化 TCP 的 seq num，也即 write_seq，然后调用 [tcp_connect](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L3640) 进行发送.
+tcp_v4_connect:
+```c
+int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+{
+	...
+	tcp_set_state(sk, TCP_SYN_SENT);
+	err = inet_hash_connect(tcp_death_row, sk); // 动态选择一个端口
+	if (err)
+		goto failure;
 
-在 tcp_connect 中，有一个新的结构 [struct tcp_sock](https://elixir.bootlin.com/linux/v5.8.1/source/include/linux/tcp.h#L142)，如果打开它，会发现它是 struct inet_connection_sock 的一个扩展，struct inet_connection_sock 在 struct tcp_sock 开头的位置，通过强制类型转换访问，故伎重演又一次. struct tcp_sock 里面维护了更多的 TCP 的状态，同样是遇到了再分析.
+	sk_set_txhash(sk);
 
-接下来 tcp_init_nondata_skb 初始化一个 SYN 包，tcp_transmit_skb 将 SYN 包发送出去，inet_csk_reset_xmit_timer 设置了一个 timer，如果 SYN 发送不成功，则再次发送.
+	rt = ip_route_newports(fl4, rt, orig_sport, orig_dport,
+			       inet->inet_sport, inet->inet_dport, sk);
+	if (IS_ERR(rt)) {
+		err = PTR_ERR(rt);
+		rt = NULL;
+		goto failure;
+	}
+	...
+
+	err = tcp_connect(sk); // 根据sk中的信息, 构建一个syn报文并发送出去
+
+	...
+}
+EXPORT_SYMBOL(tcp_v4_connect);
+```
+
+[__inet_hash_connect()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_hashtables.c#L994)传入的两个重要参数:
+- port_offset = inet_sk_port_offset(sk): 根据要连接的目的ip和端口信息生成随机数
+- __inet_check_established: 检查是否和现有ESTABLISH状态的连接冲突的函数
+
+__inet_hash_connect逻辑:
+1. `int port = inet_sk(sk)->inet_num;...if (port)`: 判断是否调用过bind
+1. `inet_sk_get_local_port_range`: 会读取net.ipv4.ip_local_port_range的可用端口范围, 默认是32768~61000. 意味着端口总可用的数量是61000-32768=28232个.
+1. `for (i = 0; i < remaining; i += step, port += step)`: 从某个随机数开始, 把整个可用端口范围遍历一遍, 直到找到可用的端口为止
+
+  整个系统中会维护一个所有使用过的端口的哈希表,它就是hinfo->bhash. 如果在哈希表中没有找到,那么说明这个端口是可用的. 这个时候通过inet_bind_bucket_create()申请一个inet bind_bucket来记录端口已经被使用,并用哈希表的形式都管理了起来
+
+  **如果ip_local_port_range中的端口快被用光了,这时候内核就大概率要把执行更多的循环才能找到可用端口, 这会导致connect系统调用的CPU开销上涨**.
+
+  1. `inet_is_local_reserved_port`: 跳过保留端口 by 是否在net.ipv4.ip_local_reserved_ports中
+  1. 查找`是hinfo-=bhash`
+  1. 通过 check_established = [__inet_check_established](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_hashtables.c#L539) 继续检查是否可用
+
+    check_estabished作用就是检测现有的TCP连接中是否四元组和要建立的连接四元素完全一致. 如果不完全一致,那么该端又仍然可用. 因此**connect时, 一个端口号可以用于多条连接. 这与bind的端口同协议下仅使用一次不同**.
+
+    __inet_check_established:
+    1. `head = inet_ehash_bucket(hinfo, hash)`找到哈希桶
+
+      head是是所有ESTABLISH状态的socket组成的哈希表, 然后遍历这个哈希表, 使用inet_match来判断是否可用.
+    1. `sk_nulls_for_each(sk2, node, &head->chain)`: 遍历是否存在一样的四元组
+1. 遍历完所有端口都没找到合适的,就返回-EADDRNOTAVAL=`Cannot assign requested address`
+
+在 tcp_v4_connect 函数中，[ip_route_connect](https://elixir.bootlin.com/linux/v6.8/source/include/net/route.h#L303) 其实是做一个路由的选择. 为什么呢？因为三次握手马上就要发送一个 SYN 包了，这就要凑齐源地址、源端口、目标地址、目标端口. 目标地址和目标端口是服务端的，已经知道源端口是客户端随机分配的，源地址应该用哪一个呢？这时候要选择一条路由，看从哪个网卡出去，就应该填写哪个网卡的 IP 地址. 接下来，在发送 SYN 之前，先将客户端 socket 的状态设置为 TCP_SYN_SENT, 然后初始化 TCP 的 seq num，也即 write_seq，然后调用 [tcp_connect](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_output.c#L4022) 进行发送.
+
+在 tcp_connect 中，有一个新的结构 [struct tcp_sock](https://elixir.bootlin.com/linux/v6.8/source/include/linux/tcp.h#L192)，如果打开它，会发现它是 struct inet_connection_sock 的一个扩展，struct inet_connection_sock 在 struct tcp_sock 开头的位置，通过强制类型转换访问，故伎重演又一次. struct tcp_sock 里面维护了更多的 TCP 的状态，同样是遇到了再分析.
+
+接下来 tcp_init_nondata_skb 初始化一个 SYN 包, `tcp_connect_queue_skb`添加包到发送队列sk_write_queue，tcp_transmit_skb 将 SYN 包发送出去，inet_csk_reset_xmit_timer 设置了一个 timer，如果 SYN 发送不成功，则再次发送.
+
+该定时器的作用是等到一定时间后收不到服务端的反馈的时候来开启重传. 首次超时时间是在[TCP_TIMEOUT_INIT](https://elixir.bootlin.com/linux/v6.8/source/include/net/tcp.h#L150)宏中定义的, 由[`tcp_connect_init`](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_output.c#L3832)的`inet_csk(sk)->icsk_rto = tcp_timeout_init(sk)`设置, 该值在Linux 3.10版本中是1秒,在一些老版本中是3秒.
 
 发送网络包的过程，放到之后讲解. 这里姑且认为 SYN 已经发送出去了.
 
@@ -2892,11 +2965,97 @@ static struct net_protocol tcp_protocol = {
 };
 ```
 
-kernel会通过 struct net_protocol 结构中的 handler 进行接收，调用的函数是 tcp_v4_rcv. 接下来的调用链为 tcp_v4_rcv->tcp_v4_do_rcv->tcp_rcv_state_process. [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L6183)，顾名思义，是用来处理接收一个网络包后引起状态变化的.
+kernel会通过 struct net_protocol 结构中的 handler 进行接收，调用的函数是 tcp_v4_rcv. 接下来的调用链为 tcp_v4_rcv->[tcp_v4_do_rcv](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1885)->tcp_rcv_state_process. [tcp_rcv_state_process](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L6619)，顾名思义，是用来处理接收一个网络包后引起状态变化的.
 
-目前服务端是处于 TCP_LISTEN 状态的，而且发过来的包是 SYN，因而就有了上面的代码，调用 icsk->icsk_af_ops->conn_request 函数. struct inet_connection_sock 对应的操作是 [inet_connection_sock_af_ops](https://elixir.bootlin.com/linux/v5.8.1/source/include/net/inet_connection_sock.h#L33)的[ipv4_specific](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L2113)，按照下面的定义，其实调用的是 [tcp_v4_conn_request](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L1455).
+```c
+int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
+{
+	enum skb_drop_reason reason;
+	struct sock *rsk;
 
-tcp_v4_conn_request 会调用 [tcp_conn_request](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_input.c#L6609)，这个函数也比较长，里面调用了 send_synack，但实际调用的是 [tcp_v4_send_synack](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_ipv4.c#L963). 具体发送的过程不去管它，看注释能知道，这是收到了 SYN 后，回复一个 SYN-ACK，回复完毕后，服务端处于 TCP_SYN_RECV.
+	...
+
+	if (sk->sk_state == TCP_LISTEN) { // 服务端收到第一步握手SYN或者第三步ACK都会走到这里
+		struct sock *nsk = tcp_v4_cookie_check(sk, skb);
+
+		if (!nsk)
+			goto discard;
+		if (nsk != sk) {
+			if (tcp_child_process(sk, nsk, skb)) {
+				rsk = nsk;
+				goto reset;
+			}
+			return 0;
+		}
+	} else
+		sock_rps_save_rxhash(sk, skb);
+
+	if (tcp_rcv_state_process(sk, skb)) {
+		rsk = sk;
+		goto reset;
+	}
+	return 0;
+
+reset:
+	tcp_v4_send_reset(rsk, skb);
+ ...
+}
+EXPORT_SYMBOL(tcp_v4_do_rcv);
+```
+
+```c
+int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	const struct tcphdr *th = tcp_hdr(skb);
+	struct request_sock *req;
+	int queued = 0;
+	bool acceptable;
+	SKB_DR(reason);
+
+	switch (sk->sk_state) {
+  ...
+
+	case TCP_LISTEN:
+		if (th->ack)
+			return 1;
+
+		if (th->rst) {
+			SKB_DR_SET(reason, TCP_RESET);
+			goto discard;
+		}
+		if (th->syn) { // 判断是否为SYN握手包
+			if (th->fin) {
+				SKB_DR_SET(reason, TCP_FLAGS);
+				goto discard;
+			}
+			/* It is possible that we process SYN packets from backlog,
+			 * so we need to make sure to disable BH and RCU right there.
+			 */
+			rcu_read_lock();
+			local_bh_disable();
+			acceptable = icsk->icsk_af_ops->conn_request(sk, skb) >= 0;
+			local_bh_enable();
+			rcu_read_unlock();
+
+			if (!acceptable)
+				return 1;
+			consume_skb(skb);
+			return 0;
+		}
+		SKB_DR_SET(reason, TCP_FLAGS);
+		goto discard;
+
+	case TCP_SYN_SENT:
+	...
+}
+EXPORT_SYMBOL(tcp_rcv_state_process);
+```
+
+目前服务端是处于 TCP_LISTEN 状态的，而且发过来的包是 SYN，因而就有了上面的代码，调用 icsk->icsk_af_ops->conn_request 函数. struct inet_connection_sock 对应的操作是 [inet_connection_sock_af_ops](https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_connection_sock.h#L35)的[ipv4_specific](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L2433)，按照下面的定义，其实调用的是 [tcp_v4_conn_request](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1710).
+
+tcp_v4_conn_request 会调用 [tcp_conn_request](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L7089)，这个函数也比较长，里面调用了 send_synack，但实际调用的是 [tcp_v4_send_synack](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1163). 具体发送的过程不去管它，看注释能知道，这是收到了 SYN 后，回复一个 SYN-ACK，回复完毕后，服务端处于 TCP_SYN_RECV.
 
 这个时候，轮到客户端接收网络包了. 都是 TCP 协议栈，所以过程和服务端没有太多区别，还是会走到 tcp_rcv_state_process 函数的，只不过由于客户端目前处于 TCP_SYN_SENT 状态，就进入了下面的代码分支.
 
