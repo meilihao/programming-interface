@@ -2755,8 +2755,10 @@ struct inet_connection_sock 结构比较复杂. 如果打开它，就能看到�
 至此，listen 的逻辑就结束了.
 
 ## 解析 accept 函数
+accept的重点工作就是从已经建立好的全连接队列中取出一个返回给用户进程.
+
 ```c
-// https://elixir.bootlin.com/linux/v5.8.1/source/net/socket.c#L1501
+// https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1991
 /*
  *	For accept, we attempt to create a new socket, set up the link
  *	with the client, wake up the client, then return the new
@@ -2777,11 +2779,9 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 
 	f = fdget(fd);
 	if (f.file) {
-		ret = __sys_accept4_file(f.file, 0, upeer_sockaddr,
-						upeer_addrlen, flags,
-						rlimit(RLIMIT_NOFILE));
-		if (f.flags)
-			fput(f.file);
+		ret = __sys_accept4_file(f.file, upeer_sockaddr,
+					 upeer_addrlen, flags);
+		fdput(f);
 	}
 
 	return ret;
@@ -2802,9 +2802,11 @@ SYSCALL_DEFINE3(accept, int, fd, struct sockaddr __user *, upeer_sockaddr,
 
 accept 函数的实现，印证了 socket 的原理中说的那样，原来的 socket 是监听 socket，这里会找到原来的 struct socket，并基于它去创建一个新的 newsock. 这才是连接 socket. 除此之外，还会创建一个新的 struct file 和 fd，并关联到 socket.
 
-这里面还会调用 struct socket 的 sock->ops->accept，也即会调用 inet_stream_ops 的 accept 函数，也即 [inet_accept](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/af_inet.c#L732).
+这里面还会调用 struct socket 的 sock->ops->accept，也即会调用 inet_stream_ops 的 accept 函数，也即 [inet_accept](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L773).
 
-inet_accept 会调用 struct sock 的 sk1->sk_prot->accept，也即 tcp_prot 的 accept 函数 [inet_csk_accept](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/inet_connection_sock.c#L454).
+inet_accept 会调用 struct sock 的 sk1->sk_prot->accept，也即 tcp_prot 的 accept 函数 [inet_csk_accept](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_connection_sock.c#L654).
+
+inet_csk_accept的reqsk_queue_remove()很简单,就是从全连接队列的链表里获取一个头元素返回就行了.
 
 inet_csk_accept 的实现，印证了上面讲的两个队列的逻辑. 如果 icsk_accept_queue 为空，则调用 inet_csk_wait_for_connect 进行等待；等待的时候，调用 schedule_timeout，让出 CPU，并且将进程状态设置为 TASK_INTERRUPTIBLE. 如果再次 CPU 醒来，会接着判断 icsk_accept_queue 是否为空，同时也会调用 signal_pending 看有没有信号可以处理. 一旦 icsk_accept_queue 不为空，就从 inet_csk_wait_for_connect 中返回，在队列中取出一个 struct sock 对象赋值给 newsk.
 
@@ -2924,6 +2926,13 @@ __inet_hash_connect逻辑:
 
   **如果ip_local_port_range中的端口快被用光了,这时候内核就大概率要把执行更多的循环才能找到可用端口, 这会导致connect系统调用的CPU开销上涨**.
 
+  因为在每次的循环内部需要等待锁以及在哈希表中执行多次的搜索. 这里的锁是自旋锁,是一种非阻塞的锁,如果资源被占用,进程并不会被挂起,而是会占用CPU去不断尝试获取锁.
+
+  解决方法:
+  1. 修改内核参数net.ipv4. ip_local_port_range多预留一些端口号
+  1. 尽量复用连接, 使用长连接来削减频繁的握手处理
+  1. 尽快回收TIME_WAT. 有用, 但是不太推荐的方法是开启tcp_tw_reuse和tcp_tw_recycle
+
   1. `inet_is_local_reserved_port`: 跳过保留端口 by 是否在net.ipv4.ip_local_reserved_ports中
   1. 查找`是hinfo-=bhash`
   1. 通过 check_established = [__inet_check_established](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_hashtables.c#L539) 继续检查是否可用
@@ -2944,6 +2953,11 @@ __inet_hash_connect逻辑:
 接下来 tcp_init_nondata_skb 初始化一个 SYN 包, `tcp_connect_queue_skb`添加包到发送队列sk_write_queue，tcp_transmit_skb 将 SYN 包发送出去，inet_csk_reset_xmit_timer 设置了一个 timer，如果 SYN 发送不成功，则再次发送.
 
 该定时器的作用是等到一定时间后收不到服务端的反馈的时候来开启重传. 首次超时时间是在[TCP_TIMEOUT_INIT](https://elixir.bootlin.com/linux/v6.8/source/include/net/tcp.h#L150)宏中定义的, 由[`tcp_connect_init`](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_output.c#L3832)的`inet_csk(sk)->icsk_rto = tcp_timeout_init(sk)`设置, 该值在Linux 3.10版本中是1秒,在一些老版本中是3秒.
+
+如果能正常接收到服务端响应的synack,那么客户端的这个定时器会清除. 这段逻辑在tcp_rearm_rto里, 调用顺序为tcp_rcv_state_process -> tcp_rev_synsent_state_
+proces -> tcp_ack -> tcp_clean_rtx_queue -> top_rearm_rto. 如果服务端发生了丢包,那么定时器到时后会进入回调函数[tcp_write_timer](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_timer.c#L702)中进行重传. 其实不只是握手,连接状态的超时重传也是在tcp_write_timer完成的.
+
+> tcp_write_timeout会判断是否重试过多, 如果是则退出重试逻辑. **下一次重传的时间是上一次的两倍**. 对于SYN握手包主要的判断依据是net.ipv4.tcp_syn_retries.
 
 发送网络包的过程，放到之后讲解. 这里姑且认为 SYN 已经发送出去了.
 
@@ -3055,13 +3069,216 @@ EXPORT_SYMBOL(tcp_rcv_state_process);
 
 目前服务端是处于 TCP_LISTEN 状态的，而且发过来的包是 SYN，因而就有了上面的代码，调用 icsk->icsk_af_ops->conn_request 函数. struct inet_connection_sock 对应的操作是 [inet_connection_sock_af_ops](https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_connection_sock.h#L35)的[ipv4_specific](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L2433)，按照下面的定义，其实调用的是 [tcp_v4_conn_request](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1710).
 
+tcp_v4_conn_request:
+```c
+int tcp_conn_request(struct request_sock_ops *rsk_ops,
+		     const struct tcp_request_sock_ops *af_ops,
+		     struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_fastopen_cookie foc = { .len = -1 };
+	__u32 isn = TCP_SKB_CB(skb)->tcp_tw_isn;
+	struct tcp_options_received tmp_opt;
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct net *net = sock_net(sk);
+	struct sock *fastopen_sk = NULL;
+	struct request_sock *req;
+	bool want_cookie = false;
+	struct dst_entry *dst;
+	struct flowi fl;
+	u8 syncookies;
+
+  ...
+	if ((syncookies == 2 || inet_csk_reqsk_queue_is_full(sk)) && !isn) { // inet_csk_reqsk_queue_is_full: 半连接队列是否已满
+		want_cookie = tcp_syn_flood_action(sk, rsk_ops->slab_name); // tcp_syn_flood_action是否开启了tcp_syncookies. 如果队列已满且未开启tcp_syncookies, 直接丢弃
+		if (!want_cookie)
+			goto drop;
+	}
+
+	if (sk_acceptq_is_full(sk)) { // 全连接队列是否已满
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENOVERFLOWS);
+		goto drop;
+	}
+
+	req = inet_reqsk_alloc(rsk_ops, sk, !want_cookie); // 分配request_sock对象
+	if (!req)
+		goto drop;
+
+	...
+	if (fastopen_sk) {
+		af_ops->send_synack(fastopen_sk, dst, &fl, req,
+				    &foc, TCP_SYNACK_FASTOPEN, skb);
+		/* Add the child socket directly into the accept queue */
+		if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
+			reqsk_fastopen_remove(fastopen_sk, req, false);
+			bh_unlock_sock(fastopen_sk);
+			sock_put(fastopen_sk);
+			goto drop_and_free;
+		}
+		sk->sk_data_ready(sk);
+		bh_unlock_sock(fastopen_sk);
+		sock_put(fastopen_sk);
+	} else {
+		tcp_rsk(req)->tfo_listener = false;
+		if (!want_cookie) {
+			req->timeout = tcp_timeout_init((struct sock *)req);
+			inet_csk_reqsk_queue_hash_add(sk, req, req->timeout); // 添加到半连接队列, 并开启计时器. 该计时器作用: 如果某个时间内还没有收到client的第三次握手, 服务端会重传synack包.
+		}
+		af_ops->send_synack(sk, dst, &fl, req, &foc,
+				    !want_cookie ? TCP_SYNACK_NORMAL :
+						   TCP_SYNACK_COOKIE,
+				    skb);
+		if (want_cookie) {
+			reqsk_free(req);
+			return 0;
+		}
+	}
+	...
+}
+EXPORT_SYMBOL(tcp_conn_request);
+```
+
+SYN Flood攻击就是通过耗光服务端上的半连接队列来使得正常的用户连接请求无法被响应. 不过在现在的Linux内核里只要打开tcp_syncookies,半连接队列满了仍然可以保证正常握手的进行
+
+如果全队列满了, 服务器对握手包的处理还是会丢弃它.
+
+假设服务端侧发生了全/半连接队列溢出而导致的丢包,那么转换到客户端视角来看就是SYN包没有任何响应.
+
+此时客户端会利用发送SYN时开启的一个重传定时器, 如果收不到预期的synack,超时重传的逻辑就会开始执行, 其时间单位都是以秒来计算的, 这意味着,如果有握手重传发生,即使第一次重传就能成功,那接又最快响应也是1秒以后的事情了, 这对接又耗时影响非常大.
+
 tcp_v4_conn_request 会调用 [tcp_conn_request](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L7089)，这个函数也比较长，里面调用了 send_synack，但实际调用的是 [tcp_v4_send_synack](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1163). 具体发送的过程不去管它，看注释能知道，这是收到了 SYN 后，回复一个 SYN-ACK，回复完毕后，服务端处于 TCP_SYN_RECV.
+
+因此服务端响应ack的主要工作是判断接收队列是否满了,满的话可能会丢弃该请求,否则发出synack. 申请request_sock添加到半连接队列中,同时启动定时器.
 
 这个时候，轮到客户端接收网络包了. 都是 TCP 协议栈，所以过程和服务端没有太多区别，还是会走到 tcp_rcv_state_process 函数的，只不过由于客户端目前处于 TCP_SYN_SENT 状态，就进入了下面的代码分支.
 
-tcp_rcv_synsent_state_process 会调用 [tcp_send_ack](https://elixir.bootlin.com/linux/v5.8.1/source/net/ipv4/tcp_output.c#L3789)，发送一个 ACK-ACK，发送后客户端处于 TCP_ESTABLISHED 状态.
+```c
+static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
+					 const struct tcphdr *th)
+{
+	...
+  tcp_ack(sk, skb, FLAG_SLOWPATH) // ->  tcp_clean_rtx_queue(): 删除发送队列; 删除定时器等.
+  ...
 
-又轮到服务端接收网络包了，还是归 tcp_rcv_state_process 函数处理. 由于服务端目前处于状态 TCP_SYN_RECV 状态，因而又走了另外的分支. 当收到这个网络包的时候，服务端也处于 TCP_ESTABLISHED 状态，三次握手结束.
+		tcp_finish_connect(sk, skb); // 连接建立完成
+
+		...
+		}
+		tcp_send_ack(sk);
+		return -1;
+	}
+
+	...
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L6215
+void tcp_finish_connect(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	tcp_ao_finish_connect(sk, skb);
+	tcp_set_state(sk, TCP_ESTABLISHED); // 修改socket状态
+	icsk->icsk_ack.lrcvtime = tcp_jiffies32;
+
+	if (skb) {
+		icsk->icsk_af_ops->sk_rx_dst_set(sk, skb);
+		security_inet_conn_established(sk, skb);
+		sk_mark_napi_id(sk, skb);
+	}
+
+	tcp_init_transfer(sk, BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB, skb); // 初始化拥塞控制
+
+	/* Prevent spurious tcp_cwnd_restart() on first data
+	 * packet.
+	 */
+	tp->lsndtime = tcp_jiffies32;
+
+	if (sock_flag(sk, SOCK_KEEPOPEN))
+		inet_csk_reset_keepalive_timer(sk, keepalive_time_when(tp)); // 保活计时器打开
+
+	if (!tp->rx_opt.snd_wscale)
+		__tcp_fast_path_on(tp, tp->snd_wnd);
+	else
+		tp->pred_flags = 0;
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_output.c#L4194
+void __tcp_send_ack(struct sock *sk, u32 rcv_nxt)
+{
+	struct sk_buff *buff;
+
+	/* If we have been reset, we may not send again. */
+	if (sk->sk_state == TCP_CLOSE)
+		return;
+
+	/* We are not putting this on the write queue, so
+	 * tcp_transmit_skb() will set the ownership to this
+	 * sock.
+	 */
+	buff = alloc_skb(MAX_TCP_HEADER,
+			 sk_gfp_mask(sk, GFP_ATOMIC | __GFP_NOWARN)); // 申请和构建ack包
+	...
+	/* Send it off, this clears delayed acks for us. */
+	__tcp_transmit_skb(sk, buff, 0, (__force gfp_t)0, rcv_nxt); // 发送ack包
+}
+EXPORT_SYMBOL_GPL(__tcp_send_ack);
+```
+
+tcp_rcv_synsent_state_process是客户端响应synack的主要逻辑:
+1.  tcp_finish_connect: 客户端将自己的socket状态修改为ESTABLISHED,接着打开TCP的保活计时器
+2. [tcp_send_ack](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_output.c#L4236)->__tcp_send_ack: 在__tcp_send_ack中构造ack包,并把它发送出去
+
+客户端响应来自服务端的synack时清除了connect时设置的重传定时器,把当前socket状态设置为ESTABLISHED,开启保活计时器后发出第三次握手的ack确认.
+
+又轮到服务端接收网络包了，还是tcp_v4_do_rcv(), 由于这已经是第三次握手了,半连接队列里会存在第一次握手时留下的半连接信息, 所以tcp_v4_cookie_check()的执行逻辑会不太一样. tcp_v4_cookie_check()会检查syncookie，因为没有syn包没有ack选项，因此忽略， 如果syncookie验证通过则创建新的sock.
+
+> [tcp_v4_hnd_req()]已被tcp_v4_cookie_check()取代 by v4.4-rc1 [tcp/dccp: install syn_recv requests into ehash table](https://github.com/torvalds/linux/commit/079096f103faca2dd87342cca6f23d4b34da8871)
+
+> [v3.19 inet_csk_reqsk_queue_unlink(sk, req, prev)/inet_csk_reqsk_queue_removed(sk, req)](https://elixir.bootlin.com/linux/v3.19/source/net/ipv4/tcp_minisocks.c#L723)->[v4.3 inet_csk_reqsk_queue_drop(sk, req)/inet_csk_reqsk_queue_add(sk, req, child)](https://elixir.bootlin.com/linux/v4.3/source/net/ipv4/tcp_minisocks.c#L560)-> 没找到具体什么时候删除
+
+tcp_v4_cookie_check->[cookie_v4_check](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/syncookies.c#L389)->[tcp_get_cookie_sock](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/syncookies.c#L205)
+
+tcp_get_cookie_sock:
+```c
+struct sock *tcp_get_cookie_sock(struct sock *sk, struct sk_buff *skb,
+				 struct request_sock *req,
+				 struct dst_entry *dst)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct sock *child;
+	bool own_req;
+
+	child = icsk->icsk_af_ops->syn_recv_sock(sk, skb, req, dst,
+						 NULL, &own_req); // 创建子socket
+	if (child) {
+		refcount_set(&req->rsk_refcnt, 1);
+		sock_rps_save_rxhash(child, skb);
+
+		if (rsk_drop_req(req)) {
+			reqsk_put(req);
+			return child;
+		}
+
+		if (inet_csk_reqsk_queue_add(sk, req, child)) // 加入全连接队列
+			return child;
+
+		bh_unlock_sock(child);
+		sock_put(child);
+	}
+	__reqsk_free(req);
+
+	return NULL;
+}
+EXPORT_SYMBOL(tcp_get_cookie_sock);
+```
+
+icsk->icsk_af_ops->syn_recv_sock是一个指针,icsk->icsk_af_ops=ipv4_specific, 因此它指向的是[tcp_v4_syn_recv_sock()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1730).
+
+在第三次握手里又会在tcp_v4_syn_recv_sock()里继续判断一次全连接队列是否满了,如果满了修改一下计数器就丢弃了. 如果队列不满,那么就申请创建新的sock对象.
+
+注意, **这里即第三次握手失败并不是客户端重试, 而是由服务端来重发Synack. 重试次数由net.ipv4.tcp_synackretries控制. 在实践中, 客户端发送ack后往往是以为连接建立成功了, 并开始发送数据, 其实这时候连接还没有真的建立起来. 它发出去的数据,包括重试将全部被服务端无视, 直到连接真正建立成功后才行**.
+
+再到 tcp_rcv_state_process(), 由于服务端目前处于状态 TCP_SYN_RECV 状态，因而走了`case TCP_SYN_RECV`分支. 当收到这个网络包的时候，服务端也处于 TCP_ESTABLISHED 状态，三次握手结束.
 
 ## 总结
 ![](/misc/img/net/c028381cf45d65d3f148e57408d26bd8.png)
@@ -3071,6 +3288,38 @@ tcp_rcv_synsent_state_process 会调用 [tcp_send_ack](https://elixir.bootlin.co
 - listen 第一层调用 inet_stream_ops 的 inet_listen 函数，第二层调用 tcp_prot 的 inet_csk_get_port 函数
 - accept 第一层调用 inet_stream_ops 的 inet_accept 函数，第二层调用 tcp_prot 的 inet_csk_accept 函数
 - connect 第一层调用 inet_stream_ops 的 inet_stream_connect 函数，第二层调用 tcp_prot 的 tcp_v4_connect 函数
+
+建立一条TCP连接需要消耗多⻓时间, 以上几步操作,可以简单划分为两类:
+1. 第一类是内核消耗CPU进行接收、发送或者是处理,包括系统调用、软中断和上下文切换. 它们的耗时基本都是几微秒左右
+2. 第二类是网络传输,当包被从一台机器上发出以后,中间要经过各式各样的网线,各种交换机路由器。所以网络传输的耗时相比本机的CPU处理,就要高得多了. 根据网络远近一般在几毫秒到几百毫秒不等.
+
+所以,在正常的TCP连接的建立过程中,一般考虑网络延时即可.
+
+一个RTT指的是包从一台机器到另外一台机器的一个来回的延迟时间, 所以从全局来看, TCP连接建立的网络耗时大约需要三次传输,再加上少许的双方CPU开销,总共大约比1.5倍RTT大一点点. 不过从客户端视角来看,只要ACK包发出了,内核就认为连接建立成功,可以开始发送数据了. 所以如果在客户端打点统计TCP连接建立耗时,只需两次传输耗时-—即1个RTT多一点的时间. 对于服务端视角来看同理,从SYN包收到开始算,到收到ACK,中间也是一次RTT耗时. 不过这些针对的是握手正常的情况,如果握手过程出了问题,可就不是这么回事了.
+
+### 丢包
+服务端在第一次握手时,在如下两种情况下可能会丢包:
+1. 半连接队列滿, 且tcp_syncookes为0
+1. 全连接队列满,且有未完成的半连接请求
+
+在这两种情况下, 从客户端视角来看和网络断了没有区别, 都是发出去的SYN包没有响应, 然后等待定时器到时后重传握手请求. 总的重传次数受net.ipv4.tcp_syn_retries
+影响(而不是决定).
+
+sever端在第三次握手时也可能出问题,如果全连接队列满,仍将发生丢包. 不过第三次握手失败时,只有服务端知道(客户端误以为连接已经建立成功). 服务端根据半
+连接队列里的握手信息发起synack重试, 重试次数由net.ipv4.top_synack_retries控制.
+
+一旦线上出现了上面这些连接队列溢出导致的问题,服务端将会受到比较严重的影响. 即使第一次重试就能够成功, 但接口响应耗时将直接上涨到秒. 如果重试两三次都没有成功, Nginx很有可能直接就报访问超时失败了.
+
+解决方法:
+1. 打开syncookie
+  在现代的Linux版本里, 可以通过打开tcp_syncookies来防止过多的请求打满半连接队列, 包括SYN Flood攻击, 来解决服务端因为半连接队列满而发生的丢包.
+2. 加大连接队列长度
+
+  全连接队列的长度是min(backlog, net.core.somaxconn), 半连接队列长度有点小复杂还没定位到, 但以前是min(backlog, somaxconn, tcp_max_syn_backlog)+ 1 再上取整到2的N次幂,且最小不能小于16.
+
+  如果需要加大全/半连接队列长度,需调节以上的一个或多个参数来达到目的. 只要队列长度合适, 就能很大程度降低握手异常概率的发生. 其中全连接队列在修改完后可以通过`ss -nlt`中输出的Send-Q来确认最终生效长度.
+
+  > Recv-Q表示当前该进程的全连接队列使用情况, 如果Recv-Q已经逼近了Send-Q,那么可能不需要等到丟包也应该准备加大全连接队列了.
 
 ## 解析 socket 的 Write 操作
 socket 对于用户来讲，是一个文件一样的存在，拥有一个文件描述符. 因而对于网络包的发送，可以使用对于 socket 文件的写入系统调用，也就是 write 系统调用. write 系统调用对于一个文件描述符的操作，大致过程都是类似的. 对于每一个打开的文件都有一个 struct file 结构，write 系统调用会最终调用 stuct file 结构指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
