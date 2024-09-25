@@ -2924,20 +2924,23 @@ __inet_hash_connect逻辑:
 
   整个系统中会维护一个所有使用过的端口的哈希表,它就是hinfo->bhash. 如果在哈希表中没有找到,那么说明这个端口是可用的. 这个时候通过inet_bind_bucket_create()申请一个inet bind_bucket来记录端口已经被使用,并用哈希表的形式都管理了起来
 
-  **如果ip_local_port_range中的端口快被用光了,这时候内核就大概率要把执行更多的循环才能找到可用端口, 这会导致connect系统调用的CPU开销上涨**.
+  **如果ip_local_port_range中的端口快被用光了,这时候内核就大概率要把执行更多的循环才能找到可用端口, 这会导致connect系统调用的CPU开销上涨, 此时server负载可能还显示为不高**.
 
   因为在每次的循环内部需要等待锁以及在哈希表中执行多次的搜索. 这里的锁是自旋锁,是一种非阻塞的锁,如果资源被占用,进程并不会被挂起,而是会占用CPU去不断尝试获取锁.
 
   解决方法:
-  1. 修改内核参数net.ipv4. ip_local_port_range多预留一些端口号
+  1. 修改内核参数net.ipv4.ip_local_port_range多预留一些端口号
   1. 尽量复用连接, 使用长连接来削减频繁的握手处理
-  1. 尽快回收TIME_WAT. 有用, 但是不太推荐的方法是开启tcp_tw_reuse和tcp_tw_recycle
+  1. 尽快回收TIME_WAT. 
+  
+    - 开启tcp_tw_reuse和tcp_tw_recycle, 不推荐
+    - 设置最大TIME_WAIT数量: net.ipv4.tcp_max_tw_buckets= 10000
 
   1. `inet_is_local_reserved_port`: 跳过保留端口 by 是否在net.ipv4.ip_local_reserved_ports中
   1. 查找`是hinfo-=bhash`
   1. 通过 check_established = [__inet_check_established](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_hashtables.c#L539) 继续检查是否可用
 
-    check_estabished作用就是检测现有的TCP连接中是否四元组和要建立的连接四元素完全一致. 如果不完全一致,那么该端又仍然可用. 因此**connect时, 一个端口号可以用于多条连接. 这与bind的端口同协议下仅使用一次不同**.
+    check_estabished作用就是检测现有的TCP连接中是否四元组和要建立的连接四元素完全一致. 如果不完全一致,那么该端又仍然可用. 因此**connect时, 一个端口号可以用于多条连接, 比如client用同一个端口连接server端的两个不同端口. 这与bind的端口同协议下仅使用一次不同**.
 
     __inet_check_established:
     1. `head = inet_ehash_bucket(hinfo, hash)`找到哈希桶
@@ -3274,7 +3277,8 @@ EXPORT_SYMBOL(tcp_get_cookie_sock);
 
 icsk->icsk_af_ops->syn_recv_sock是一个指针,icsk->icsk_af_ops=ipv4_specific, 因此它指向的是[tcp_v4_syn_recv_sock()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1730).
 
-在第三次握手里又会在tcp_v4_syn_recv_sock()里继续判断一次全连接队列是否满了,如果满了修改一下计数器就丢弃了. 如果队列不满,那么就申请创建新的sock对象.
+在第三次握手里又会在tcp_v4_syn_recv_sock()里继续判断一次全连接队列是否满了,如果满了修改一下计数器就丢弃了. 如果队列不满,那么就申请创建新的sock对象. 在用户进程调用accept
+的时候,直接把该对象取出来,再包装成一个socke对象就返回了.
 
 注意, **这里即第三次握手失败并不是客户端重试, 而是由服务端来重发Synack. 重试次数由net.ipv4.tcp_synackretries控制. 在实践中, 客户端发送ack后往往是以为连接建立成功了, 并开始发送数据, 其实这时候连接还没有真的建立起来. 它发出去的数据,包括重试将全部被服务端无视, 直到连接真正建立成功后才行**.
 
@@ -3315,11 +3319,41 @@ sever端在第三次握手时也可能出问题,如果全连接队列满,仍将�
   在现代的Linux版本里, 可以通过打开tcp_syncookies来防止过多的请求打满半连接队列, 包括SYN Flood攻击, 来解决服务端因为半连接队列满而发生的丢包.
 2. 加大连接队列长度
 
-  全连接队列的长度是min(backlog, net.core.somaxconn), 半连接队列长度有点小复杂还没定位到, 但以前是min(backlog, somaxconn, tcp_max_syn_backlog)+ 1 再上取整到2的N次幂,且最小不能小于16.
+  全连接队列的长度是min(backlog, net.core.somaxconn), 半连接队列长度有点小复杂还没定位到, 但以前是`min(backlog, somaxconn, tcp_max_syn_backlog)+ 1 再上取整到2的N次幂,且最小不能小于16`.
 
   如果需要加大全/半连接队列长度,需调节以上的一个或多个参数来达到目的. 只要队列长度合适, 就能很大程度降低握手异常概率的发生. 其中全连接队列在修改完后可以通过`ss -nlt`中输出的Send-Q来确认最终生效长度.
 
   > Recv-Q表示当前该进程的全连接队列使用情况, 如果Recv-Q已经逼近了Send-Q,那么可能不需要等到丟包也应该准备加大全连接队列了.
+1. 尽快调用accept
+
+  这虽然一般不会成为问题, 应用应尽快在握手成功之后通过accept把新连接取走, 不要忙于处理其他业务逻辑而导致全连接队列塞满了
+1. 尽早拒绝
+
+  如果加大队列后仍然有非常偶发的队列溢出, 可以暂且容忍. 但如果仍然有较长时间处理不过来, 那就直接报错,不要让容户端超时等待. 比如将Redis、MySQL等服务器的内核参数tcp_abort_on _overtlow设置为1. 如果队列满了,直接发resel指令给客户端, 告诉其不要傻等. 这时候客户端会收到错误`cornection reset by peer`. 拒绝少量用户的访问请求, 比把整个服务都搞崩了还是要强的
+1. 尽量减少TCP连接的次数
+  
+  如果上述方法都未能根治问题, 这时应该思考是否可以用长连接代替短连接, 减少过于频繁的三次握手. 该放法不但能降低握手出问题的可能性, 而且还顺带砍掉了三次握手的各种内存、CPU、时间上的开销,对提升性能也有较大帮助.
+
+判断—台服务器当前是否有半/全连接队列溢出产生丢包的方法:
+1. 全队列
+
+  全连接队列溢出都会记录到ListenOverflows这个MIB (Management Information Base,管理信息库), 对应SNMP统计信息中的ListenDrops这一项, 共有两处:
+  1. server在响应client的SYN握手包时: [tcp_conn_request]的[`NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENOVERFLOWS)`](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L7122)和后面的`tcp_listendrop()`, 可以看到,全连接队列满了以后调用NET_INC_STATS增加了LINUX_MIB_LISTENOVERFLOWS和LINUX_MIB_LISTENDROPS这两个MIB.
+  2. server在响应第三次握手的时候: [tcp_v4_syn_recv_sock](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L1748)会再次判断全连接队列是否溢出. 如果溢出, 同样会增加这两个MIB
+
+  > 在[/net/ipv4/proc.c](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/proc.c#L195)中,LINUX_MIB_LISTENOVERFLOWS和LINUX_MIB_LISTENDROPS都被整合进SNMP统计信息
+
+  在执行`nstat -z -t 1 |grep -i ListenOverflows`/[`netstat -s | grep overflowed`](https://github.com/giftnuss/net-tools/blob/master/statistics.c#L243)时, 就可以判断是否有丢包发生, 因为ListenOverflows只有在全连接队列满的时候才会增加
+
+1. 半队列
+
+  溢出时更新的是LINUX_MIB_LISTENDROPS这个MIB,对应到SNMP就是ListenDrops这个统计项. 在[tcp_conn_request()](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L7118).
+
+  但是问题在于，不仅仅只是在半连接队列发生溢出的时候会增加该值,比如 tcp_conn_request()和 [`tcp_req_err->httptcp_req_err`](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L476). 所以根据上面的 nstat/netstat 看半连接队列是否溢出是不靠谱的.
+
+  建议是不要纠结怎么看是否丢包了. 直接看tcp_syncookies是不是为1就行. 如果该值是1, 那么[`want_cookie = tcp_syn_flood_action(sk, rsk_ops->slab_name);`](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_input.c#L7122)就返回真,是根本不会发生半连接溢出丟包的. 如果tcp_syncookies不是1,则建议改成1就行了.
+
+  如果因为各种原因就是不想打开tcp_syncookies,就想吞看是否有因为半连接队列满而导致的SYN丢弃, 除了`nstat -z -t 1 |grep -i ListenDrops`/`netstat -s|grep SYNs`的结果,建议同时查看当前listen端口上的SYN_RECV的数量(`ss -antp|grep SYN_RECV|wc-l`/`netstat -antp |grep SYN_RECV|wc -l`). 如果SYN_RECV状态的连接数量达到算出来的队列长度,那么可以确定有半连接队列溢出.
 
 ## 解析 socket 的 Write 操作
 socket 对于用户来讲，是一个文件一样的存在，拥有一个文件描述符. 因而对于网络包的发送，可以使用对于 socket 文件的写入系统调用，也就是 write 系统调用. write 系统调用对于一个文件描述符的操作，大致过程都是类似的. 对于每一个打开的文件都有一个 struct file 结构，write 系统调用会最终调用 stuct file 结构指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
