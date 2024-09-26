@@ -228,15 +228,24 @@ e820描述的内存段共有6种类型,但只有E820_RAM和E820_RESERVED_KERN两
 齐调整)。页数就是该节点page对象的个数,据此申请内存,将内存地址赋值给node_mem_map字段,page对象就存在这里. node的page对象本质是一个数组,这个数组对应
 着Flat Memory模式的整个平面物理内存,所以内存的hole也需要有page结构体与之对应.
 
-节点的内存根据使用情况划分为多个区域,每个区域都对应一个zone对象. zone最多分为ZONE_DMA、ZONE_DMA32、ZONE_NORMAL、ZONE_HIGHMEM、ZONE_MOVABLE和
-ZONE_DEVICE六种。ZONE_DMA32用在64位系统上 , ZONE_MOVABLE是为了减少内存碎片化引入的虚拟zone.
+![](/misc/img/mem/mem_arch.png)
 
-ZONE_DMA的内存区间为低16M,ZONE_NORMAL的内存区间为16M到max_low_pfn页框的地址,ZONE_HIGHMEM的内存区间为max_low_pfn 到 max_pfn.
+每一个CPU以及和它直连的内存条组成了一个node(节点).
+
+节点的内存根据使用情况划分为多个区域,每个区域都对应一个zone对象. zone最多分为六种:
+- ZONE_DMA: 内存区间为低16M, 供IO设备DMA访问
+- ZONE_DMA32: 用在64位系统上, 用于支持32位地址总线的DMA设备
+- ZONE_NORMAL: 内存区间为16M到max_low_pfn页框的地址. 在X86-64架构下, DMA和DMA32之外的内存全部在NORMAL的zone里管理
+- ZONE_HIGHMEM: 内存区间为max_low_pfn 到 max_pfn, 是32位机时代的产物, 现在还在用这个的不多了
+- ZONE_MOVABLE: 为了减少内存碎片化引入的虚拟zone
+- ZONE_DEVICE
 
 max_pfn等于最大的页框号,不考虑预留HighMemory的情况下,如果它大于MAXMEM_PFN(MAXMEM对应的页框) ,
 max_low_pfn就等于MAXMEM_PFN。如果它小于MAXMEM_PFN,max_low_pfn则等于max_pfn,这样就没有ZONE_HIGHMEM了.
 
-page是zone的下一级单位,属于zone。但所有的page对象,都以数组的形式统一放在了pglist_data的node_mem_map字段指向的内存中.
+page是zone的下一级单位, 大小一般是4KB。但所有的page对象,都以数组的形式统一放在了pglist_data的node_mem_map字段指向的内存中.
+
+通过`/proc/zoneinfo`, 可以看到每个zone 下所管理的页面有多少个.
 
 除了碎片化,还要考虑效率,内核在不同阶段采用的内存管理方式也不同,主要分为memblock和buddy系统两种.
 
@@ -305,6 +314,8 @@ page的order函数:
 
 如果程序的应用场景并不要求连续内存,应该优先多次使用alloc_page,而不是alloc_pages,多次申请几个分散的
 页,比一次申请多个连续的页,对整个系统要友善得多. 某些malloc lib(比如jemalloc)通常会从内核申请一大块内存再在应用侧自己管理内存.
+
+内核提供分配器alloc_peges()会到zone->free_area的多个链表中寻找可用连续页面.
 
 alloc_pages最终调用`__alloc_pages_nodemask`实现,后者是伙伴系统页分配的核心.
 
@@ -1102,9 +1113,22 @@ struct zone {
 } ____cacheline_internodealigned_in_smp;
 ```
 
+![](/misc/img/mem/numa_arch.png)
+
 在很多服务器和大型计算机上，如果物理内存是分布式的，由多个计算节点组成，那么每个 CPU 核都会有自己的本地内存，CPU 在访问它的本地内存的时候就比较快，访问其他 CPU 核内存的时候就比较慢，这种体系结构被称为 Non-Uniform Memory Access（NUMA）.
 
+`dmidecode`的`Memory Device`表示内存设备, 其`Locator`表明与哪个cpu直连, `Bank Locator`表明属于哪个node.
+
+`numactl --hardware`可查看每个node的情况.
+
 Linux 对 NUMA 进行了抽象，它可以将一整块连续物理内存的划分成几个内存节点，也可以把不是连续的物理内存当成真正的 NUMA.
+
+zone对应的数据结构是struct zone, 其下面的一个数组free_area管理了绝大部分可用的空闲页面. 这个数组就是伙伴系统实现的重要数据结构.
+
+freearea是一个包含11个元素的数组,每—个数组分别代表的是空闲可分配连续4KB、8KB、16KB...4MB内存链表. 通过`cat /proc/pagetypeinfo`可以看到当前系统中伙伴系统各个尺寸的可用连续内
+存块数量.
+
+![](/misc/img/mem/buddy_arch.png)
 
 ```c
 //https://elixir.bootlin.com/linux/v6.5.1/source/include/linux/mmzone.h#L1175
@@ -2467,6 +2491,7 @@ EXPORT_PER_CPU_SYMBOL_GPL(gdt_page);
 - [linux内存源码分析 - SLUB分配器概述](https://www.cnblogs.com/tolimit/p/4654109.html)
 - [linux内核之slob、slab、slub](https://blog.csdn.net/Rong_Toa/article/details/106440497)
 - [如何诊断SLUB问题](http://linuxperf.com/?p=184)
+- [面试问题之：kmalloc，vmalloc，malloc区别分析](https://blog.csdn.net/m0_47696151/article/details/115187968)
 
 Linux内核内存管理的一项重要工作就是如何在频繁申请释放内存的情况下，避免碎片的产生. Linux提供了两个层次的内存分配接口:
 1. 伙伴系统管理物理内存页面, 解决外部碎片的问题
@@ -2486,7 +2511,50 @@ Linux内核内存管理的一项重要工作就是如何在频繁申请释放内
 
 	kmalloc使用的就是slub提供的对象.
 
-	要从slub申请内存需要先使用[kmem_cache_create](https://elixir.bootlin.com/linux/v5.11/source/mm/slab_common.c#L407)创建一个slub对象. 再通过[kmem_cache_alloc](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3484)和[kmem_cache_free](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3686)来申请和释放内存.
+	```c
+	// https://elixir.bootlin.com/linux/v5.11/source/include/linux/slub_def.h#L83
+	struct kmem_cache {
+		...
+
+		struct kmem_cache_node *node[MAX_NUMNODES];
+	};
+
+	// https://elixir.bootlin.com/linux/v5.11/source/mm/slab.h#L525
+	struct kmem_cache_node {
+		spinlock_t list_lock;
+
+	#ifdef CONFIG_SLAB
+		struct list_head slabs_partial;	/* partial list first, better asm code */
+		struct list_head slabs_full;
+		struct list_head slabs_free;
+		unsigned long total_slabs;	/* length of all slab lists */
+		unsigned long free_slabs;	/* length of free slab list only */
+		unsigned long free_objects;
+		unsigned int free_limit;
+		unsigned int colour_next;	/* Per-node cache coloring */
+		struct array_cache *shared;	/* shared per node */
+		struct alien_cache **alien;	/* on other nodes */
+		unsigned long next_reap;	/* updated without locking */
+		int free_touched;		/* updated without locking */
+	#endif
+
+	#ifdef CONFIG_SLUB
+		unsigned long nr_partial;
+		struct list_head partial;
+	#ifdef CONFIG_SLUB_DEBUG
+		atomic_long_t nr_slabs;
+		atomic_long_t total_objects;
+		struct list_head full;
+	#endif
+	#endif
+
+	};
+	```
+
+	slab时每个cache都有满、半满、空三个链表. 每个链表节点都对应一个slab,一个slab由一个或者多个内存⻚组成, 每一个slab内都保存的是同等大小的对象.
+	slub与slab有不同的实现.
+
+	要从slub申请内存需要先使用[kmem_cache_create](https://elixir.bootlin.com/linux/v5.11/source/mm/slab_common.c#L407)创建一个slub对象. 再通过[kmem_cache_alloc](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3484)和[kmem_cache_free](https://elixir.bootlin.com/linux/v5.11/source/mm/slab.c#L3686)来申请和释放对象内存.
 
 	vmalloc: 把物理地址不连续的内存页拼凑成逻辑地址连续的内存区间.
 
@@ -2499,6 +2567,19 @@ Linux内核内存管理的一项重要工作就是如何在频繁申请释放内
 	- kmem_cache_destroy: 销毁cache
 
 	> 创建和销毁cache是有代价的,若非必要,使用内核提供的cache更加高效
+
+	当cache中内存不够的时候, 会调用基于伙伴系统的分配器__alloc_peges()请求整页连续内存的分配.
+
+	内核中会有很多个kmem_cache存在. 它们是在Linux初始化,或者是运行的过程中分配出来的. 它们有的是专用的,有的是通用的.
+
+	socket_alloc内核对象都存在TCP的专用kem_cache中. 通过查看`/proc/slabinfo`可以查看所有的kmem_cache.
+
+	linux还提供slabtop来按照占用内存从大往小进行排列, 利用它可以很方便分析slab内存开销.
+
+	无论是/roc/slabinfo,还是slabtop命令的输出,里面都包含了每个cache中slab的如下两个关键信息:
+	- objsize:每个对象的大小。
+	- objperslab:一个slab里存放的对象的数量
+	`/proc/slabinto`还多输出了一个pagesperslab, 展示了一个slab占用的页面的数量,每个页面4KB,这样也就能算出每个slab占用的内存大小.
 
 申请内存因素表:
 1. 小于4M, 连续: buddy, slub

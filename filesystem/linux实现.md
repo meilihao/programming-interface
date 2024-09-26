@@ -596,6 +596,12 @@ Linux 支持的文件系统也不少，根据存储位置的不同，可以把�
 
 **文件系统首先要先挂载到某个目录才可以正常使用**，比如 Linux 系统在启动时，会把文件系统挂载到根目录.
 
+## fs_context
+ref:
+- [sock文件系统](https://blog.csdn.net/sinat_34467747/article/details/109169108)
+
+fs_context 引入了一种新的super block创建方式. 这个patch在2019年(linux 5.x)被合入，老的接口仍然可以兼容使用，但是目前大部分文件系统实现已经切换到了fs_context的新方式，见[VFS: Introduce filesystem context](https://lwn.net/Articles/780267/), [Filesystem Mount API](https://www.kernel.org/doc/html/latest/filesystems/mount_api.html)
+
 ## mount
 参考:
 - [EADME - 计算机专业性文章及回答总索引#新一代VFS mount系统调用](https://zhuanlan.zhihu.com/p/67686817)
@@ -649,7 +655,7 @@ do_new_mount
    -> init_fs_context(fc)  //初始化fs上下文 (比如初始化一些回调函数共以后使用)
 -> parse_monolithic_mount_data(fc, data)  //调用fc->ops->parse_monolithic  解析挂载选项
 -> mount_capable(fc) //检查是否有挂载权限
--> vfs_get_tree(fc)  //fs/super.c 挂载重点, 调用fc->ops->get_tree(fc) 创建super_block实例
+-> vfs_get_tree(fc)  //fs/super.c 挂载重点, 调用fc->ops->get_tree(fc) `set fc->root`并创建super_block实例
 -> do_new_mount_fc(fc, path, mnt_flags)  //创建mount实例, 关联挂载点和super_block, 添加到命名空间的挂载树中
    -> do_add_mount(real_mount(mnt), mp, mountpoint, mnt_flags) // 把源fs挂载到目的fs
       -> graft_tree(newmnt, parent, mp) // 把源fs的dentry树与目的fs的dentry树嫁接到一起

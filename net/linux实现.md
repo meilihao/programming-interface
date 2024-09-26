@@ -3355,6 +3355,27 @@ sever端在第三次握手时也可能出问题,如果全连接队列满,仍将�
 
   如果因为各种原因就是不想打开tcp_syncookies,就想吞看是否有因为半连接队列满而导致的SYN丢弃, 除了`nstat -z -t 1 |grep -i ListenDrops`/`netstat -s|grep SYNs`的结果,建议同时查看当前listen端口上的SYN_RECV的数量(`ss -antp|grep SYN_RECV|wc-l`/`netstat -antp |grep SYN_RECV|wc -l`). 如果SYN_RECV状态的连接数量达到算出来的队列长度,那么可以确定有半连接队列溢出.
 
+### 内存占用
+socket的创建方式有两种:
+1. 一种是直接调用socket函数
+
+  [`sock = sock_alloc();`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1535), 在sock_alloc函数中,申请了一个struct socket内核对象, 并将其与inode信息关联起来.
+
+  sock_alloc=> new_node_pseudo => alloc_inode (`sock_mnt->mnt_sb->op`=`&sockfs_ops`) => `inode = ops->alloc_inode(sb)`, 因此直接看[sock_alloc_inode](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L304), 它调用alloc_inode_sb从sock_inode_cachep缓存中申请一个struct socket_alloc对象(该对象还包括socket.wq, 因为较小, 忽略)
+
+  > `sock_mnt = kern_mount(&sock_fs_type);`=> 
+    `fs_context_for_mount()` => 
+    
+      => `init_fs_context = fc->fs_type->init_fs_context`
+      => init_fs_context(fc)=>
+         => `init_pseudo(fc, SOCKFS_MAGIC)`: `fc->fs_private = ctx`+`fc->ops = &pseudo_fs_context_ops`
+         => `ctx->ops = &sockfs_ops;`
+    `fc_mount(fc)` 
+        => vfs_get_tree(): fc->ops->get_tree(fc) => [vfs_get_super()](https://elixir.bootlin.com/linux/v6.8/source/fs/super.c#L1255) : [`s->s_op = ctx->ops ?: &simple_super_operations`](https://elixir.bootlin.com/linux/v6.8/source/fs/libfs.c#L580)
+        => vfs_create_mount(): [`mnt->mnt.mnt_sb = fc->root->d_sb`](https://elixir.bootlin.com/linux/v6.8/source/fs/namespace.c#L1111)
+
+1. 另外一种是调用accept接收
+
 ## 解析 socket 的 Write 操作
 socket 对于用户来讲，是一个文件一样的存在，拥有一个文件描述符. 因而对于网络包的发送，可以使用对于 socket 文件的写入系统调用，也就是 write 系统调用. write 系统调用对于一个文件描述符的操作，大致过程都是类似的. 对于每一个打开的文件都有一个 struct file 结构，write 系统调用会最终调用 stuct file 结构指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
 ```c
