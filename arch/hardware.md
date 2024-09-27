@@ -320,3 +320,4 @@ ref:
 - [OpenBMC 成服务器固件发展的 “事实标准”](https://www.oschina.net/news/310712)
 
     阿里云自 2020 年逐步采用 OpenBMC 产品，通过四年的探索与实践，已经在 x86 和 ARM 平台中实现 OpenBMC 替代，并计划未来支持 RISC-V 等多元芯片平台
+- [华为宣布 openUBMC 开源](https://www.oschina.net/news/313748)
