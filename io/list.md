@@ -7,6 +7,7 @@
 - [Linux IO 之 文件系统的架构.md](https://github.com/0voice/linux_kernel_wiki/blob/main/%E6%96%87%E7%AB%A0/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/Linux%20IO%20%E4%B9%8B%20%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E7%9A%84%E6%9E%B6%E6%9E%84.md)
 - [Linux Storage Stack Diagram](https://www.thomas-krenn.com/en/wiki/Linux_Storage_Stack_Diagram)
 - [1000行代码实现简单EBS块存储](https://zhuanlan.zhihu.com/p/695313576)
+- [深入学习理解 IO 多路复用](https://segmentfault.com/a/1190000022352273)
 
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)
@@ -25,6 +26,7 @@
 - [下一代异步 IO io_uring 技术解密](https://kernel.taobao.org/2020/08/Introduction_to_IO_uring/)
 - [io_uring，高并发网络编程新利器](https://kernel.taobao.org/2020/09/New_Weapon_for_High_Concurrency_Network_Programming/)
 - [面对疾风吧！io_uring 优化 nginx 实战演练](https://kernel.taobao.org/2020/09/IO_uring_Optimization_for_Nginx/)
+- [异步IO时代的颠覆者：深入探讨io_uring](https://mp.weixin.qq.com/s/i_hhPabueeVEW__uUiUavQ)
 
 ## 超融合
 - [The Nutanix Bible](https://toutiao.io/posts/v28zs0/preview)
