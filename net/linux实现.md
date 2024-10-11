@@ -2729,7 +2729,7 @@ __inet_listen_sk()设置的sk_max_ack_backlog是全连接队列的最大⻓度, 
 inet_csk_listen_start里面建立了一个新的结构 [inet_connection_sock](https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_connection_sock.h#L82)，这个结构一开始是 struct inet_sock，inet_csk()其实做了一次强制类型转换，扩大了结构. 接着`reqsk_queue_alloc(&icsk->icsk_accept_queue)`初始化了接收队列.
 
 > tcp_sock、inet_connection_sock、 inet_sock、 sock是逐层嵌套的关系, 类似面向对象里的继承. 对于TCP的socket来说, sock对象实际上是一个tcp_sock. 因此TCP中的sock对象随
-时可以强制类型转换为tcp_sock、 inet_connecion_sock、 inet_sock来使用.
+时可以强制类型转换为tcp_sock、 inet_connecion_sock、 inet_sock、sock来使用.
 
 struct inet_connection_sock 结构比较复杂. 如果打开它，就能看到处于各种状态的队列，各种超时时间、拥塞控制等字眼.
 
@@ -3361,7 +3361,7 @@ tcp连接相关的内核对象
   socket的创建方式有两种:
   1. 一种是直接调用socket函数
 
-    [`sock = sock_alloc();`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1535), 在sock_alloc函数中,申请了一个struct socket内核对象, 并将其与inode信息关联起来.
+    `__sys_socket_create`->`sock_create`->`sock_create`-> `__sock_create`-> [`sock = sock_alloc();`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1535), 在sock_alloc函数中,申请了一个struct socket内核对象, 并将其与inode信息关联起来.
 
     sock_alloc=> new_node_pseudo => alloc_inode (`sock_mnt->mnt_sb->op`=`&sockfs_ops`) => `inode = ops->alloc_inode(sb)`, 因此直接看[sock_alloc_inode](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L304), 它调用alloc_inode_sb从sock_inode_cachep缓存中申请一个struct socket_alloc对象(该对象还包括socket.wq, 因为较小, 忽略)
 
@@ -3377,13 +3377,75 @@ tcp连接相关的内核对象
           => vfs_create_mount(): [`mnt->mnt.mnt_sb = fc->root->d_sb`](https://elixir.bootlin.com/linux/v6.8/source/fs/namespace.c#L1111)
 
   1. 另外一种是调用accept接收
+
+    [`SYSCALL_DEFINE4(accept4, ...)`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1535)->`__sys_accept4`->`__sys_accept4_file`->`do_accept`
+
+    do_accept调用了`newsock = sock_alloc()`和`newfile = sock_alloc_file()`创建了sock_alloc_inode(该对象中包含了struct inode 和struct socket),struct dentry和struct file 3个内核对象的申请.
+
+    不过tcp_sock对象的创建过程有点不太一样, 服务端内核在第三次握手成功的时候,就已经创建好了tcp_sock, 并且一同放到了全连接队列中. 这样在调用accept函数接收的时候,只需要从全连接队列中取出来直接用就行了,无须再单独申请.
+
 1. tcp_sock
 
   对于IPV4来说, inet协议族对应的create()是[inet_create](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/af_inet.c#L251) by inet_family_ops.
 
-  因此__sock create中对pf->create的调用会执行到inet create中去。在这个西数中,
-将会到TCP这个slab缓存中申请一个stuct sock内核对象出来。其中TCP这个slab缓存是在
-inet init中初始化好的。
+  因此__sock create中对pf->create的调用会执行到inet_create(). 在这个函数中, 将会到TCP这个slab缓存中申请一个stuct sock内核对象出来, 其中TCP这个slab缓存是在inet_init [`proto_register(&tcp_prot, 1)`](https://elixir.bootlin.com/linux/v6.8/source/net/core/sock.c#L3925)中初始化的. 即协议栈初始化的时候,会创建一个名为TCP、大小为sizeof(struct tcp_ sock)的slab缓存,并把它记到tcp_prot->slab的字段下.
+
+  > 在TCP slab缓存中实际存放的是struct tcp_sock对象,是struct sock的扩展.
+1. dentry
+
+   socket系统调用[`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1535), 除了__sys_socket_create以外,还调用了一个sock_map_fd, 以此为入口将完成struct dentry的申请.
+
+   内核初始化的时候创建好了一个dentry_cache的slab缓存,所有的struct dentry对象都将在这里进行分配.
+
+   `sock_map_fd`->`sock_alloc_file`->`alloc_file_pseudo`->`d_alloc_pseudo`
+
+   alloc_file_pseudo其实完成了struct dentry和struct file 两个内核对象的申请.
+1. flip对象申请 (struct file)
+
+  由alloc_file_pseudo()的alloc_file()申请. 在Linux上,一切皆是文件,正是通过和struct file对象的关联来让sacket看起来也是一个文件. struct file是通过[filp_cachep](https://elixir.bootlin.com/linux/v6.8/source/fs/file_table.c#L469)来进行管理的.
+
+实测TCP内核对象开销:
+1. 准备阶段
+  1. 客户端
+
+    1. 需要调整如下内核参数:
+      1. 调整ip_local_port_range来保证可用端口数大于5万个
+      1. 保证tw_reuse和tw_recycle是关闭状态的,否则连接无法进入TIME_WAIT
+      1. 调整tcp_max_tw_buckets保证能有5万个TIME_WAT状态供观察
+
+    2. `echo "3" > /proc/sys/vm/drop_caches` # 先清理pagecache、dentries和nodes
+    3. `cat /proc/meminfo |grep Slab`记录输出c1
+
+    > 可用slabtop查看slab变化
+
+  1. server
+    1. 需要调整如下内核参数:
+      1. net.core.somaxconn = 1024 : 避免把连接队列打满,进而导致握手过慢
+
+    2. `echo "3" > /proc/sys/vm/drop_caches` # 先清理pagecache、dentries和nodes
+    3. `cat /proc/meminfo |grep Slab` #记录输出s1
+1. 实验
+
+  1. 在client端发起请求5000个
+  2. 在client的其他terminal观察slabtop
+
+    和实验开始前的数据相比, kmalloc-64、dentry、kmalloc-256、 sock_inode_cache、TCP这5个内核对象都有了明显的增加. 这些其实就是上面提到的socket内部相关的内核对象. 其中的kmalloc-256是filp. krnalloc-64既包括前文提到的socket_wq,也包括记录端口使用关系的哈希表中使用的inet_bind_bucket元素. 每次使用一个端口的时候,就会申请—个inet_bind_bucket以记录该端口被使用过, 所有的inet_bind_bucket以哈希表的形式组织了起来, 以便下次再选择端口的时候查找该哈希表来判断一个端口有没有被使用.
+
+    至于不直接显示filp, tcp_bind_bucket等,而是显示kmalloc-xx,那是因为Linux内部的一个叫slab merging的功能, 该功能可能会将同等大小的stab缓存放到一起. Linux源码中提供了工具`slabinfo -a`可以查看都有哪些slab参与了合并.
+
+    > cd kernel/tools/vm && make slabinfo
+  3. 在client查看`cat /proc/meminfo |grep Slab`记录输出c2, . 结果就是(c2-c1)/5000≈3.34KB/一条ESTABLISH状态的空连接
+  4. 在server的其他terminal观察slabtop, 同理根据`cat /proc/meminfo |grep Slab`记录输出s2, 算得一条ESTABLISH状态的空连接大约是3.05KB
+
+    大致也是kmalloc-64、dentry、kmalloc-256、sock_inode_cache、TCP这五个对象. 不过和客户端相比, kmalloc-64明显要消耗得少一些. 这是因为服务端不需要tcp_bind_bucket记录端口占用.
+  5. 在client 按ctrl+c, 会发出FIN, 然后让tcp连接进入FIN_WAIT2, 查看`cat /proc/meminfo |grep Slab`记录输出c3, 可算的是0.396 KB. 可见在FIN_WAT2状态下,TCP连接的开销要比ESTABLISH状态下小得多.
+
+    可见dentry、tilp、sock_inode_cache、TCP这四个对象都被回收了,只剩下kmalloc-64, 另外多了一个只有0.25KB的tw_sock_TCP. 总之,FIN_WAIT2状态下的TCP连接占用的内存很小. 内核在不需要的时候会尽量回收不再使用的内核对象,以节约内存.
+  6. 再在server 按ctrl+c, 会发出FIN, 让client tcp连接进入TIME_WAIT, 查看client `cat /proc/meminfo |grep Slab`记录输出c4, 可算的是0.41 KB, 和client FIN_WAIT2时差不多.
+
+  注意: 实验后slab内存管理还是会适度存在一些浪费, 外加其他slab缓存对象的使用, 所以实际内存占用会比`cat /proc/meminfo |grep Slab`大一些
+
+数据收发对内存的消耗相当复杂,涉及tcp_rmem、tcp_wmem等内核参数限制, 也涉及滑动窗口、流量控制等协议层面的影响, 不做测试.
 
 ## 解析 socket 的 Write 操作
 socket 对于用户来讲，是一个文件一样的存在，拥有一个文件描述符. 因而对于网络包的发送，可以使用对于 socket 文件的写入系统调用，也就是 write 系统调用. write 系统调用对于一个文件描述符的操作，大致过程都是类似的. 对于每一个打开的文件都有一个 struct file 结构，write 系统调用会最终调用 stuct file 结构指向的 file_operations 操作. 对于 socket 来讲，它的 file_operations 定义如下：
@@ -4064,3 +4126,48 @@ L3的套接字
 ## FAQ
 ### 根据主机的ip查找其mac
 该工作由邻接子系统完成. 邻居发现在ipv4由arp协议完成; 在ipv6由NDISC协议负责. 它们区别在于: arp依赖于发送广播请求; NDISC依赖于发送ICMPv6请求(属于组播数据包).
+
+### Too many open files
+在Linux系统中,限制打开文件数的内核参数包含以下三个:fs.nr_open、nofile和fs.file-max. 想要加大可打开文件数的限制就需要涉及对这三个参数的修改.
+
+但这几个参数里有的是进程级的,有的是系统级的,有的是用户进程级的, 而且这几个参数还有依赖关系,修改的时候,稍有不慎还可能把机器搞出问题.
+
+`SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)`->`sock_map_fd(sock, flags & (O_CLOEXEC | O_NONBLOCK));`
+
+```c
+// https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L485
+static int sock_map_fd(struct socket *sock, int flags)
+{
+	struct file *newfile;
+	int fd = get_unused_fd_flags(flags); // 获取可用fd句柄号, 这只是在找一个可用的数组下标而己: 在这里会判断打开文件数是否超过soft nofile和fs.nr_open
+	if (unlikely(fd < 0)) {
+		sock_release(sock);
+		return fd;
+	}
+
+	newfile = sock_alloc_file(sock, flags, NULL); // 创建sock_a11oc_file对象: 在这里会判断打开文件数是否超过 fs.file-max
+	if (!IS_ERR(newfile)) {
+		fd_install(fd, newfile);
+		return fd;
+	}
+
+	put_unused_fd(fd);
+	return PTR_ERR(newfile);
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/fs/file.c#L562
+int get_unused_fd_flags(unsigned flags)
+{
+	return __get_unused_fd_flags(flags, rlimit(RLIMIT_NOFILE)); // rlimit(RLIMIT_NOFILE)是读取limits.conf中配置的soft nofile(rim_max应hard nofile)
+}
+EXPORT_SYMBOL(get_unused_fd_flags);
+```
+
+![socket的fd和sock_alloc_file](/misc/img/net/socket_file.png)
+
+__get_unused_fd_flags->[alloc_fd](https://elixir.bootlin.com/linux/v6.8/source/fs/file.c#L499), 它判断要分配的句柄号是不是超过了limits.conf中nofile的限制.
+因为fd是当前进程相关的,是一个从O开始的整数, 只要确保分配出去的fd编号不超过limits.conf中的nofile,就能保证该进程打开的文件总数不会超过这个数. 如果超限,就报错EMFILE ( Too many open files).
+
+alloc_fd -> [expand_files](https://elixir.bootlin.com/linux/v6.8/source/fs/file.c#L214), 在expand_files中,又见到nr( 就是fd编号) 和fs.nr_open相比较了, 超过这个限制, 返回错误EMFILE.
+
+由上可见,无论是和fs.nr_open, 还是和soft nofile比较, 都是用当前进程的文件描述符序号比较的, 所以这两个参数都是进程级别的.

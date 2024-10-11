@@ -308,3 +308,9 @@ if err:=unix.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1<<20*40);
 
 ### lib
 - [netlink - golang](https://github.com/mdlayher/netlink)
+
+## FAQ
+### unix.Close(netlikFd)成功, 但再次使用该netlink报`address already in use`
+kernel: 5.4.17
+
+如果有netlikFd, 再次尝试(未验证); 否则重启
