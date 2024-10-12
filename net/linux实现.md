@@ -4197,3 +4197,26 @@ hard nofile 1000000
 
 ### 一台服务端机器最多可以支撑多少条TCP连接
 TCP连接四元组是源IP地址、源端口、目的IP地址和目的端口. 任意一个元素发生了改变, 就代表这是一条完全不同的连接了.
+
+以nginx使用443举例, 此时dst ip和dst port固定, 剩下src ip和src port可变, 所以理论上nginx上最多可以建立2^32(ip)x2^16(port)条连接.
+
+进程每打开一个文件, 都会消耗一定的内存资源. Linux系统出于安全的考虑,在多个位置都限制了可打开的文件描述符的数量, 这三个限制的含义和修改方式如下:
+1. 系统级: 当前系统可打开的最大数量,通过fs.file-max参数可修改
+1. 用户级: 指定用户可打开的最大数量,修改/etc/security/limits.conf
+1. 进桯级: 单个进程可打开的最大数量,通过fs.nr_open参数可修改
+
+接收缓存区大小限制是可以通过一组内核参数配置的, 通过sysctl就可以查看和修改:
+```bash
+$ sysctl -a | grep rmem
+net.ipv4.tcp_rmem = 4096 87380 8388608
+net.core.rmem_default = 212992
+net.core.rmem_max = 8388608
+```
+
+TCP分配发送缓存区的大小受参数net.ipv4.tcp_wmem等另外一组参数控制:
+```bash
+$ sysctl -a l grep wmem
+net.ipv4.tcp_wmem = 4096 65536 8388608
+net.core.wmem_default = 212992
+net.core.wmem_max =8388608
+```
