@@ -4171,3 +4171,29 @@ __get_unused_fd_flags->[alloc_fd](https://elixir.bootlin.com/linux/v6.8/source/f
 alloc_fd -> [expand_files](https://elixir.bootlin.com/linux/v6.8/source/fs/file.c#L214), 在expand_files中,又见到nr( 就是fd编号) 和fs.nr_open相比较了, 超过这个限制, 返回错误EMFILE.
 
 由上可见,无论是和fs.nr_open, 还是和soft nofile比较, 都是用当前进程的文件描述符序号比较的, 所以这两个参数都是进程级别的.
+
+结论: soft nofile和fs.nr_open的作用一样,它们都是用来限制**单个进程即进程级**的最大文件数量, 区别是soft nofile可以按用户来配置,而所有用户只能配一个fs.nr_open.
+
+sock_alloc_file->alloc_file_pseudo->alloc_file->[alloc_empty_file](https://elixir.bootlin.com/linux/v6.8/source/fs/file_table.c#L185), 可见其中的`get_nr_files() >= files_stat.max_files && !capable(CAP_SYS_ADMIN)`(root不受限制).
+
+fs.file-max表示**整个系统即系统级**可打开的最大文件数, 但不限制root用户.
+
+这几个参数之间还有耦合关系,因此还要注意以下三点:
+1. 如果想加大soft nofile, 那么hard nofile也需要一起调整. 因为如果hard nofile设置得低, sofit nofile 设置得再高都没用,实际生效的值会按二者里最低的来.
+1. 如果加大了hard nofile, 那么fs.nr_open也都需要跟着一起调整. 如果不小心把hard nofile设置得比fs.nr_open大, 后果比较严重, 会导致该用户无法登录. 如果设置的是`*`,那么所有的用户都无法登录
+1. 如果加大了fs.nr_open, 但用的是echo xx > ../fs/nr_open的方式时, 只要机器一重启fs.nr_open设置就会失效,还是无法登录, 所以非常不建议用echo的方式修改内核参数.
+
+参考配置(100万级):
+```conf
+# vim /etc/sysctl.conf
+fs.fi1e-max=1100000 // 系统级别设置成110万,多留点缓冲
+fs.nr_open=1100000 // 进程级别也设置成110万, 因为要保证比hard nofile大
+# sysctl -p
+# vim /etc/security/limits.conf
+// 用户进程级别都设置成100万
+soft nofile 1000000
+hard nofile 1000000
+```
+
+### 一台服务端机器最多可以支撑多少条TCP连接
+TCP连接四元组是源IP地址、源端口、目的IP地址和目的端口. 任意一个元素发生了改变, 就代表这是一条完全不同的连接了.
