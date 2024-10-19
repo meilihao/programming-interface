@@ -4123,6 +4123,54 @@ struct:
 ### sock
 L3的套接字
 
+## veth
+docker网络虛拟化中最基础的技术是veth, 它模拟了在物理世界里的两块连接在一起的网卡. veth和lo的一点儿区别就是veth总是成双成对地
+出现.
+
+```bash
+# ip link add veth0 type veth peer name veth1 # 创建一对veth
+# ip addr add 192.168.1.1/24 dev veth0 # 和eth0, lo等网络设备一样,veth也需要为其配置IP后才能够正常工作
+# ip addr add 192.168.1.2/24 dev veth1
+# ip 1ink set vethe up
+# ip link set vethl up
+#--- 需要做一点儿准备工作,它们之间才可以进行互相通信. 首先要关闭反向过滤rp filter, 该模块会检查IP包是否符合要求,否则可能会过滤掉。然后再打开accept local,接收本机IP数据包
+# echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+# echo 0 > /proc/sys/net/ipv4/conf/veth0/rp_filter
+# echo O > /proc/sys/net/ipv4/conf/veth1/rp_filter
+# echo 1 > /proc/sys/net/ipv4/conf/veth0/accept_1ocal
+# echo 1 > /proc/sys/net/ipv4/conf/veth1/accept_1ocal
+# --- 在vethO上来ping—下veth1, 此时这两个veth之间就可以通信了
+```
+
+veth的相关源码位于drivers/net/veth.c, 其中初始化入口是[veth_init](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/veth.c#L2050).
+
+在veth_init中注册了[veth_link_ops(veth设备的操作方法)](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/veth.c#L2032),它包含了veth设备的创建、启动和删除等回调函数.
+
+veth设备的创建函数[veth_newlink](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/veth.c#L1853), 这是理解veth的关键之处.
+
+在veth_newlink中, 看到它通过register_netdevice创建了peer和dev两个网络虛拟设备. 接下来的netdev_priv函数返回的是网络设备的private数据,priv->peer就是一个指
+针而己.
+
+两个新创建出来的设备dev和peer通过priv->peer指针来完成结对, 其中dev设备里的prv->peer指针指向peer设备, peer设备里的priv->peer指向dev.
+
+veth设备的启动过程是veth_setup.
+
+其中dev->netdev_ops = &veth_netdev_ops这行也比较关键. veth_netdev_ops是veth设备的操作函数. 例如发送过程中调用的函数指针ndo_start xmit, 对于veth设备来说就会
+调用到veth_xmit.
+
+veth的网络IO过程和lo几乎完全一样, 和lo设备不同的就是使用的驱动程序不一样.
+
+网络设备层最后会在dev_hard_start_xmit通过ops->ndo_start_xmit()来调用驱动进行真正的发送即veth_xmit.
+
+在veth_xmit中主要就是获取当前veth设备,然后把数据向对端发送过去就行了. 发送到对端设备的工作是由dev_forward_skb函数处理的.
+
+它先调用了eth_type_trans将skb的所属设备改为刚刚取到的veth对端设备rcv.
+
+接着调用netif_rx, 这块又和lo设备的操作一样了. 在该方法中最终会执行到enqueve_to_backlog中 (netif_rx->netif_rx_internal-> enqueue_to_backog). 在这里将要发送的skt插入softnet_data->input_pkt_queu队列中并调用napi_schedule来触发软中
+断.
+
+当数据发送完唤起软中断后,veth对端的设备开始接收. 和发送过程不同的是,所有的虚拟设备的收包poll函数都是一样的, 都是在设备层被初始化成process_backog.
+
 ## FAQ
 ### 根据主机的ip查找其mac
 该工作由邻接子系统完成. 邻居发现在ipv4由arp协议完成; 在ipv6由NDISC协议负责. 它们区别在于: arp依赖于发送广播请求; NDISC依赖于发送ICMPv6请求(属于组播数据包).
@@ -4220,3 +4268,299 @@ net.ipv4.tcp_wmem = 4096 65536 8388608
 net.core.wmem_default = 212992
 net.core.wmem_max =8388608
 ```
+
+每条TCP连接即使是在无数据传输的**空闲状态**下,也会消耗3KB多的内存. 所以,一台服务器的最大连接数总量受限于服务端机器的内存, 而cpu通常不会成为瓶颈.
+
+### 一台服务端机器最多可以支撑多少条TCP连接
+```c
+// https://elixir.bootlin.com/linux/v6.8/source/include/net/sock.h#L150
+struct sock_common {
+	union {
+		__addrpair	skc_addrpair;
+		struct {
+			__be32	skc_daddr;
+			__be32	skc_rcv_saddr;
+		};
+	};
+	...
+	/* skc_dport && skc_num must be grouped as well */
+	union {
+		__portpair	skc_portpair;
+		struct {
+			__be16	skc_dport;
+			__u16	skc_num;
+		};
+	};
+  ...
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/tcp_ipv4.c#L2161
+int tcp_v4_rcv(struct sk_buff *skb)
+{
+	...
+
+	th = (const struct tcphdr *)skb->data;
+	iph = ip_hdr(skb);
+lookup:
+	sk = __inet_lookup_skb(net->ipv4.tcp_death_row.hashinfo,
+			       skb, __tcp_hdrlen(th), th->source,
+			       th->dest, sdif, &refcounted);
+	if (!sk)
+		goto no_tcp_socket;
+  ...
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/include/net/inet_hashtables.h#L408
+static inline struct sock *__inet_lookup(struct net *net,
+					 struct inet_hashinfo *hashinfo,
+					 struct sk_buff *skb, int doff,
+					 const __be32 saddr, const __be16 sport,
+					 const __be32 daddr, const __be16 dport,
+					 const int dif, const int sdif,
+					 bool *refcounted)
+{
+	u16 hnum = ntohs(dport);
+	struct sock *sk;
+
+	sk = __inet_lookup_established(net, hashinfo, saddr, sport,
+				       daddr, hnum, dif, sdif);
+	*refcounted = true;
+	if (sk)
+		return sk;
+	*refcounted = false;
+	return __inet_lookup_listener(net, hashinfo, skb, doff, saddr,
+				      sport, daddr, hnum, dif, sdif);
+}
+
+// https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/inet_hashtables.c#L492
+struct sock *__inet_lookup_established(struct net *net,
+				  struct inet_hashinfo *hashinfo,
+				  const __be32 saddr, const __be16 sport,
+				  const __be32 daddr, const u16 hnum,
+				  const int dif, const int sdif)
+{
+	INET_ADDR_COOKIE(acookie, saddr, daddr);
+	const __portpair ports = INET_COMBINED_PORTS(sport, hnum); // 将源端口、目的端口拼成一个32位int整数
+	struct sock *sk;
+	const struct hlist_nulls_node *node;
+	/* Optimize here for direct hit, only listening connections can
+	 * have wildcards anyways.
+	 */
+  // 内核用哈希的方法加速socket的查找
+	unsigned int hash = inet_ehashfn(net, daddr, hnum, saddr, sport);
+	unsigned int slot = hash & hashinfo->ehash_mask;
+	struct inet_ehash_bucket *head = &hashinfo->ehash[slot];
+
+begin:
+	sk_nulls_for_each_rcu(sk, node, &head->chain) { // 遍历链表,逐个对比直到找到
+		if (sk->sk_hash != hash)
+			continue;
+		if (likely(inet_match(net, sk, acookie, ports, dif, sdif))) {
+			if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
+				goto out;
+			if (unlikely(!inet_match(net, sk, acookie,
+						 ports, dif, sdif))) {
+				sock_gen_put(sk);
+				goto begin;
+			}
+			goto found;
+		}
+	}
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != slot)
+		goto begin;
+out:
+	sk = NULL;
+found:
+	return sk;
+}
+EXPORT_SYMBOL_GPL(__inet_lookup_established);
+```
+
+skc_addrpair记录的是TCP连接里的1P对,skc_portpair记录的是端口对.
+
+__inet_lookup_skb->__inet_lookup, __inet_lookup先判断有没有连接状态的socket, 这会走到 _inet_lookup_established函数中.
+
+在inet_match中将网络包tcp header中的`_saddr、_daddr、_ports`和Linux中socket的`inet_portpair、 inet_daddr、inet_rcv_saddr`进行对比. 如果匹配socket就找到了.
+
+当然,除了ip和端口,inet_match还比较了其他一些项, 所以TCP还有五元组、七元组之类的说法.
+
+所以在客户端增加TCP最大并发能力有两个方法:
+1. 为客户端配置多个ip
+2. 连接多个不同的server port, **推荐**
+
+这两个办法最好不要混用. 因为使用多ip时,client需要绑定. 一旦绑定之后, 内核建立连接的时候就不会选择用过的端口了. bind函数会改变内核选择端口的策略.
+
+### 优化
+网络请求:
+1. 尽量減少不必要的网络IO
+1. 尽量合并网络请求
+1. 调用者与被调用机器尽可能部署得近一些
+1. 内网调用不要用外网域名
+
+  原因:
+  1. 外网接口慢
+  1. 带宽成本高
+  1. NAT单点瓶颈
+
+接收过程优化:
+1. 调整网卡RingBuffer大小
+
+  ethtool查看到的实际是Rx bd的大小. Rx bd位于网卡中,相当于一个指针. RingBuffer在内存中,Rx bd指向RingBuffer. Rx bd和RingBuffer中的元素是一一对应的关系. 在网卡启动的时候, 内核会为网卡的Rxbd在内存中分配RingBuffer,并设置好对应关系.
+
+  `ethtool -S eth0`的`rx_fifo_errors如果不为0(在ifconfig中体现为overruns指标增长),就表示有包因为RingButter装不下而被丢弃了.
+
+  不过调大RingButter有个小副作用,那就是排队的包过多会增加处理网络包的延时
+1. 多队列网卡RSS调优
+
+  打散队列的cpu亲和性
+
+  > 在默认情况下, 队列中断号和CPU之间的亲和性并不需要手工维护,由irgbalance服务来自动管理. irqbalance会根据系统中断负载的情况,自动维护和迁移各个中断的CPU亲和性,以保持各个CPU之问的中断开销
+
+1. 硬中断合并
+
+  减少中断数量虽然能使得Linux整体网络包吞吐更高,不过一些包的延迟也会增大,所以用的时候要适当注意.
+
+  `ethtool -c eth0`:
+  - Adaptve RX: 自适应中断合并,网卡驱动自己判断啥时候该合并啥时候不合并
+  - rx-usecs:当过这么长时间过后,一个RX interrupt就会产生
+  - rx-frames:当累计接收到这么多个帧后,一个RX interrupt就会产生
+
+  调整方法: `ethtool -C eth0 adaptive-rx on`
+
+1. 软中断budget调整
+
+  对于Linux处理软中断的ksoftirad来说,它和番茄工作法思路类化. 一旦它被硬中断触发开始了工作,会集中精力处理一拨网络包 (绝对不只一个),然后再去做别的事情
+
+  `net.core.netdev_budget = 300`(by sysctl)就是ksotirad一次最多处理300个包,处理够了就会把CPU主动让出来, 以便Linux上其他的任务得到处理.
+
+1. 接收处理合并
+
+  硬中断合并是指的攒一堆数据包后再通知一次CPU, 不过数据包仍然是分开的. LRO ( Large Receive Ofload )/GRO ( Generic Receive Oftload )还能把数据包合并后再往
+上层传递.
+
+  LRO和GRO的区别是合并包的位置不同. LRO是在网卡上就把合并的事情给做了, 因此要求网卡硬件必须支持才行. 而GRO是在内核源码中用软件的方式实现的,更加通用,不依赖硬件
+
+  ```bash
+  # ethtool -k eth0
+  generic-receive-offload: on
+  large-receive-offload: on
+  #ethtool -K eth0 gro on
+  # ethtool -K eth0 lro on
+  ```
+
+发送过程优化:
+1. 控制数据包大小
+
+  分片影响:
+  1. 在分片的过程中多了一次内存拷贝
+  1. 分片越多,在网络传输的过程中出现丢包的风险也越大. 当丢包重传出现的时候,重传定时器的工作时间单位是秒, 即最快1s以后才能开始重传
+2. 减少内存拷贝
+
+  使用:
+  1. mmap
+
+    其实在mmap发送文件的方式里,系统调用的开销并没有减少,还是发生两次内核态和用户态的上下文切换
+  1. sendfile
+
+    sendfile比mmap省一次系统调用的开销
+
+    再配合绝大多数网卡都支持的`分散一收集 ( Sctter getther )` DMA功能, 可以直按从PageCache缓存区中DMA拷贝至网卡中
+1. 推迟分片
+
+  发送过程在IP层如果要发送的数据大于MTU, 会被分片. 但其实有一个例外,那就是开启了TSO ( TCP Segmentation Offload ) / GSO ( Generic Segmentation Offload).
+
+  skb_is_gso判断是否使用GSO,如果使用了,就可以把分片过程推迟到更下面的设备层去做.
+
+  dev_hard_start_xmit位于设备层,和物理网卡离得更近. netif_needs_gso来判断是否需要进行GSO切分. 在这个函数里会判断网卡硬件是不是支持TSO, 如果支持,则不进行GS0切分,将大包直接传给网卡驱动,切分工作推迟到网卡硬件中去做. 如果硬件不支持,则调用dev_gso_segment开始切分.
+  
+  推迟分片的好处是可以省去大量包的协议头的计算工作量, 减轻CPU的负担.
+
+  ```bash
+  # ethtool -k eth0 # 查看当前TSO和GSO的开启状况
+  # ethtool -K eth0 tso on
+  # ethtool -K eth0 gso on
+  ```
+1. 多队列网卡XPS调优
+
+  在__netdev_pick_tx中, 要选出来—个发送队列. 如果存在XPS配置, 就以XPS配置为准. XPS配置在`/sys/class/net/eth0/queues/tx-2/xps_cpus`(内容是cpu掩码)里.
+
+  通过XPS指定了当前CPU要使用的发送队列的好处:
+  1. 因为更少的CPU争用同一个队列,所以设备队列锁上的冲突大大减少. 如果进一步配置成每个CPU都有自己独立的队列可用,则会完全消除队列锁的开销
+  1. CPU和发送队列一对一绑定以后能提高传输结构的局部性,从而进一步提升效率
+
+  > 关于RSS、RPS、RFS、aRFS、 XPS等网络包收发过程中的优化手段可参考源码中的Documentation/networking/scaling.txt
+1. 使用eBPF绕开协议栈的**本机**网络IO
+
+  本机网络IO和跨机IO比较起来,确实是节省了驱动上的一些开销. 发送数据不需要进RingBuffer的驱动队列, 直接把skb传给接收协议栈(经过软中断).
+  但是在内核的其他组件上,工作量可是一点儿都没少,系统调用、 协议栈(传输层、网络层等)、设备子系统整个走了一个遍. 连"驱动"程序都走了(虽然对于回环设备来说这个驱动只是纯软件的虛拟出来的).
+
+  可使用eBPF的sockmap和sk redirect可以绕过TCPAP协议栈,而被直接发送给接收端的socket
+
+内核与进程协作优化:
+1. 尽量少用recvfrom等进程阻塞的方式
+
+  在使用了recvrom阻塞方式来接收socket 上的数据时,每次一个进程专门为了等一个socket上的数据就被人CPU 上拿下来, 然后再换上另一个进程. 等到数据准备好了,睡眠的进程又会被唤醒. 总共两次进程上下文切换开销.
+
+  其缺点:
+  1. 每个进程只能同时等待一条连接,所以需要大量的进程
+  1. 进程之问互相切换的时候需要消耗很多CPU周期,一次切换大约是3~5微秒左右
+  1. 频繁的切换导致L1、L2、L3等高速缓存的效果大打折扣
+1. 使用成熟的网络库
+1. 使用Kernel-ByPass
+
+  方案有SOLARFLARE的软硬件方案、DPDK等等
+
+握手挥手过程优化:
+1. 配置充足的端口范围
+
+  如果端口加大了仍然不够用, 那么可以考虑开启端口reuse和recycle. 这样端口在连接、断开的时候就不需要等待2MSL的时间了,可以快速回收. 开启这个参数之前需要保证tcp timestamps是开启的
+
+  ```bash
+  # vim /etc/sysctl.conf
+  net.ipv4.tcptimestamps = 1
+  net.ipv4.tcp_tw_reuse = 1
+  net.ipv4.tw_recycle = 1
+  # sysctl -p
+  ```
+1. 客户端最好不要使用bind
+
+  connect系统调用在选择端口的时候,即使一个端口已经被用过了,只要和已有的连接四元组不完全一致,那这个端又仍然可以被用于建立新连接.
+  
+  但是bind会破坏connect的这段端口选择逻辑, 直接绑定一个端口, 而且一个端口只能被绑定一次. 如果使用了bind, 则一个端口只能用于发起一条连接.
+
+1. 小心连接队列溢出
+
+  对于半连接队列, 只要保证tcp_syncookies是1, 就能保证不会有因为半连接队列满而发生的丢包
+  对于全连接队列, `netstat -s | grep overflowed`可查看到当前系统全连接队列满导致的丢包统计
+
+  > tcpdump抓包查看是否有SYN的TCP Retransmnission. 如果有偶发的TCP Retransmission, 那就说明对应的server连接队列可能有问题了
+1. 减少握手重试
+
+  超时重试的时问间隔是翻倍增长的
+
+  client的syn重传次数由tcp_syn_retries控制, 服务器半连接队列中的超时次数由tcp_synack_retries来控制
+1. 打开TFO (TCP Fast Open)
+
+  在客户端和服务端都支持该功能的前提下, 客户端的第三次握手ack包就可以携带要发送给服务器的数据. 这样就会节约一个RTT的时间开销
+
+  `net.ipv4.tcp_fastopen=3 // 服务端和客户端两种角色都启用`
+1. 保持充足的文件描述符上限
+1. 如果请求频繁,请弃用短连接改用⻓连接
+
+  改长连接优点:
+  1. 节约了握手开销
+  1. 规避了队列满的问题
+  1. 端口数不容易出问题
+1. TIME_WAIT的优化
+
+  1. 开启端口reuse 和recycle
+  1. 限制TIME_WAIT状态的连接的最大数量
+
+    `net.ipv4.tcp_max_tw_buckets = 32768`
+  1. 使用长连接
+  
