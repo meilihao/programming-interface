@@ -4155,21 +4155,280 @@ veth设备的创建函数[veth_newlink](https://elixir.bootlin.com/linux/v6.8/so
 
 veth设备的启动过程是veth_setup.
 
-其中dev->netdev_ops = &veth_netdev_ops这行也比较关键. veth_netdev_ops是veth设备的操作函数. 例如发送过程中调用的函数指针ndo_start xmit, 对于veth设备来说就会
-调用到veth_xmit.
+其中dev->netdev_ops = &veth_netdev_ops这行也比较关键. [veth_netdev_ops](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/veth.c#L1744)是veth设备的操作函数. 例如发送过程中调用的函数指针ndo_start xmit, 对于veth设备来说就会调用到veth_xmit.
 
-veth的网络IO过程和lo几乎完全一样, 和lo设备不同的就是使用的驱动程序不一样.
+veth的网络IO过程和lo几乎完全一样, 和lo设备不同的就是使用的驱动程序不一样即lo的netdev_ops是loopback_ops, 而veth是veth_netdev_ops.
+
+> lo: 在发送阶段,流程是执行send系统调用 =>协议栈 =>邻居子系统 =>网络设备层 =>驱动; 在接收阶段,流程是软中断=>驱动=>网络设备层=>协议栈 =>系统调用返回
 
 网络设备层最后会在dev_hard_start_xmit通过ops->ndo_start_xmit()来调用驱动进行真正的发送即veth_xmit.
 
-在veth_xmit中主要就是获取当前veth设备,然后把数据向对端发送过去就行了. 发送到对端设备的工作是由dev_forward_skb函数处理的.
+在veth_xmit中主要就是获取当前veth设备的对端(`rcv = rcu_dereference(priv->peer)`),然后把数据向对端发送过去就行了. 发送到对端设备的工作是由[veth_forward_skb](https://elixir.bootlin.com/linux/v6.8/source/drivers/net/veth.c#L316)->[__dev_forward_skb](https://github.com/torvalds/linux/blob/v6.8/net/core/dev.c#L2162)函数处理的.
 
 它先调用了eth_type_trans将skb的所属设备改为刚刚取到的veth对端设备rcv.
 
-接着调用netif_rx, 这块又和lo设备的操作一样了. 在该方法中最终会执行到enqueve_to_backlog中 (netif_rx->netif_rx_internal-> enqueue_to_backog). 在这里将要发送的skt插入softnet_data->input_pkt_queu队列中并调用napi_schedule来触发软中
-断.
+接着调用netif_rx, 这块又和lo设备的操作一样了. 在该方法中最终会执行到enqueve_to_backlog中 (netif_rx->netif_rx_internal-> enqueue_to_backog). 在这里将要发送的skb插入softnet_data->input_pkt_queue队列中并调用____napi_schedule来触发软中断.
 
-当数据发送完唤起软中断后,veth对端的设备开始接收. 和发送过程不同的是,所有的虚拟设备的收包poll函数都是一样的, 都是在设备层被初始化成process_backog.
+> [「十八」数据包的转发 dev_forward_skb源码分析](https://guanjunjian.github.io/2018/01/05/study-18-dev_forward_skb-source-analysis/)
+
+当数据发送完唤起软中断后,veth对端的设备开始接收. 和发送过程不同的是,所有的虚拟设备的收包poll函数都是一样的, 都是在设备层被初始化成process_backog. 所以veth设备的接收过程和lo设备完全一样, 大致流程是net_rx_action执行到deliver_skb,然后送到协议栈中.
+
+## netnamespace
+netnamespace(netns)为不同的命名空间从逻辑上提供独立的网络协议栈, 具体包括网络设备、路由表、arD表、iptables以及套接字(socket ) 等, 使得不同的网络空问都好像运行在独立的网络中一样.
+
+```bash
+# ip netns add net1 # 创建net1
+# ip netns exec net1 route # 查看net1路由表
+# ip netns exec net1 iptables -L # 查看net1的iptable
+# ip netns exec net1 ip link list # 查看net1的网络设备
+# ip link add veth1 type veth peer name veth1_p
+# ip link set veth1 netns net1 # 将veth1加入net1
+# ip link list # 在host上查看一下当前的设备,发现已经看不到veth1这个网卡设备了,只能看到veth1_p
+# ip netns exec net1 ip link list # 能查看veth1
+# ip netns exec net1 ip addr add 192.168.0.100/24 dev veth1_p
+# ip netns exec net1 ip addr add 192.168.0.101/24 dev veth1
+# ip netns exec net1 ip link set dev veth1_p up
+# ip netns exec net1 ip link set dev veth1 up
+# ip netns exec net1 ping 192.158.0.100 -I veth1 # 能ping通
+```
+
+Linux中每个进程(线程)都是用task_struct来表示的. 每个task_struct都要关联到一个命名空间对象[nsproxy](https://elixir.bootlin.com/linux/v6.8/source/include/linux/sched.h#L1108), 而nsproxy又包含了网络命名空间(netns). 对于网卡设备和socket来说,通过自己的成员来直接表明自己的归属.
+
+![内核命名空间相关数据结构](/misc/img/net/netns_struct.png)
+
+命名空间的核心数据结构是上面的这个[struct nsproxy](https://elixir.bootlin.com/linux/v6.8/source/include/linux/nsproxy.h#L32), 所有类型的命名空间(包括pid、 文件系统挂载点、网络栈等)都是在这里定义的.
+
+网卡设备net_device用来保存和网络命名空间归属关系的变量是[nd_net](https://elixir.bootlin.com/linux/v6.8/source/include/linux/netdevice.h#L2166), 所有的网络设备刚创建出来都是在宿主机默认网络空间下的, 可以通过`ip link set 设备名 netns 网络空间名`将设备移动到另一个空问里去,这时其实修改的就是net device下的nd_net.
+
+在socket中, 用来保存和网络命名空间归属关系的变量是skc_net(sock_common的skc_net).
+
+[`struct net`](https://elixir.bootlin.com/linux/v6.8/source/include/net/net_namespace.h#L61)对象下都包含了自己的路由表、iptablel以及内核参数配置等.
+
+每一个网络命名空间中都有一个loopback_dev, 这就是为什么刚创建出来的空间里就有一个lo设备的底层原因.
+
+网络命名空间中最核心的数据结构是`struct netns_ipv4 ipv4`. 在这个数据结构里, 定义了每一个网络空间专属的路由表、ipfiter以及各种内核参数.
+
+Linux上存在一个默认的网络命名空间, Linux中的1号进程初始使用该默认空间. Linux上其他所有进程都是由1号进程派生出来的, 在派生clone的时候如果没有特别指定,所有的进程都将共享这个默认网络空间.
+
+在clone函数里可以指定创建新进程时的flag, 都是以CLONE_开头的, 和命名空问有关的标志位有CLONE_NEWPC、CLONE_NEWNET、CLONE_NEWNS、CLONE_NEWPID等等. 如果在创建进程时指定了CLONE_NEWNET标志位, 那么该进程将会创建并使用新的netns.
+
+其实内核提供了三种操作命名空间的方式,分别是clone、setns和unshare.
+
+> 使用strace跟踪可以确认`ip netns add`命令内部是否使用了unshare. unshare的工作原理和clone类似.
+
+第1号进程[`task_struct init_task`](https://elixir.bootlin.com/linux/v6.8/source/init/init_task.c#L64)在初始化时就使用了默认的nsproxy即[init_nsproxy](https://elixir.bootlin.com/linux/v6.8/source/kernel/nsproxy.c#L32), 其中netns使用默认的init_net. 它是系统初始化的时候就创建好by [net_ns_init](https://elixir.bootlin.com/linux/v6.8/source/net/core/net_namespace.c#L1150)的.
+
+如果创建进程过程中指定了CLONE_NEWNET标志位,那么就会重新申请一个网络命名空间出来. 关键函数是copy_net_ns(它的调用链是do_fork => copy_process
+=> copy_namespaces => create_new_namespaces => copy_net_ns).
+
+命名空间内的各个子系统都是在调用setup_net时初始化的, 包括路由表、tcp的proc伪文件系统、iptable规则读取等等.
+
+由于内核网络模块的复杂性, 在内核中将网络模块划分成了各个子系统。每个子系统都定义了一个初始化函数和一个退出函数.
+
+各个子系统通过调用[register_pernet_subsys](https://elixir.bootlin.com/linux/v6.8/source/net/core/net_namespace.c#L1320)或register_pernet_device将其初始化函数注册到网络命名空问系统的全局链衣pernet_list中.
+
+register_pernet_subsys->register_pernet_operations-> __register_pernet_operations.
+
+__register_pernet_operations的`list_add_tail(&ops->list, list)`完成了将子系统传入的struct pernet_operations *ops链入pernet_list中. 同时for_each_net遍历了所有的网络命名空间,然后在这个空间内执行了ops_init初始化.
+
+这个初始化是网络子系统在注册的时候调用的. 同样,当新的命名空间创建时,会遍历该全局变量pernet_list,执行每个子模块注册的初始化函数.
+
+在创建新命名空问调用到setup_net函数时, 会通过pernet_list找到所有的网络子系统, 把它们都用init初始化一遍.
+拿路由表来举例, 路由表子系统通过register_pernet_subsys将fib_net_ops 注册进来.
+这样每当创建一个新的网络命名空间时,就会调用fib_net_init来创建一套独立的路由规则.
+
+再比如拿iptable中的nat表来说,也是一样的. 每当创建新网络命名空间的时候,就会调用iptable_nat_net_init创建一套新的表.
+
+在一个设备刚刚创建出来的时候,它是属于默认网络命名空间init_net. 不过可以在创建后进行修改, 将设备添加到新的网络命名空间.
+
+拿veth设备来举例,它是在创建时的源码alloc_netdev_mqs中设置到init_net上的(veth_newink=>rtnl_create_link => alloc_netdev_mqs).
+
+在执行修改设备所属的网络命名空间时,会将dev->nd_net再指向新的netns(by dev_change_net_namespace). 对于veth来说,它包含了两个设备, 这两个设备可以放在不同的网络命名空间中. 这就是docker容器和其host或者其他容器通信的基础.
+
+其实每个socket都归属于某个网络命名空间. 这是由创建这个socket的进程所属的netns来决定的. 当在某个进程里创建socket的时候,内核就会把当前进程的nsproxy->net_ns找出来,并把它赋值给scoket上的网络命名空间成员skc_net.
+
+在[sock_create](https://elixir.bootlin.com/linux/v6.8/source/net/socket.c#L1638)中,看到current->nsproxy->net_ns了, 它获取到了进程的网络命名空间, 再依次经过__sock_create => inet_create => sk_alloc, 调用到sock_net_set的时候, 成功设置了新socket和netns的关联关系.
+
+以网络包发送过程中的路由功能为例, 看一下网络在传输的时候是如何使用网络命名空间的. 大致的原理就是socket上记录了其归属的网络命名空间. 需要查找路由
+表之前先找到该命名空问, 再找到网络命名空间里的路由表, 然后再开始执行查找.
+
+在发送过程中ip层的发送函数[__ip_queue_xmit](https://elixir.bootlin.com/linux/v6.8/source/net/ipv4/ip_output.c#L456)调用ip_route_output_ports来查找路由项, 其他它通过`sock_net(sk)`找到了`struct net *net`.
+
+路由查找最后会执行到fib_lookup, 其中的fib_get_table入参就是使用了上述的net. 由上述代码可⻅,在路由过程中是根据前面步骤中确定好的网络命名空间`struct net *net`来查找路由项的. 每个网络命名空间有自己的net变量, 所以不同的网络命名空间中自然也就可以配置不同的路由表了.
+
+## bridge
+在Linux下软件实现交换机的技术就叫作Bridge. 它支持很多个虚拟端口, 能把更多的虛拟网卡连接在一起,通过自己的转发功能让这些虛拟网卡之间可以通信.
+
+各个Docker容器都通过veth连接到Bridge 上,Bridge负责在不同的"端口"之间转发数据包, 这样各个docker之问就可以互相通信了.
+
+```bash
+# ip netns add net1
+# ip link add veth1 type veth peer name veth1_p
+# ip link set veth1 netns net1
+# ip netns exec net1 ip addr add 192.168.0.101/24 dev veth1
+# ip netns exec net1 ip 1ink set veth1 up
+# ip netns exec net1 ip link list
+# ip netns exec net1 ifconfig
+# -- 同上创建
+netns: net2
+veth pair: veth2, veth2_p
+veth2 ip: 192.168.0.102
+
+# brctl addbr br0
+# ip link set dev veth1_p master br0
+# ip link set dev veth2_p master br0
+# ip addn add 192.168.0.100/24 dev br0
+# ip link set veth1_p up
+# ip link set veth2_p up
+# ip link set br0 up
+# brctl show
+# ip netns exec net1 ping 192.168.0.102 -I veth1 # 能ping通
+```
+
+在内核中,Bridge是由两个相邻存储的内核对象(struct net_device + struct net_bridge)来表示的.
+
+内核中创建Bridge的关键代码在[br_add_bridge](https://elixir.bootlin.com/linux/v6.8/source/net/bridge/br_if.c#L455), 其中注册网桥的关键代码是alloc_netdev这一行, 它将申请网桥的内核对象net_device. 在这个函数调用里要注意两点:
+1. 第一个参数传入了struct net_bridge的大小
+1. 第三个参数传入的br_dev_setup是一个函数
+
+alloc_netdev是[alloc_netdev_mqs](https://elixir.bootlin.com/linux/v6.8/source/net/core/dev.c#L10774)的封装宏, 它一次性就申请了两个内核对象, 这说明Bridge在内核中是由两个内核数据结构来表示的. 申请完了后紧接着调用setup,这实际是外部传人的br_dev_setup函数. 在这个函数内部进行进一步的初始化.
+
+总之, brctl addbr brO命令主要就是完成了Bridge内核对象 (struct net_device 和 struct net_bridge)的申请以及初始化.
+
+将veth设备以虛拟的方式连到网桥上是通过[br_add_if](https://elixir.bootlin.com/linux/v6.8/source/net/bridge/br_if.c#L567)实现的.
+
+这个函数中的第二个参数dev传入的是要添加的设备. 就是veth的其中一头. 比较关键的是net_bridge_port这个结构体, 它模拟的是物理交換机上的一个插
+口, 由new_nbp创建. 它起到一个连接的作用, 把veth和Bridge连接了起来.
+
+在new_nbp中,先是申请了代表插又的内核对象. find_portno是在当前bridge下寻找一个可用的端口号. 接下来插口对象通过p->br=br和bridge设备关联了起来, 通过
+p->dev=dev和代表veth设备的dev对象也建立了联系.
+
+在br_add_if中还调用netdev_rx_handller_register 注册了设备帧接收函数, 设置veth上的rx_handler为br_handle_frame.
+
+拿veth设备来举例, 如果它连接到Bridge 上, 在设备层的__netif_receive_skb_core()中和上述过程(veth两端直连)有所不同. 连在Bridge上的veth在收到数据包的时候, 不会进入协议栈, 而是会进入Bridge处理. Bridge找到合适的转发口(另一个veth), 通过这个veth把数据转发出去.
+
+从上述连接到br0的veth1_p设备的接收看起, 所有设备的接收都一样, 都会进入 __netif_receive_skb_core设备层的关键函数.
+
+在 __netif_receive_skb_core中先是过了tcpdump的抓包点, 然后查找和执行了rx_handler.
+
+在上面可知, 把veth连接到Bridge 上的时候,veth对应的内核对象dev中的rx_hancler被设置成了br_handle_frame. 所以连接到Bridge 上的veth在收到包的时候,会将帧送入Bridge处理函数br_handle_frame. 另外要注意的是,Bridge函数处理完的话, 一般来说就执行goto unlock退出了. 这和普通的网卡数据包接收相比, 并不会往下再送到协议栈.
+
+br_handle_frame的核心就是调用br_handle_frame_finish.
+
+在硬件中, 交换机和集线器的主要区别就是它会智能地把数据送到正确的端口上去, 而不会像集线器那样给所有的端口群发一遍. 所以在br_handle_frame_finish()中, 看到了更新和查找转发表的逻辑. 这就是网桥在学习,它会根据自学习结果来工作.
+
+在找到要送往的端口后, 下一步就是调用br_forward=>__br_forward进入真正的转发流程.
+
+在__br_forward中,将skb上的设备dev改为了新的目的dev.
+
+然后调用br_forward_finish进入发送流程. 在br_forward_finish里会依次调用br_dev_queue_push_xmit和dev_queue_xmit.
+
+dev_queue_xmit就是发送函数, 后续的发送过程就是dev_queue_xmit=> dev_hard_start_xmit => veth_xmit. 在veth_xmit中会获取当前veth的对端,然后把数据给它发送过去.
+
+至此, Bridge上的转发流程就算完毕了. 要注意的是, 整个Bridge的工作源码都是在net/core/dev.c或net/bridge目录下, 都是在设备层工作的. 这也就充分印证了Bridge(物理交换机也一样)是二层上的设备.
+
+接下来,收到网桥发过来数据的veth会把数据包发送给它的对端veth2, veth2再开始自己的数据包接收流程.
+
+所谓网络虛拟化,其实用一句话来概括就是用软件来模拟实现真实的物理网络连接.
+
+从两个Docker的用户态来看:
+1. Docker1 在需要发送数据的时候,先通过send系统调用发送,这个发送会执行到协议栈进行协议头的封装等处理. 经由邻居子系统找到要使用的设备(veth1)后,从这个设备将数据发送出去,veth1的对端veth1_p会收到数据包
+1. 收到数据包的veth1_p是一个连接在Bridge 上的设备,这时候Bridge会接管该veth的数据接收过程. 从自己连接的所有设备中查找目的设备. 找到veth2_p以后,调用该设备的发送函数将数据发送出去. 同样,veth2_p的对端veth2即将收到数据
+1. 其中veth2收到数据后,将和lo、eth0等设备一样,进入正常的数据接收处理过程. 之后Docker2中的用户态进程将能够收到Docker1 发送过来的数据了.
+
+### 与外部网络通信
+Linux在发送数据包或者转发包的时候,会涉及路由过程.
+
+如果Linux收到数据包以后发现目的地址并不是本地地址的话, 就可以选择把这个数据包从自己的某个网卡设备转发出去. 这时和本机发送一样,也需要读取路由表. 根据路由表的配置来选择从哪个设备将包转走.
+
+linux上转发功能默认是关闭的, 也就是发现目的地址不是本机ip地址时默认将包直接丢弃. 需要做一些简单的配置, Linux才可以干像路由器一样的工作,实现数据包的转发.
+
+Linux内核网络栈在运行上基本属于纯内核态的东西,但为了迎合各种各样用户层不同的需求, kernel开放了一些口子出来供用户层来干预. 其中iptables就是一个非常常用的干预内核行为的工具,它在内核里埋下了五个钩子入口, 这就是俗称的五链.
+
+Linux在接收数据的时候,在ip层进入ip_rev中处理. 再执行路由判断,发现是本机的话就进入ip_local_deliver进行本机接收, 最后送往TCP协议层. 在这个过程中,埋了两个HOOK, 第一个是PRE_ROUTING. 这段代码会执行到iptables中pre_routing里的各种表. 发现是本地接收后接着又会执行到LOCAL_IN, 这会执行到iptables中配置的input规则.
+
+在发送数据的时候,查找路由表找到出口设备后,依次通过__ip_local_out、ip_output等函数将包送到设备层. 在这两个函数中分别过了OUTPUT和PREROUTING的各种
+规则.
+
+在转发数据的时候, Linux收到数据包发现不是本机的包可以通过查找自己的路由表, 找到合适的设备把它转发出去. 那就先在ip_rcv中将包送到ip_forward函数中处理,最后在ip_output函数中将包转发出去. 在这个过程中分别过了PREPOUTING、FORWARD和POSTROUTING三个规则.
+
+![](/misc/img/net/iptables_arch.png)
+
+数据接收过程走的是1和2,发送过程走的是4和5,转发过程是1、3、5.
+
+在iptables中, 根据实现的功能的不同, 又分成了四张表. 分别是raw、mangle、 nat和fliter, 其中nat表实现常说的NAT ( Network Address Translation ) 功能, 其中NAT又分成SNAT ( Source NAT)利DNAT(Destnation NAT)两种.
+
+SNAT 解決的是内网地址访问外部网络的问题. 它是通过在POSTROUTING 里修改来源 IP来实现的. DNAT解决的是内网的服务要能够被外部访问到的问题. 它是通过
+PREROUTING修改目标IP实现的.
+
+假设本地eth0是10.162.1.2
+```bash
+# ip netns add net1
+# ip link add veth1 type veth peer name veth1_p
+# ip link set veth1 netns net1
+# ip netns exec net1 ip addr add 192.168.0.2/24 dev veth1
+# ip netns exec net1 ip link set veth1 up
+# brctl addbr br0
+# ip addr add 192.168.0.1/24 dev br0
+# ip Iink set dev vethi_p master br0
+# ip link set veth1_p up
+# ip link set br0 up
+```
+
+当192.168.0.2请求其他host `10.153.1.2`时, `ip netns exec net1 ping 10.153.1.2`是`connect : Network is unreachable`即不通的. 其实就是ping_sendmsg()判断ip_route_output_flow返回值如果是ENETUNPEACH就退出了.
+
+ip_route_output_flow主要是执行路由选路, 通过`ip netns exec net1 route -n`可知, net1 这个网络命名空间下默认只有`192.168.0.*`这个网段的路由规则. ping的ip是10.153.1.2, 根据这个路由表找不到出口,自然就发送失败了.
+
+给net添加上默认路由规则,只要匹配不到其他规则就默认送到veth1上,同时指定下一条是它所连接的Bridge ( 192.168.0.1 ) 即`ip netns exec net1 route add default gw 192.168.0.1 veth1`. 再ping还是不通, 但报错已变为`100% packet loss`.
+
+上面路由帮把数据包从veth正确送到了Bridge这个网桥. 接下来网桥还需要Bridge转发到ethO网卡上, 此时需要打开下面这两个转发相关的配置:
+```
+# sysct1 net.ipv4.conf.all.forwarding=1
+# iptables -P FORWARD ACCEPT
+```
+但`10.153.1.2`与`10.162.1.2`并不是在同一网段, 它们通过`10.*`进行通信的.
+
+这次的需求是实现内部虛拟网络访问外网,所以需要使用的是SNAT. 它将namespace请求中的ip(192.168.0.2) 换成外部网络认识的`10.153.*.*`,进而达到正常访
+问外部网络的效果: `iptables -t nat -A POSTROUTING -s 192.168.0.0/24 ! -0 br0 -j MASQUERADE`.
+
+再执行`ip netns exec net1 ping 10.153.1.2`就能ping通了.
+
+在bridge上抓包能看到还是原始的源IP和目的IP, 但在ethO 上抓, 源IP已经被替换成可和外网通信的eth0上的IP了.
+
+如果是将docker中的服务开放给其他host, 要实现外部网络访问内部地址,所以需要的是DNAT配置. DNAT和SNAT
+配置中有一个不一样的地方就是需要明确指定容器中的端口在宿主机上对应哪个. 比如在docker命令的使用中,是通过`-p`来指定端口的对应关系的.
+
+```bash
+# docker run -p 8000:80 ...
+# iptables -t nat -A PREROUTING ! -i br0 -p tcp -m tcp --dport 8088 -j DNAT --to-destination 192.168.0.2:80
+```
+
+上面的iptables设置表示的是宿主机在路由之前判断一下, 如果流量不是来自br0, 并且是访问tcp的8088, 那就转发到192.168.0.2:80.
+
+在net1中启动`ip netns exec net1 nc -lp 80`, 在外部host上执行`telnet 10.162.1.2 8088`是可以通信的.
+
+在eth0上抓包, 网络包目的是宿主机的IP的端口.
+
+但数据包到宿主机协议栈以后命中了配置的DNAT规则, 宿主机把它转发到了brO上. 在Bridge上抓包, 发现在br0上抓到的目的IP和端口是已经替换过的了, 换成了
+192.168.0.2:80.
+
+总结:
+1. 容器中的eth0和host上的eth0是一个东西吗?
+
+  不是, 每个容器中的设备都是独立的. 物理Linux机上的eth0一般来说是个真正的网卡, 有网线接口. 而容器中的ethO只是一个虚拟设备veth设备对中的一头, 它和lo回环设备类似, 是以纯软件方式工作的. 设备的名字是可以随便修改的, 命名成ethO是容器作者们为了让容器和物理机更像.
+1. veth设备是什么,它是如何工作的?
+
+  veth设备和回环设备lo非常像, 唯一的区别就是veth是为了虛拟化技术而生的, 所以它多了个结对的概念. 每一次创建veth都会创建出来两个虛拟网络设备. 这两个设备是连通着的, 在veth的一头发送数据, 另一头就可以收到. 它是容器和host通信的基础.
+
+1. 同一宿主机上多个容器之间是如何通信的?
+
+  在物理机的网络环境中,多台不同的物理机之间通过以太网交换机连接在一起, 进而实现通信. 在Linux下也是类似的, Bridge是用软件模拟了交换机, 它也有插又的概念,多个虛拟设备都是"连接" 在Bridge 上的. Bidge 工作在内核网络栈的二层上,可以在不同的插口之间转发数据包.
+
+1. Linux上的容器如何和外部机器通信?
+
+  使用veth、Bridge、网络命名空间三个技术搭建起来的虚拟网络只能在宿主机内部进行通信, 因为其私有IP无法被外网认识. 采用路由表控制以及NAT功能可以使得虛拟网络通过host的网卡和外部机器进行通信.
+  
+  k8s、lstio等项目中用的网络方案看似复杂, 但其实追根溯源也是对路由选择、iptables等技术的不同应用方式罢了!
 
 ## FAQ
 ### 根据主机的ip查找其mac
