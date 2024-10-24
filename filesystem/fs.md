@@ -411,6 +411,10 @@ sysfs 文件形式和内核抽象的对应关系:
 - net : 网络接口的大量原始统计, 比如接收的组播数据包或每个接口的路由
 - partitions : 记录了系统中每个磁盘分区的主辅设备编号、大小和名称
 - scsi : scsi子系统信息, 比如连接的设备或驱动程序版本
+
+	- sg : sg设备
+		- device_hdr
+		- devices : device_hdr+devices是完整sg设备的表格
 - self : 访问procfs的进程信息
 	- sessionid: 标识特定 Linux 登录会话的 ID, 最好将其与 /proc/sys/kernel/random/boot_id 结合使用. 部分发行版不支持总是返回`-1`
 - slabinfo : 内核缓存信息

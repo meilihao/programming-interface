@@ -127,8 +127,12 @@ lsscsi
 
 ## example
 ref:
+- [使用和操作磁带机的奇妙体验](https://juejin.cn/post/7343863800145346623)
 - [第 15 章 管理磁带设备](https://access.redhat.com/documentation/zh-cn/red_hat_enterprise_linux/9/html/managing_storage_devices/managing-tape-devices_managing-storage-devices)
 - [小型多卷磁带库综合使用手册](https://blog.csdn.net/weixin_33725126/article/details/85589333)
+- [给系统管理员的 15 条实用 Linux/Unix 磁带管理命令](https://linux.cn/article-7326-1.html)
+- [管理磁带设备](https://docs.redhat.com/zh_hans/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/managing-tape-devices_managing-storage-devices)
+- [HPE StoreEver LTO-9 Ultrium 磁带机技术参考手册第 3 卷：主机接口指南 # 命令](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00001234zh_cn&page=s_Mode_block_descriptor_201601220213.html&docLocale=zh_CN)
 
 > 默认情况下，在磁带设备中，块大小为 10KB(bs=10k)
 
@@ -206,18 +210,20 @@ CAPACITY=500
 # mtx -f /dev/sg13 inquiry # 获取产商信息
 # mtx -f /dev/sg13 load 1 0 # 将StorageElement 1位置上的磁带设备放置到Data Transfer Element 3的磁带机中. L80是如果驱动器为空就可用放入磁带; L700是驱动器必须是逐个顺序使用, 否则报错. load模拟的是真实操作因此是存在延迟的, 即load后查看其status时file_number可能还是-1. 但`General status bits`有变化: `DR_OPEN`->`ONLINE`->`BOT ONLINE`.
 # dd if=/dev/nst0 bs=512 count=1 # 会报`dd: error reading '/dev/nst0': Input/output error`. bareos标记tape时会在开头写入63KB左右的数据.
-# mt -f /dev/st0 status # 有磁带: file_number=0;没有磁带: file_number=-1. file_number表示磁带上的文件序号,从0开始. mt传送命令到磁带驱动器. [Density code](https://github.com/markh794/mhvtl/blob/master/usr/vtltape.h#L171)
+# mt -f /dev/st0 status # /dev/st0只能被独占使用, 比如bareos-sd打开它后执行mt会报`Device or resource busy` by `lsof`
 # tar -cvf /dev/nst0 /etc/hosts # 测试向磁带中归档数据. st0为/dev/sg13磁带库中的第一个磁带机, 可通过`lsscsi -g`获取
-# tar -tvf /dev/nst0
+# tar -tvf /dev/nst0 # 查看磁带设备上的所有文件列表
 # mt -f /dev/nst0 tel # tel用于获取磁头位置. 如果使用的是自动回带设备st0，那么第2次备份会replace
 At block 6.
+# mt -f /dev/nst0 eod # 将磁带设备的读写位置移动到“结束数据”位置, 任何随后的写入操作将不会覆盖现有数据，而是开始在磁带的下一个可用位置写入
 # mt -f /dev/nst0 fsf 1 # 让磁头前进一个文件.
 # tar -xvf /dev/st0 -C /tmp # 恢复文件
 # mt -f /dev/nst0 rewind # 倒带
-# mt -f /dev/nst0 erase # 清除磁带内容
-# mt -f /dev/nst0 offline # ???没效果
+# mt -f /dev/nst0 erase # 完整清除磁带内容. vtl的erase命令执行很快, 效果是vtl console上的`已使用大小`变为0
+# mt -f /dev/nst0 offline # 卸载磁带, ???没效果
 # cat /opt/mhvtl/E01001L4/data # 假设是E01001L4在st0中
 # mtx -f /dev/sg13 unload 2 0 # 将磁带从DataTransfer Element 0的磁带机中的移出到StorageElement 2
+# tapestat # 磁带io状态, 类似iostat
 # --- Linux 备份 /home 分区 ###
 # dump 0uf /dev/nst0 /dev/sda5
 # dump 0uf /dev/nst0 /home
@@ -225,15 +231,41 @@ At block 6.
 # restore rf /dev/nst0
 ```
 
+```bash
+# --- st
+tar -czf /dev/st0 _/source/directory
+tar -tzf /dev/st0 # 查看
+tar -xzf /dev/st0 /source/directory/ # 恢复
+# --- nst
+mt -f /dev/nst0 rewind
+mt -f /dev/nst0 eod
+tar -czf /dev/nst0 /source/directory/
+tar -tzf /dev/nst0
+mt -f /dev/nst0 rewind
+tar -xzf /dev/nst0 /source/directory/
+```
+
+`mt -f /dev/st0 status`输出:
+- file_number: 0, 有磁带;-1, 没有磁带. file_number表示磁带上的文件序号,从0开始. mt传送命令到磁带驱动器.
+- block number: 0, 磁带设备没有固定的块大小
+- [Density code](https://github.com/markh794/mhvtl/blob/master/usr/vtltape.h#L171)或[root repo:mt.c](https://github.com/iustin/mt-st/blob/main/mt.c#L133): 描述在磁带机中装入的介质的格式
+
+    `mt -f /dev/st0 status`无法获取物理磁带大小, 其大小由Density code决定, VTL tape大小则由用户指定, 不受Density code限制.
+
+    > `mt densities`: 输出所有Density code
+
+- Soft error count since last status: 在执行 mt status 命令后遇到的错误数量
+- General status bits(磁带设备的状态):
+
+    - DR_OPEN : 磁带设备为空
+    - IM_REP_EN : 即时报告模式
+    - BOT ONLINE : [Beginning Of Tape](https://github.com/markh794/mhvtl/blob/master/usr/vtlcart_v1.c#L136)
+    - EOF ONLINE : 在file_number-1文件的末尾
+
+
 推测:
 1. 磁带上写入的文件间存在空隙, 导致`tar -tvf`读取一次正常一次错误交替出现, 可用`mt -f /dev/nst0 fsf 1`跳过空隙.
 1. 每次`tar -tvf`读取操作会导致磁头移动到下一个文件块/空隙.
-
-General status bits(磁带设备的状态):
-- DR_OPEN : 磁带设备为空
-- IM_REP_EN : 即时报告模式
-- BOT ONLINE : [Beginning Of Tape](https://github.com/markh794/mhvtl/blob/master/usr/vtlcart_v1.c#L136)
-- EOF ONLINE : 在file_number-1文件的末尾
 
 磁头操作:
 - fsf : 将磁带前进指定的文件标记数目, 即跳过指定个 EOF 标记, 磁带会定位在下一文件的第一个块
@@ -284,7 +316,7 @@ ref:
 ### st0和nst0区别
 两者都表示磁带驱动器, 并指向同一设备, 主要区别在于执行任务后: st打头的表示**写入完成后会自动倒带, 下次写入会覆盖之前的数据即每次都是重头开始写**; nst打头的表示写入完成后不会自动倒带
 
-通常使用 nst0 进行每日备份（不更换磁带）, nst0 进行每周/每月备份（每次备份使用单个磁带）.
+通常使用 st0 进行每日备份（不更换磁带）, nst0 进行日常备份.
 
 ### 厂商
 只有 HP, Quantum 和 IBM 能生产 LTO 磁带机, 其它都是贴牌
