@@ -133,6 +133,15 @@ ref:
 - [给系统管理员的 15 条实用 Linux/Unix 磁带管理命令](https://linux.cn/article-7326-1.html)
 - [管理磁带设备](https://docs.redhat.com/zh_hans/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/managing-tape-devices_managing-storage-devices)
 - [HPE StoreEver LTO-9 Ultrium 磁带机技术参考手册第 3 卷：主机接口指南 # 命令](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00001234zh_cn&page=s_Mode_block_descriptor_201601220213.html&docLocale=zh_CN)
+- [Erasing Tapes](https://helpcenter.veeam.com/docs/backup/vsphere/erasing_tapes.html?ver=120)
+- [Tape Erase utility](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00001794en_us&page=DiagTest_MediaErase.html&docLocale=en_US)
+
+    Quick erase—(one minute) Removes the tape directory and writes EOD at the start of the tape making all data inaccessible without actually overwriting it.
+    Full erase—(2 - 16 hours depending on LTO generation) Erases the tape directory and also overwrites all data on the tape.
+    Secure erase—(10 - 80 hours depending on LTO generation) Performs a full erase followed by a rewind. It repeats this four more times for a total of five full erases.
+- [How to erase a Data tape](https://mercia.solutions/posts/how-to-erase-a-data-tape/)
+
+    quick erase: `rewind/erase 0/rewind`=`rewind/weof/rewind`
 
 > 默认情况下，在磁带设备中，块大小为 10KB(bs=10k)
 
@@ -221,6 +230,7 @@ At block 6.
 # mt -f /dev/nst0 rewind # 倒带
 # mt -f /dev/nst0 erase # 完整清除磁带内容. vtl的erase命令执行很快, 效果是vtl console上的`已使用大小`变为0
 # mt -f /dev/nst0 offline # 卸载磁带, ???没效果
+# mt -f /dev/nst0 eject # 弹出tape, baresos的话, 建议使用其release命令否则容易与其内部drive状态不一致
 # cat /opt/mhvtl/E01001L4/data # 假设是E01001L4在st0中
 # mtx -f /dev/sg13 unload 2 0 # 将磁带从DataTransfer Element 0的磁带机中的移出到StorageElement 2
 # tapestat # 磁带io状态, 类似iostat

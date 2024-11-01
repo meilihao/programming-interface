@@ -1,4 +1,7 @@
 # list
+## hardware
+- [60秒看懂DDR5内存标签：选购时注意](https://news.mydrivers.com/1/1010/1010527.htm)
+
 ## layout
 - [riscv/vm-layout.rst](https://elixir.bootlin.com/linux/v6.4-rc7/source/Documentation/riscv/vm-layout.rst)
 - [RISCV MMU 概述](https://tinylab.org/riscv-mmu/)

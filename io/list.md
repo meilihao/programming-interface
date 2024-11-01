@@ -180,11 +180,16 @@
     基于PCIE Switch互联, 4坏3
 
     - [华为存储 OceanStor SmartMatrix 架构](https://zhuanlan.zhihu.com/p/81871403)
-- [OceanStor Dorado 6000, Dorado 18000 系列 6.1.2 产品技术白皮书](https://carrier.huawei.com/~/media/cnbgv2/download/products/it-new/oceanstor-dorado-180006800.pdf)
+- [**OceanStor Dorado 6000, Dorado 18000 系列 6.1.2 产品技术白皮书**](https://carrier.huawei.com/~/media/cnbgv2/download/products/it-new/oceanstor-dorado-180006800.pdf)
 
     基于RDMA互联, 8坏7(OceanStor Dorado V6)
 
     - [构建新型数据基础设施 华为OceanStor Dorado V6重定义存储架构](https://server.zhiding.cn/server/2019/0814/3120409.shtml)
+    - [OceanStor Dorado 5000 系列 6.1.2 产品技术白皮书](https://carrier.huawei.com/~/media/cnbgv2/download/products/it-new/oceanstor-dorado-5000.pdf)
+    - [**华为OceanStor存储Dorado系列比波音747更可靠**](https://client.sina.com.cn/2020-06-09/doc-iircuyvi7580195.shtml)
+
+        硬盘框实现8控全互联后，结合内双活特性，一方面通过缓存3副本技术，即业界首创的**3个缓存副本分布在3个不同的控制器**，从而保证两个控制器同时故障，或者一个控制框（引擎）故障情况下，至少还有一份有效的写缓存副本，实现2个引擎任意坏1个引擎，业务0中断；另一方面还能通过业界领先的缓存持续镜像技术，即一个控制器失效，镜像控制器重建缓存镜像，从而实现8个控制器**陆续**坏7控，业务0中断.
+    - [重新定义高端存储架构，华为Dorado V6树立全闪存新标杆](https://mp.ofweek.com/znyj/a345683921346)
 - [华为发布了新一代OceanStor Dorado全闪存存储 2024.9](https://news.mydrivers.com/1/1004/1004644.htm)
 - [OceanStor Dorado V6 Technical Deep Dive Perm.pdf](/misc/pdf/io/4_OceanStor Dorado V6 Technical Deep Dive Perm.pdf)
 - [Huawei OceanStor Dorado V3 All Flash Storage Technical White Paper](https://objects.icecat.biz/objects/mmo_39230499_1509028620_8925_7785.pdf)
@@ -204,6 +209,15 @@
 - [浅析 VMware 与 SmartX 超融合 I/O 路径差异及其影响](https://www.smartx.com/blog/2022/11/io-locality-vs-vmware/)
 
     条带
+- [超融合与传统虚拟化哪个稳定？](https://www.smartx.com/blog/2020/06/hci-traditional-virtualization/)
+
+    超融合的本质是分布式存储 + 虚拟化融合部署
+- [分布式块存储 ZBS 的自主研发之旅](https://www.smartx.com/blog/2022/08/zbs-architecture/)
+- [分布式存储 ZBS 的自主研发之旅｜接入协议之 NVMe-oF](https://www.smartx.com/blog/2023/02/zbs-nvmeof/)
+
+    结合性能和网络条件这两个角度的考虑，ZBS 选择支持 NVMe over RDMA/RoCE v2 和 NVMe over TCP，以满足用户的多种需求
+- [SmartX超融合技术原理与特性解析合集(一)](https://internet.hactcm.edu.cn/fileservice/cloud/file/2024/3/13/133548132421005193.pdf)
+- [VMware 与 SmartX 分布式存储缓存机制浅析与性能对比](https://blog.csdn.net/weixin_43696211/article/details/126889412)
 
 ## 硬件
 - [阿里平头哥主控终于量产！忆恒创源发布PBlaze7 7A40系列PCIe 5.0 SSD](https://news.mydrivers.com/1/1001/1001037.htm)
