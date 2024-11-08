@@ -16,3 +16,8 @@ iscsi在传输数据的时候考虑了安全性，可以通过IPSEC 对流量加
 Linux-IO Target(LIO)是linux原生实现了iscsi target, 是趋势.
 
 iscsi数据包PDU格式见[这里](https://www.cnblogs.com/pipci/p/11622014.html).
+
+## 协议
+iscsi协议支持重定向功能, 见ZBS的[iSCSI重定向程序](https://max.book118.com/html/2023/0405/8142011001005054.shtm).
+
+> nfs协议不支持重定向, zbs通过在nfs client端部署IO Rerouter解决.

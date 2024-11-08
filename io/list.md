@@ -1,6 +1,7 @@
 # list
 
 ## base
+- [**了解 SSD 技术：NVMe、SATA、M.2**](https://www.kingston.com.cn/cn/ssd/what-is-nvme-ssd-technology)
 - [itworld123](https://www.zhihu.com/people/zhang-shu-zhu-69)
 - [存储系统的快照技术](https://zhuanlan.zhihu.com/p/64595897)
 - [快照原理](https://www.haxi.cc/archives/%E5%BF%AB%E7%85%A7%E5%8E%9F%E7%90%86.html)
@@ -218,6 +219,8 @@
     结合性能和网络条件这两个角度的考虑，ZBS 选择支持 NVMe over RDMA/RoCE v2 和 NVMe over TCP，以满足用户的多种需求
 - [SmartX超融合技术原理与特性解析合集(一)](https://internet.hactcm.edu.cn/fileservice/cloud/file/2024/3/13/133548132421005193.pdf)
 - [VMware 与 SmartX 分布式存储缓存机制浅析与性能对比](https://blog.csdn.net/weixin_43696211/article/details/126889412)
+- [超融合还是虚拟化？一文了解二者的区别、优缺点与传统虚拟化转型方案](https://www.smartx.com/blog/2023/11/virtualization-vs-hci/)
+- [SMTX OS 块存储服务技术白皮书 v4.0.7](https://max.book118.com/html/2023/0405/8142011001005054.shtm)
 
 ## 硬件
 - [阿里平头哥主控终于量产！忆恒创源发布PBlaze7 7A40系列PCIe 5.0 SSD](https://news.mydrivers.com/1/1001/1001037.htm)
