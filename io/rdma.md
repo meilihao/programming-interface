@@ -1,5 +1,6 @@
 # rdma
 ref:
+- [一文彻底搞懂：什么是RDMA技术及其三个协议](https://mp.weixin.qq.com/s/mfZjKCaGvlgw0WoIXIpyIw)
 - [一文了解 NVMe、NVMe-oF 和 RDMA](https://www.smartx.com/blog/2021/12/nvme-nvme-of-rdma/)
 
 直接内存访问 (DMA) 指设备无需 CPU 干预即可直接访问主机内存的能力。远程直接内存访问 (RDMA) 也就是在不中断远程机器系统 CPU 处理的情况下对该机器上的内存执行访问（读取和写入）的能力。
