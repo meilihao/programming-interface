@@ -331,3 +331,9 @@ ref:
 ### 厂商
 只有 HP, Quantum 和 IBM 能生产 LTO 磁带机, 其它都是贴牌
 只有 Fujitsu 和 SONY 能生产 LTO 磁带, 其它都是贴牌
+
+### /dev/tape/by-id下没有stX和nstX设备的id文件
+```bash
+udevadm control --reload-rules
+udevadm trigger
+```
