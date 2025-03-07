@@ -3,6 +3,7 @@ ref:
 - [coder-kung-fu](https://github.com/yanfeizhang/coder-kung-fu)
 - [**Linux 网络栈接收数据（RX）：原理及内核实现（2022）**](https://arthurchiao.art/blog/linux-net-stack-implementation-rx-zh/)
 - [**十年码农内功：收包（一）**](https://mp.weixin.qq.com/s?__biz=MzkzMzM5MTUwNQ==&mid=2247484076&idx=1&sn=2a43acaed3e3596bf338784ee5b09c9c&scene=21#wechat_redirect)
+- [**Linux 路由实现原理**](https://blog.csdn.net/CoderTnT/article/details/124856179)
 
 kernel: 6.8.0/ubuntu 24.04.1
 
