@@ -9,6 +9,7 @@
 - [Linux Storage Stack Diagram](https://www.thomas-krenn.com/en/wiki/Linux_Storage_Stack_Diagram)
 - [1000行代码实现简单EBS块存储](https://zhuanlan.zhihu.com/p/695313576)
 - [深入学习理解 IO 多路复用](https://segmentfault.com/a/1190000022352273)
+- [Linux之慢盘检测](https://blog.csdn.net/zincooo/article/details/133804233)
 
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)
