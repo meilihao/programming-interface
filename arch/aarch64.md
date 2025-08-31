@@ -1,4 +1,7 @@
 # aarch64
+ref:
+- [Armv8/Armv9架构入门指南](https://armv8-doc.readthedocs.io/en/latest/index.html#)
+
 ## 特权级
 - EL0: 最低的特权级, 应用程序通常运行在该级别, 也称为用户态
 - EL1: os通常运行在该级别, 也称为内核态

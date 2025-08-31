@@ -59,3 +59,8 @@ riscv64支持Sv39/Sv48/Sv57/Sv64 这几种模式. 因为 C906 设计的应用场
 
 	- [LicheePi 4A 是基于 Lichee Module 4A 核心板的 高性能 RISC-V Linux 开发板，以 TH1520 为主控核心](https://wiki.sipeed.com/hardware/zh/lichee/th1520/lpi4a/1_intro.html)
 - [Milk-V Vega: 全球首款 RISC-V 万兆开源交换机正式发售](https://www.oschina.net/news/276901)
+
+### 处理器
+- 香山昆明湖v3, 2026交付
+
+	SPECCPU2006/GHz: 18~21
