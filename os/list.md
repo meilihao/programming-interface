@@ -2,10 +2,17 @@
 ## kernel
 入门:
 1. [《linux-0.12 内核完全剖析》读书笔记及linux-0.12注释源码](https://github.com/yifengyou/linux-0.12)
+1. [linux-0.12 源码学习](https://github.com/ultraji/linux-0.12)
 1. 深入理解Linux内核
 1. Linux内核源代码情景分析
 1. [yifengyou/learn-linux](https://github.com/yifengyou/learn-linux)
 1. [os-elephant源码及学习笔记](https://github.com/yifengyou/os-elephant)
+1. [操作系统系列文章](https://www.junmajinlong.com/os/index/)
+1. [计算子系统](https://rootw.github.io/archive/)
+1. [开发内功修炼](https://github.com/yanfeizhang/coder-kung-fu)
+1. [**耗时半月，终于把牛客网上的Linux内核进阶成神笔记整理好了**](https://zhuanlan.zhihu.com/p/635604961)
+1. [**牛客网论坛最具争议的Linux内核成神笔记，GitHub已下载量已过百万**](https://zhuanlan.zhihu.com/p/635315467)
+1. [Linux核心概念详解](https://s3.shizhz.me/linux-mm/3.2-wu-li-nei-cun/3.2.5-slab-slub-slob)
 
 实践:
 1. [从零开始制作 Linux](https://juejin.im/entry/6844903600305635335)

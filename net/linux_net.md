@@ -1,4 +1,7 @@
 # sdn
+ref:
+- [sdn-handbook](https://tonydeng.github.io/sdn-handbook/)
+
 SDN并不是一个具体的技术与协议，而是一个思想、一个框架，只要网络硬件可以通过软件集中式管理、可编程、控制与转发分离，就可以认为这是一个SDN网络.
 
 openflow作为sdn的主要实现, 它的发展史就是SDN的发展史. 因为基于OpenFlow为网络带来的可编程的特性，斯坦福的Nick McKeown教授和他的团队进一步提出了SDN（Software Defined Network，软件定义网络）的概念.

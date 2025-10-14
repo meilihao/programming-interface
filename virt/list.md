@@ -1,9 +1,14 @@
 # list
 
 ## base
+- [QEMU KVM学习笔记](https://github.com/yifengyou/learn-kvm)
 - [虚拟化调试和优化指南](https://access.redhat.com/documentation/zh-cn/red_hat_enterprise_linux/7/html/virtualization_tuning_and_optimization_guide)
 - [详解ZStack 高性能网络方案以及性能对比测试](https://www.zstack.io/recentnews/marketing_voice/2022/0704/2391.html)
 - [GPU虚拟化基础】三：搞懂 IOMMU、VFIO在虚拟化中的作用](https://mp.weixin.qq.com/s/GZmymWbYl_8hRo8M4wUQxw)
+
+## qemu
+- [QEMU Object Model](https://github.com/UtopianFuture/UtopianFuture.github.io/blob/c52cf7c64648588ed444eb50662c480c2fa6cfbd/virtualization/QEMU-qom.md#0-qom-%E6%A6%82%E5%BF%B5)
+- [understanding_qemu](https://richardweiyang-2.gitbook.io/understanding_qemu/00-qmeu_bios_guest/03-seabios)
 
 ## driver
 - [虚拟化技术 — VirtIO 虚拟设备接口标准](https://mp.weixin.qq.com/s?__biz=MzI3MDM0NjU3MA==&mid=2247486117&idx=1&sn=6ed2b543774e553093e33d29f8658e1f&chksm=ead33a80dda4b39609813bd1baffa9a4b45bc75284100d51eab6251ca1628e9494be78408caa&token=751397496&lang=zh_CN&scene=21#wechat_redirect)

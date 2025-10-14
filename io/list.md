@@ -6,10 +6,17 @@
 - [存储系统的快照技术](https://zhuanlan.zhihu.com/p/64595897)
 - [快照原理](https://www.haxi.cc/archives/%E5%BF%AB%E7%85%A7%E5%8E%9F%E7%90%86.html)
 - [Linux IO 之 文件系统的架构.md](https://github.com/0voice/linux_kernel_wiki/blob/main/%E6%96%87%E7%AB%A0/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/Linux%20IO%20%E4%B9%8B%20%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E7%9A%84%E6%9E%B6%E6%9E%84.md)
-- [Linux Storage Stack Diagram](https://www.thomas-krenn.com/en/wiki/Linux_Storage_Stack_Diagram)
+- [**Linux Storage Stack Diagram**](https://www.thomas-krenn.com/en/wiki/Linux_Storage_Stack_Diagram)
+
+    kernel 6.16 - 3.3
 - [1000行代码实现简单EBS块存储](https://zhuanlan.zhihu.com/p/695313576)
 - [深入学习理解 IO 多路复用](https://segmentfault.com/a/1190000022352273)
 - [Linux之慢盘检测](https://blog.csdn.net/zincooo/article/details/133804233)
+- [操作系统修炼秘籍（15）：IO操作和DMA、RDMA](https://www.junmajinlong.com/os/io_dma_rdma/)
+- [IO 多路复用原理分析以及技术延伸分析](https://my.oschina.net/VILLE/blog/5281313)
+- [彻底理解 IO 多路复用实现机制](https://juejin.cn/post/6882984260672847879)
+- [文件IO系统调用内幕](https://lrita.github.io/2019/03/13/the-internal-of-file-syscall/)
+- [NVMe驱动详解系列_第一部:NVMe驱动初始化与注销](https://developer.aliyun.com/article/609295)
 
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)

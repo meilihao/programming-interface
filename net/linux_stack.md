@@ -1,4 +1,7 @@
 # linux net stack
+ref:
+- [浅析Linux sockfs文件系统](https://mp.weixin.qq.com/s?__biz=Mzg5MTU1ODgyMA==&mid=2247484140&idx=1&sn=2d9bd9abf3cf2c5c5e37fe0875d8bc69&chksm=cfcacc27f8bd453123a37ee9c877384340069da85bff6ceb624447d7d57bfab628b7d5be794c&scene=21#wechat_redirect)
+
 - ![linux收包](/misc/img/net/深度截图_选择区域_20191126214406.png)
 - ![linux发包](/misc/img/net/深度截图_选择区域_20191126215757.png)
 

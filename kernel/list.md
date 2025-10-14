@@ -14,6 +14,11 @@
 	- [code 6.1](https://github.com/PacktPublishing/Linux-Kernel-Programming_2E)
 	- [code 5.x](https://github.com/PacktPublishing/Linux-Kernel-Programming)/(booksforihucs)[https://sourceforge.net/projects/booksforihucs/files/]
 	- [Linux Kernel Programming Part 2 - Char Device Drivers and Kernel Synchronization](https://github.com/PacktPublishing/Linux-Kernel-Programming-Part-2)
+- [linux_kernel_wiki](https://github.com/0voice/linux_kernel_wiki/tree/main)
+- [原来 8 张图，就可以搞懂「零拷贝」了 ](https://www.cnblogs.com/xiaolincoding/p/13719610.html)
+- [linux-0.12 内核完全剖析](https://github.com/yifengyou/linux-0.12)
+- [linux-kernel-module-cheat](https://github.com/cirosantilli/linux-kernel-module-cheat)
+- [**ArthurChiao's Blog**](https://arthurchiao.art/articles-zh/)
 
 ## module
 - [The Linux Kernel Module Programming Guide](https://github.com/sysprog21/lkmpg)

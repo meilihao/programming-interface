@@ -6,6 +6,7 @@
 
 ## 进阶
 - [深度解析：分布式存储系统实现快照隔离的常见时钟方案](https://www.tuicool.com/articles/eEJB7rI)
+- [Distributed System Series（分布式系统·实践笔记）](https://github.com/wx-chevalier/DistributedSystem-Notes)
 
 ## paxos
 - [MySQL · 引擎特性 · RDS三节点企业版 一致性协议](http://mysql.taobao.org/monthly/2019/11/06/)
@@ -57,6 +58,10 @@
 	- [第七节：X-Paxos 三副本与高可用](https://edu.aliyun.com/course/316505/lesson/15168)
 	- [云原生数据库PolarDB分布式版（PolarDB-X）原理导读](https://openpolardb.com/blog/detail?id=32023062116873389487049628&creator=52c1dfde391f4f63b5f84e0654c06137&tabData=blog)
 	- [PolarDB-X 从入门到实战](https://developer.aliyun.com/ebook/download/7674)
+	- [PolarDB-X 源码解读（番外）：如何实现一个 Paxos](https://zhuanlan.zhihu.com/p/490329189)
+- 盘古
+
+	- [盘古：阿里云飞天分布式存储系统设计深度解析](https://developer.aliyun.com/article/64374)
 
 ## Distributed Consensus Framework
 ref:

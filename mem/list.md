@@ -37,3 +37,5 @@
 	[在 OS X 和早期的iOS里，页大小均为4K, macos也一直沿用4k; 但之后基于A7和A8的iOS里，采用虚拟内存每页16K，物理内存每页4K；基于A9或更新CPU的iOS里，页大小均为16K.](https://www.jianshu.com/p/961d819096a7)
 
 	在x86通常为 4k（4096）, 在 ARM64 中通常为 16K.
+- [Linux内存管理—进程地址空间](https://r00tk1ts.github.io/2018/08/13/Linux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86-%E8%BF%9B%E7%A8%8B%E5%9C%B0%E5%9D%80%E7%A9%BA%E9%97%B4/)
+- [看完这篇，别再说你不懂 Linux 内存管理了](https://cloud.tencent.com/developer/news/646104)
