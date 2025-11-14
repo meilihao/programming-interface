@@ -1,4 +1,7 @@
 # list
+## base
+- [从Linux内核角度看TCP粘包](https://mp.weixin.qq.com/s/J3XyoBU2r5irHtVQ3Qfrog)
+
 ## new ip
 - [New IP：开拓未来数据网络的新连接和新能力](http://www.infocomm-journal.com/dxkx/article/2019/1000-0801/1000-0801-35-9-00002.shtml)
 - [NEW IP Framework and Protocol for Future Applications](/misc/pdf/net/6f569c60-7045-11ea-89df-41bea055720b.pdf)

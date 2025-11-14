@@ -19,6 +19,10 @@ linux文件系统结构引用了[Linux Foundation Referenced Specifications](htt
 	- shm : 一个tmpfs, 由posix标准规定, 可用于内存共享
 	- ttS* : 代表串行端口. 类似windows下的COM
 	- tty* : linux上的虚拟控制台, 仅接收进程输出的信息, 这是与/dev/console的区别
+	- dri : 与直接渲染基础设施（Direct Rendering Infrastructure, DRI）相关联的目录, 是现代 Linux 图形栈的核心组成部分，用于实现图形硬件加速
+
+		- cardN (Legacy/Primary Node): 主要用于显示管理和配置以及遗留 API（如 X11）, 它通常是独占的，通常只有一个进程（如 X Server 或 Wayland 合成器）会打开并控制这个节点，以管理显示输出. 过去需要 video 组权限, 现在由 systemd-logind 动态授予当前活动会话的用户
+		- renderDN (Render Node): 专门用于图形渲染和通用 GPU 计算 (GPGPU)，是现代图形 API（如 Wayland、Vulkan、现代 OpenGL）的首选. 它是非独占的，允许多个应用程序同时安全地使用 GPU 进行计算. 访问权限相对宽松，因为它不涉及直接的显示输出控制
 - /etc : 存放系统管理相关的配置
 
 	- crontab : 系统定时任务的配置
