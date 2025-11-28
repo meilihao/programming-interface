@@ -3,6 +3,9 @@
 - [分布式系统设计中的通用方法](https://zhuanlan.zhihu.com/p/498068994)
 - [深入浅出paxos](https://rebootcat.com/2020/12/05/paxos/)
 - [分布式系统设计模式](https://colobu.com/2022/06/26/distributed-system-design-patterns/)
+- [可靠分布式系统-paxos的直观解释](https://blog.openacid.com/algo/paxos/)
+
+	- [200行代码实现基于paxos的kv存储](https://drmingdrmer.github.io/algo/2020/10/28/paxoskv.html)
 
 ## 进阶
 - [深度解析：分布式存储系统实现快照隔离的常见时钟方案](https://www.tuicool.com/articles/eEJB7rI)
@@ -62,6 +65,10 @@
 - 盘古
 
 	- [盘古：阿里云飞天分布式存储系统设计深度解析](https://developer.aliyun.com/article/64374)
+- [benschulz/paxakos](https://github.com/benschulz/paxakos)
+
+	- [playground](https://benschulz.github.io/paxakos/playground/)
+	- [深入探讨Paxakos：基于Leslie Lamport的Paxos的分布式共识算法的Rust实现及其应用](https://blog.csdn.net/qq_38334677/article/details/132378290)
 
 ## Distributed Consensus Framework
 ref:

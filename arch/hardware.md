@@ -1,5 +1,6 @@
 # hardware
 [intel主板架构](/misc/img/z390_chipset.jpg)
+[](/misc/img/arch/INTEL-W890-BLOCK-DIAGRAM.jpg)
 
 平台路径控制器(Platform Controller Hub，PCH)了取代南/北桥.
 目前北桥芯片的功能已被集成在cpu里, 可参考[消失的北桥 主板芯片组背后的故事](http://www.mcplive.cn/?controller=Article&id=3008), 因此主板芯片组就等价于南桥芯片.

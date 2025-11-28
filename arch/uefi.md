@@ -3,6 +3,7 @@
 - [<<UEFI原理与编程>>]
 - [*使用Rust开发操作系统(UEFI基本介绍)](https://blog.csdn.net/qq_41698827/article/details/104081406)
 - [UEFI入门必读的12本书](https://www.eet-china.com/mp/a150514.html)
+- [**从BIOS到桌面：图形子系统启动全解析**](https://mp.weixin.qq.com/s/FACJDF5RMFuo7xGnZfRj8A)
 
 uefi定义了os与平台固件之间的接口, 是一种标准. tianocore是它的一种开源实现.
 
