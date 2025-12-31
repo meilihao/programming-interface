@@ -217,6 +217,10 @@ TiKV 将 commit 的 Log 应用到 RocksDB 上，由于 Input（即 Log）都一�
 - ReadIndex
 - LeaseRead
 
+## 实现
+- [Dragonboat](https://my.oschina.net/u/5783135/blog/18822143)
+- [如何用 Rust 写分布式系统？这只“章鱼”太硬核了！](https://mp.weixin.qq.com/s/SchC0tHavCXTrY_5H37DcA)
+
 ## FAQ
 ### no-op LogEntry
 raft切成leader后除了已经提交的 LogEntry, 还可能有一些较新的 LogEntry 是未提交的，raft 需要确认这些未提交 LogEntry 的状态.

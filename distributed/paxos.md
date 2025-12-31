@@ -143,6 +143,14 @@ Raft 和 Multi-Paxos 都使用了任期形式的 Leader. 好处是性能很高�
 
 一些团队为了提高可用性, 转而采用基础的 Paxos 算法，比如微信的 PaxosStore 都是用了每轮一个单独的 Paxos 这种策略.
 
+## 实现
+- [benschulz/paxakos](https://github.com/benschulz/paxakos)
+
+  - [playground](https://benschulz.github.io/paxakos/playground/)
+
+    paxos动画
+  - [深入探讨Paxakos：基于Leslie Lamport的Paxos的分布式共识算法的Rust实现及其应用](https://blog.csdn.net/qq_38334677/article/details/132378290)
+
 ## FAQ
 ### chubby vs zookeeper的一致性
 Chubby(google分布式锁)：线性一致性(Linearizability)

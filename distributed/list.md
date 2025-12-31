@@ -65,10 +65,6 @@
 - 盘古
 
 	- [盘古：阿里云飞天分布式存储系统设计深度解析](https://developer.aliyun.com/article/64374)
-- [benschulz/paxakos](https://github.com/benschulz/paxakos)
-
-	- [playground](https://benschulz.github.io/paxakos/playground/)
-	- [深入探讨Paxakos：基于Leslie Lamport的Paxos的分布式共识算法的Rust实现及其应用](https://blog.csdn.net/qq_38334677/article/details/132378290)
 
 ## Distributed Consensus Framework
 ref:
@@ -82,7 +78,7 @@ ref:
 
 - [opengauss : Distributed Consensus Framework](https://gitee.com/opengauss/DCF)
 
-	- [DCF](https://docs-opengauss.osinfra.cn/zh/docs/5.0.0/docs/AboutopenGauss/DCF.html)
+	- [DCF](https://docs.opengauss.org/zh/docs/latest/docs/DatabaseOMGuide/%E5%9F%BA%E4%BA%8EPaxos%E5%8D%8F%E8%AE%AE%E7%9A%84%E9%AB%98%E5%8F%AF%E7%94%A8.html)
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)
 
 	最新版本VERSION已删除, 信息在CMakeLists.txt了, 可结合部分[号称史上最晦涩的算法Paxos，如何变得平易近人？](https://developer.aliyun.com/article/156281)代码阅读.
