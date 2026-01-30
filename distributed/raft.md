@@ -220,6 +220,7 @@ TiKV 将 commit 的 Log 应用到 RocksDB 上，由于 Input（即 Log）都一�
 ## 实现
 - [Dragonboat](https://my.oschina.net/u/5783135/blog/18822143)
 - [如何用 Rust 写分布式系统？这只“章鱼”太硬核了！](https://mp.weixin.qq.com/s/SchC0tHavCXTrY_5H37DcA)
+- [Rust分布式一致性库openraft的使用，高性能Raft共识算法实现与集群管理](https://bbs.itying.com/topic/688dd2902cb460013cc0f441)
 
 ## FAQ
 ### no-op LogEntry

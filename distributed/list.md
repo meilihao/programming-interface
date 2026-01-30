@@ -76,7 +76,7 @@ ref:
 		[本地](/misc/pdf/dc/Have we reached consensus on consensus 公开版.pptx)
 
 
-- [opengauss : Distributed Consensus Framework](https://gitee.com/opengauss/DCF)
+- [opengauss : Distributed Consensus Framework](`https://gitcode.com/opengauss/DCF`/`https://gitee.com/opengauss/DCF`)
 
 	- [DCF](https://docs.opengauss.org/zh/docs/latest/docs/DatabaseOMGuide/%E5%9F%BA%E4%BA%8EPaxos%E5%8D%8F%E8%AE%AE%E7%9A%84%E9%AB%98%E5%8F%AF%E7%94%A8.html)
 - [X-Paxos代码](https://github.com/polardb/polardbx-engine/blob/ed663bd0017042e7088ba34b46ad4e2fc0c01150/extra/IS/VERSION)

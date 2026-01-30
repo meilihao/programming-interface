@@ -36,6 +36,7 @@
 - [io_uring，高并发网络编程新利器](https://kernel.taobao.org/2020/09/New_Weapon_for_High_Concurrency_Network_Programming/)
 - [面对疾风吧！io_uring 优化 nginx 实战演练](https://kernel.taobao.org/2020/09/IO_uring_Optimization_for_Nginx/)
 - [异步IO时代的颠覆者：深入探讨io_uring](https://mp.weixin.qq.com/s/i_hhPabueeVEW__uUiUavQ)
+- [从 epoll 到 io_uring！为何 2025 年是告别事件循环的终结之年？](https://mp.weixin.qq.com/s/RK2Ame6o9NyUm2EnbtiGVQ)
 
 ## 超融合
 - [The Nutanix Bible](https://toutiao.io/posts/v28zs0/preview)

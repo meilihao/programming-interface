@@ -43,6 +43,7 @@
 ### 手写os
 - [手写操作系统](https://www.eet-china.com/mp/a163987.html) from [luban-ziya](https://gitee.com/luban-ziya/projects)
 - [DragonOS-Community/DragonOS](https://github.com/DragonOS-Community/DragonOS)
+- [rust-raspberrypi-OS-tutorials：学习如何用 Rust 编写嵌入式操作系统](https://github.com/rust-embedded/rust-raspberrypi-OS-tutorials)
 
 ## debug
 - [一文汇总Linux 系统动态追踪(高级调试)技术](http://news.eeworld.com.cn/mp/ymc/a85336.jspx)
