@@ -1,6 +1,8 @@
 # list
 ## base
 - [从Linux内核角度看TCP粘包](https://mp.weixin.qq.com/s/J3XyoBU2r5irHtVQ3Qfrog)
+- [Linux不同网卡名称详细讲解](https://mp.weixin.qq.com/s/T7giGF-oG_MG4FtUJ2BOIw)
+- [PVE SDN 完全指南：从入门到企业级，选对方案不踩坑](https://mp.weixin.qq.com/s/lzCMVETg9OKI5K6rME-QYA)
 
 ## new ip
 - [New IP：开拓未来数据网络的新连接和新能力](http://www.infocomm-journal.com/dxkx/article/2019/1000-0801/1000-0801-35-9-00002.shtml)

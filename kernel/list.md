@@ -19,6 +19,7 @@
 - [linux-0.12 内核完全剖析](https://github.com/yifengyou/linux-0.12)
 - [linux-kernel-module-cheat](https://github.com/cirosantilli/linux-kernel-module-cheat)
 - [**ArthurChiao's Blog**](https://arthurchiao.art/articles-zh/)
+- [编译一个最小可用 Linux 内核](https://mp.weixin.qq.com/s/g4hw4Jt0STS55BVzNZnHrQ)
 
 ## module
 - [The Linux Kernel Module Programming Guide](https://github.com/sysprog21/lkmpg)
