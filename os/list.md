@@ -33,6 +33,7 @@
 - [openKylin 2.0 揭秘 | 新一代不可变系统探索](https://www.oschina.net/news/274942)
 
 ## os
+- [linux-insides-zh](https://github.com/hust-open-atom-club/linux-insides-zh)
 - 操作系统: 三大简易元素(Operating Systems: Tree Easy Pieces)
 - 操作系统概论(Operating Systems Comcepts)
 - 操作系统: 精髓与设计原理(Operating Systems: Internals and Design Principles)

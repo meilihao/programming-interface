@@ -17,6 +17,7 @@
 - [彻底理解 IO 多路复用实现机制](https://juejin.cn/post/6882984260672847879)
 - [文件IO系统调用内幕](https://lrita.github.io/2019/03/13/the-internal-of-file-syscall/)
 - [NVMe驱动详解系列_第一部:NVMe驱动初始化与注销](https://developer.aliyun.com/article/609295)
+- [**Linux I/O 调度器架构解析**](https://mp.weixin.qq.com/s/ztrPFnqo43nzl7mr_SkDig)
 
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)
