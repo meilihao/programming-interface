@@ -1,5 +1,6 @@
 # boot
 ref:
+- [GRUB2 传统 BIOS vs 现代 UEFI 引导过程详解](https://mp.weixin.qq.com/s/zJggXb0XXiok3BDXQgqVUQ)
 - [systemd时代的开机启动流程(UEFI+systemd)](https://www.junmajinlong.com/linux/systemd/systemd_bootup/)
 
 ## uefi
