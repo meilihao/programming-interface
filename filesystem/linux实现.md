@@ -602,6 +602,24 @@ ref:
 
 fs_context 引入了一种新的super block创建方式. 这个patch在2019年(linux 5.x)被合入，老的接口仍然可以兼容使用，但是目前大部分文件系统实现已经切换到了fs_context的新方式，见[VFS: Introduce filesystem context](https://lwn.net/Articles/780267/), [Filesystem Mount API](https://www.kernel.org/doc/html/latest/filesystems/mount_api.html)
 
+在 Linux 内核 5.1 之后，引入了新的文件系统挂载 API（即 fs_context），旨在取代旧的 mount 接口（fill_super 和 mount_bdev 等）.
+
+内核源码中的轻量级文件系统是最好的选择：
+- Zonefs (fs/zonefs/)
+
+	这是一个相对现代且代码量适中的文件系统。它完整地实现了 fs_context_operations，包括参数解析（zonefs_parse_param）和上下文初始化
+
+- Ramfs / tmpfs / Libfs (fs/ramfs/ & fs/libfs.c)
+	
+	ramfs 是学习 fs_context 的“入门级”教材。它通过 ramfs_init_fs_context 展示了如何为一个简单的基于内存的文件系统设置上下文
+
+- Debugfs (fs/debugfs/)
+	
+	Debugfs 也是较早迁移到新 API 的系统之一，适合观察如何处理挂载选项
+
+其他demo
+- [SimpleFS (新版)](https://github.com/sysprog21/simplefs)
+
 ## mount
 参考:
 - [EADME - 计算机专业性文章及回答总索引#新一代VFS mount系统调用](https://zhuanlan.zhihu.com/p/67686817)

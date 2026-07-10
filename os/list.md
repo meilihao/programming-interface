@@ -45,6 +45,7 @@
 - [手写操作系统](https://www.eet-china.com/mp/a163987.html) from [luban-ziya](https://gitee.com/luban-ziya/projects)
 - [DragonOS-Community/DragonOS](https://github.com/DragonOS-Community/DragonOS)
 - [rust-raspberrypi-OS-tutorials：学习如何用 Rust 编写嵌入式操作系统](https://github.com/rust-embedded/rust-raspberrypi-OS-tutorials)
+- [**OS Kernel From Scratch · 从零写OS内核**](https://github.com/golang12306/os-kernel-from-scratch)
 
 ## debug
 - [一文汇总Linux 系统动态追踪(高级调试)技术](http://news.eeworld.com.cn/mp/ymc/a85336.jspx)
@@ -66,6 +67,7 @@
 
 ## iso
 - [使用grub2制作U盘引导iso](http://xstarcd.github.io/wiki/Linux/boot-multiple-iso-from-usb-via-grub2-using-linux.html)
+- [08 一次性搞定所有 BUG，从零编译可直接启动的 NAS Live 镜像](https://mp.weixin.qq.com/s/5JBKfHat6hlFtQvXwRpzTA)
 
 ## news
 - [全场景创新，这些厉害的 openEuler 技术创新，你值得拥有](https://linux.cn/article-15435-1.html)

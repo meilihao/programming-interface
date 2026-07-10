@@ -1,8 +1,10 @@
 # list
 
 ## base
+- [Linux: bio 结构源码解析](https://mp.weixin.qq.com/s/EXEDnro85orgFTo6bCgXsQ)
 - [**了解 SSD 技术：NVMe、SATA、M.2**](https://www.kingston.com.cn/cn/ssd/what-is-nvme-ssd-technology)
 - [itworld123](https://www.zhihu.com/people/zhang-shu-zhu-69)
+- [文件系统快照：CoW vs RoW，瞬间创建的秘密与删除慢的真相](https://mp.weixin.qq.com/s/he744iCrXeDeHUr6fWW6LA)
 - [存储系统的快照技术](https://zhuanlan.zhihu.com/p/64595897)
 - [快照原理](https://www.haxi.cc/archives/%E5%BF%AB%E7%85%A7%E5%8E%9F%E7%90%86.html)
 - [Linux IO 之 文件系统的架构.md](https://github.com/0voice/linux_kernel_wiki/blob/main/%E6%96%87%E7%AB%A0/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/Linux%20IO%20%E4%B9%8B%20%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E7%9A%84%E6%9E%B6%E6%9E%84.md)
@@ -18,6 +20,7 @@
 - [文件IO系统调用内幕](https://lrita.github.io/2019/03/13/the-internal-of-file-syscall/)
 - [NVMe驱动详解系列_第一部:NVMe驱动初始化与注销](https://developer.aliyun.com/article/609295)
 - [**Linux I/O 调度器架构解析**](https://mp.weixin.qq.com/s/ztrPFnqo43nzl7mr_SkDig)
+- [**企业级闪存：存储架构和关键技术**](https://mp.weixin.qq.com/s/nABxSk2fUxufsqSMP3mjMw)
 
 ## next
 - [唬人的“零拷贝”技术，也就那么回事](https://developer.51cto.com/art/202011/633030.htm)

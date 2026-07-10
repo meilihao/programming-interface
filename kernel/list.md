@@ -20,6 +20,7 @@
 - [linux-kernel-module-cheat](https://github.com/cirosantilli/linux-kernel-module-cheat)
 - [**ArthurChiao's Blog**](https://arthurchiao.art/articles-zh/)
 - [编译一个最小可用 Linux 内核](https://mp.weixin.qq.com/s/g4hw4Jt0STS55BVzNZnHrQ)
+- [手写一个迷你 Initcall：用 100 行 C 代码模拟 Linux 内核初始化机制](https://mp.weixin.qq.com/s/MjNTXx2WKcOJQsW4sOHBhQ)
 
 ## module
 - [The Linux Kernel Module Programming Guide](https://github.com/sysprog21/lkmpg)

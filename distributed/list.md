@@ -6,6 +6,7 @@
 - [可靠分布式系统-paxos的直观解释](https://blog.openacid.com/algo/paxos/)
 
 	- [200行代码实现基于paxos的kv存储](https://drmingdrmer.github.io/algo/2020/10/28/paxoskv.html)
+- [图解分布式系统原理](https://www.codedump.info/dist-system-cn/)
 
 ## 进阶
 - [深度解析：分布式存储系统实现快照隔离的常见时钟方案](https://www.tuicool.com/articles/eEJB7rI)
@@ -25,6 +26,7 @@
 - [共识协议：切主后的困境 - 日志恢复和幽灵复现](https://zhuanlan.zhihu.com/p/652849109)
 
 	其他文章也值得一看
+- [PaxosStore 源码分析](https://sf-zhou.github.io/paxos/paxos_store_01_network.html)
 
 ## etcd
 - [etcd技术架构以及其内部的实现机制](https://zhuanlan.zhihu.com/p/566090538)
@@ -55,6 +57,7 @@
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
 	- [OBCE V3.0教材: 07_第七章_OceanBase高可用_V3.0.pdf](https://mdn.alipayobjects.com/huamei_22khvb/afts/file/A*PIj4T6BIPtwAAAAAAAAAAAAADiGDAQ/07_%E7%AC%AC%E4%B8%83%E7%AB%A0_OceanBase%E9%AB%98%E5%8F%AF%E7%94%A8_V3.0.pdf)
 	- [【数据库】从系统架构上描述 OceanBase 的高可用与容灾](https://blog.csdn.net/qq_40948559/article/details/125154366)
+	- [成为ob贡献者(6):如何阅读Paxos代码](https://open.oceanbase.com/blog/14760731985)
 - [PolarDB-X]()
 
 	- [PolarDB-X 三副本存储引擎](https://zhuanlan.zhihu.com/p/535496764)
@@ -95,6 +98,9 @@ ref:
 
 	- [多副本日志同步](https://www.oceanbase.com/docs/community-observer-cn-10000000000901312)
 	- [万字解析：从 OceanBase 源码剖析 paxos 选举原理](https://zhuanlan.zhihu.com/p/630468476)
+	- [VLDB24论文之PALF](https://zhuanlan.zhihu.com/p/3665985750)
+	- [成为ob贡献者(08):翻译PALF: Replicated Write-Ahead Logging for Distributed Databases](https://open.oceanbase.com/blog/16174519112)
+	- [2分钟论文: 为了满足小企业用户, OceanBas分布式日志系统像写文件一样写数据库,超简单](https://cloud.tencent.com/developer/article/2574900)
 - [浅析华为Cantian引擎](https://www.modb.pro/db/1701776671271636992)
 
 	- [Cantian引擎，分布式数据库可实现多节点并发读写同一库表的多主架构](https://e.huawei.com/cn/solutions/storage/all-flash-storage/oceandata)

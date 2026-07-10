@@ -10,7 +10,7 @@ ref:
   通过jsnbd, Web浏览器成为了服务器端, 存放着文件, 而本地系统通过/dev/nbdx来访问Web浏览器文件
 - [BDEV: 基于Append-Only存储实现的块设备](https://gitee.com/mphyatyh/bdev/)
 
-    使用nbd-client无法连接10809, 必须使用[go-nbd/cmd/go-nbd-example-client](github.com:pojntfx/go-nbd.git)
+    使用nbd-client无法连接10809, 必须使用[go-nbd/cmd/go-nbd-example-client](https://github.com/pojntfx/go-nbd)
 
 ## example
 ```bash

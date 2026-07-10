@@ -8,6 +8,7 @@
 - [阿里云弹性裸金属服务器-神龙架构（X-Dragon）揭秘](http://cnzzidc.com/cnzz1372.html)
 - [继AWS Nitro和阿里云神龙，京东造起了“京刚”](https://finance.sina.com.cn/tech/2021-03-09/doc-ikkntiak6464795.shtml)
 - [阿里云张献涛：自主最强DPU神龙的秘诀](https://developer.aliyun.com/article/867094)
+- [硬件加速器：DPDK、SmartNIC、DPU 如何解放 CPU](https://mp.weixin.qq.com/s/2Bru7dZFpnQw503-ya9txQ)
 
 一般而言，实现“软件的硬件化处理”，是将这个硬件做成一个网卡，插在卡槽上，硬件层面还有一个层做在Bios之上，操作系统之下，负责硬件资源的切分。云主机的性能扩展不需要占用CPU资源，显著提升性能的可扩展性.
 

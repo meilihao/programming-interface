@@ -1,4 +1,11 @@
 # list
+
+## base
+- [LLVM编译器开发指南](https://mp.weixin.qq.com/s/qzIfjdNCjeH4gN3hbwA9dw)
+- [Getting Started with LLVM Core Libraries（中文版](https://getting-started-with-llvm-core-libraries-zh-cn.readthedocs.io/zh-cn/latest/)
+- [LLVM编译器实战教程]()
+- [2万字|30张图带你领略glibc内存管理精髓](https://mp.weixin.qq.com/s/pdv5MMUQ9ACpeCpyGnxb1Q)
+
 ## debug
 - [手把手教你使用 GNU 调试器](https://linux.cn/article-14853-1.html)
 

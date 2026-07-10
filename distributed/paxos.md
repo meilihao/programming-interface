@@ -117,6 +117,15 @@ Leader本质: ，如果每个节点都争相 propose，每条日志都靠完整�
 ref:
 - [Implementing Replicated Logs with Paxos](https://ongardie.net/static/raft/userstudy/paxos.pdf)
 
+概念:
+1. 提案: `[n,v]`
+
+  - n: 提案编号
+  
+    全局唯一且单调递增
+
+  - v: 提议值
+
 1. Prepare
   某个提案节点准备发起提案，必须先向所有的决策节点广播一个许可申请（称为 Prepare 请求）. 提案节点的 Prepare 请求中会附带一个全局唯一的数字 n 作为提案 ID, 本质上而言，提案编号的大小代表着优先级. 决策节点收到后, 根据提案编号的大小，接受者给予提议者保证三个承诺:
   1. 承诺不会再接受提案 ID 小于或等于 n 的 Prepare 请求
@@ -149,7 +158,18 @@ Raft 和 Multi-Paxos 都使用了任期形式的 Leader. 好处是性能很高�
   - [playground](https://benschulz.github.io/paxakos/playground/)
 
     paxos动画
+
+    ```bash
+    cd paxakos
+    rustup target add wasm32-unknown-unknown
+    cargo install wasm-pack
+    cd examples/playground
+    wasm-pack build --target web
+    ./caddy file-server --listen :8001 --root paxakos/examples/playground # 访问`http://localhost:8001/src/`即可
+    ```
   - [深入探讨Paxakos：基于Leslie Lamport的Paxos的分布式共识算法的Rust实现及其应用](https://blog.csdn.net/qq_38334677/article/details/132378290)
+- [Ceph monitor中实现了paxos算法，来选举一个leader负责监控集群的监控状态](https://github.com/ceph/ceph/blob/main/src/mon/Paxos.cc)
+- [Multi-Paxos](https://github.com/dywsjtu/Multi-Paxos)
 
 ## FAQ
 ### chubby vs zookeeper的一致性
@@ -172,6 +192,25 @@ Zookeeper集群的初始状态为x；Client A发起写操作将状态修改为y�
 
 这也符合Zookeeper的设计思路：提供更高效更原子的操作，通过这些操作客户端可以自行组装满足各种需求，即便是对一致性要求更高的需求.
 
-### leaderless的multi-paxos
+### multi-paxos
+#### leadership
+- [PolarDB-X 存储引擎核心技术 | Paxos多副本](https://zhuanlan.zhihu.com/p/655731358)
+
+  X-Paxos基于强Leadership的Multi-Paxos实现，大量理论和实践已经证明了强Leadership的Multi-Paxos，性能好于Multi-Paxos/Basic-Paxos
+
+  ps: 这里的`强Leadership`指[`unique proposer`](https://zhuanlan.zhihu.com/p/352849246)
+
+#### leaderless
 ref:
 - [BIGO技术 | Paxos的工程实践与极致优化](https://juejin.cn/post/6854573221681823758)
+
+## FAQ
+### Paxos与Raft的核心差异
+ref:
+- [OceanBase为何选择Paxos协议？](https://open.oceanbase.com/blog/21682138672)
+- [OceanBase的一致性协议为什么选择 paxos而不是raft?](https://www.zhihu.com/question/52337912)
+
+- Paxos 允许多条日志乱序提交，支持并行处理
+- Raft 要求多条日志严格按顺序执行，只有前一个日志被确认后才能确认后一个日志
+
+这一根本差异带来了两者在性能、并发处理能力和可用性上的不同表现

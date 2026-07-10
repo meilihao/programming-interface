@@ -2,6 +2,7 @@
 参考:
 - [JohnHufferd-IP Storage Protocols-V3.pdf](/misc/pdf/JohnHufferd-IP Storage Protocols-V3.pdf)
 - [rfc 7143 Internet Small Computer System Interface (iSCSI) Protocol](https://tools.ietf.org/html/rfc7143)
+- [一文搞懂 iSCSI：网络对面的硬盘，怎么当本地盘用？](https://mp.weixin.qq.com/s/0FPzwteFTOH0vj8ZiCd8Eg)
 
 iscsi 架构基于客户/服务器模型，其主要功能是在TCP/IP网络上的主机系统（启动器initlator）和存储设备（目标 target） 之间进行大量的数据封装和可靠传输过程，此外，iscsi 提供了在IP网络封装SCSI命令，切运行在TCP上.
 

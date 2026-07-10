@@ -1,4 +1,7 @@
 # rdma
+ref:
+- [Linux 网络栈在 RDMA 场景下的角色](https://mp.weixin.qq.com/s/T0ik8r8cFCIm9QVYqxk9Iw)
+
 远程直接内存访问(即RDMA)是一种直接内存访问技术, 它将数据直接从一台计算机的内存传输到另一台计算机, 无需双方操作系统的介入. 它是一种为了解决网络传输中服务器端数据处理延迟而产生的技术.
 
 RDMA最早在Infiniband传输网络上实现, 后来业界厂家把RDMA移植到传统Ethernet以太网上, 降低了RDMA的使用成本, 推动RDMA技术普及.

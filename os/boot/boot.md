@@ -379,3 +379,17 @@ lrwxrwxrwx 1 root root 30 12月 17 12:22  zfs.target -> /lib/systemd/system/zfs.
 ```
 
 不仅如此，为了兼容早期sysV的rc.local开机自启动功能，systemd会检查/etc/rc.local是否具有可执行权限，如果具备，systemd会在此阶段自动执行rc.local中的命令.
+
+## FAQ
+### initramfs、rootfs、initrd的关系
+rootfs 是内核启动后最早可用的根文件系统载体；initramfs 是现代 Linux 放进这个载体里的早期用户空间内容包；initrd 是更老的一种“内存盘镜像”方案, initramfs 是后来替代 initrd 的主流实现方案.
+
+> initrd 走的是“内存块设备镜像”思路; initramfs 走的是“直接释放文件内容”思路
+
+内核启动后会做两件关键事：
+1. 先创建最初始的 rootfs
+
+	rootfs 本质上是内核启动后最先拥有的那个根文件系统, 而不是最终长期使用的根
+2. 再把 initramfs 的内容解包到 rootfs 里, 然后执行其中的 /init。
+
+initramfs 不是“挂载成根”, 而是“解包进 rootfs”. 所以两者关系一定要分层理解：rootfs 是承载位置。initramfs 是填进去的内容

@@ -3,6 +3,29 @@
 - [从Linux内核角度看TCP粘包](https://mp.weixin.qq.com/s/J3XyoBU2r5irHtVQ3Qfrog)
 - [Linux不同网卡名称详细讲解](https://mp.weixin.qq.com/s/T7giGF-oG_MG4FtUJ2BOIw)
 - [PVE SDN 完全指南：从入门到企业级，选对方案不踩坑](https://mp.weixin.qq.com/s/lzCMVETg9OKI5K6rME-QYA)
+- [Wireshark 排查 TCP 重传：超时重传、快速重传、重复 ACK 一次讲清](https://mp.weixin.qq.com/s/46U78i6cJmlAK-KcuykikA)
+
+## 打洞
+- [NAT 穿透是如何工作的：技术原理及企业级实践（Tailscale, 2020）](https://arthurchiao.art/blog/how-nat-traversal-works-zh/)
+- [NAS远程访问方案选择指南：5款工具深度测评（12000字实战经验）](https://zhuanlan.zhihu.com/p/1974115965320066799)
+
+组网软件:
+- [EasyTier](https://github.com/EasyTier/EasyTier)
+- [happynclient](https://github.com/happynclient)
+
+    - [happyn-您的组网专家](https://happyncn.feishu.cn/wiki/wikcnqJgp8j6qSKMPS9DdyrhLHc)
+- [headscale，是 tailscale 服务器的开源版](https://blog.zonowry.com/posts/nat-in-different-environments/)
+- [n3n]()
+
+    2023 年从 n2n fork
+- [异地组网，有多少种选择？](https://aeterna.cim.mcgill.ca/mayx/blog/src/branch/master/_posts/2026-05-01-virtual-net.md)
+
+    [VNT](https://rustvnt.com/)/Netmaker/WireGuard
+
+## SD-WAN
+- [星空组网——比zerotier、tailscale还好用的虚拟组网工具](https://zhuanlan.zhihu.com/p/687891215)
+
+    - [星空-你的远程访问管家](https://fast.v2ex.com/t/929318)
 
 ## new ip
 - [New IP：开拓未来数据网络的新连接和新能力](http://www.infocomm-journal.com/dxkx/article/2019/1000-0801/1000-0801-35-9-00002.shtml)
@@ -69,6 +92,9 @@
 - [L4S(低延迟低损耗可扩展) 的意义](https://zhuanlan.zhihu.com/p/614223442)
 - [virtio 网络的演化：原始virtio ＞ vhost-net(内核态) ＞ vhost-user(DPDK) ＞ vDPA](https://blog.csdn.net/Rong_Toa/article/details/113819506)
 - [SRIOV：智能网卡就靠它了！](https://www.eet-china.com/mp/a14091.html)
+- [现代数据中心网络]()
+
+    现代数据中心网络依靠 Leaf-Spine 架构 提供高带宽、低延迟的无阻塞通信。在此物理架构之上，结合 VXLAN 实现跨三层的大二层扩展，利用 BGP EVPN 作为控制平面自动化路由。配合 SDN 控制器 集中下发策略，实现网络自动化运维
 
 ## 实现
 - [Linux 网络栈监控和调优：发送数据](https://colobu.com/2019/12/09/monitoring-tuning-linux-networking-stack-sending-data/)

@@ -1,7 +1,7 @@
-# BFT(Byzantine Fault Tolerance)
+# BFT(Byzantine Fault Tolerance, 拜占庭容错算法)
 因为拜占庭容错算法（比如 PoW 算法、PBFT 算法），能容忍一定比例的作恶行为，所以它在相对开放的场景中应用广泛，比如公链、联盟链.
 
-非拜占庭容错算法（比如 Raft）无法对作恶行为进行容错，主要用于封闭、绝对可信的场景中，比如私链, 分布式存储.
+非拜占庭容错算法即故障容错算法CFT（Crash Fault Tolerance, 故障容错算法），（比如 Raft, Paxos, ZAB）无法对作恶行为进行容错，主要用于封闭、绝对可信的场景中，比如私链, 分布式存储.
 
 ## PBFT
 PBFT 算法是一种能在实际场景中落地的拜占庭容错算法，它在区块链中应用广泛（比如 Hyperledger Sawtooth、Zilliqa）.

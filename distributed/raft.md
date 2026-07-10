@@ -3,6 +3,7 @@ ref:
 - [raft官网](raft.github.io)
 
 	raft动画
+- [raft动画](https://thesecretlivesofdata.com/raft/)
 - [深度解析 Raft 分布式一致性协议（长文）](https://mp.weixin.qq.com/s/IA4aGJ0o-xsQtU9H0JliYw)
 - [Raft 在 etcd 中的实现](https://blog.betacat.io/post/raft-implementation-in-etcd/)
 - [分布式理论 6 - 一致性协议Raft.md](https://github.com/loveincode/notes/blob/master/15%20-%20Distributed%20%E5%88%86%E5%B8%83%E5%BC%8F/%E5%88%86%E5%B8%83%E5%BC%8F%E7%90%86%E8%AE%BA/%E5%88%86%E5%B8%83%E5%BC%8F%E7%90%86%E8%AE%BA%206%20-%20%E4%B8%80%E8%87%B4%E6%80%A7%E5%8D%8F%E8%AE%AERaft.md)
@@ -26,14 +27,11 @@ Paxos 协议有一个很大的设计假设, 它要求支持多个投票, 也就�
 	如果采用 Paxos 协议, 当一台机器新上线的时候很快就能提供服务了, 因为不需要等前面的数据确认它就能提供服务, 但是如果使用的是 raft 协议, 需要等前面的所有日志确认以后才能提供服务???(不是应是新节点补全数据后才提供访问吗?).
 
 其实将分布式系统中如何对某个值达成一致可分解成3个子问题:
-1. 如何选主（Leader Election）
-1. 如何把数据复制到各个节点上（Entity Replication）
-1. 如何保证过程是安全的（Safety）
+1. 领导者选举: 如何选主（Leader Election）
+1. 日志复制: 如何把数据复制到各个节点上（Log Replication）
+1. 安全性: 如何保证过程是安全的（Safety）
 
-raft属于 Multi-Paxos 算法, 但做了一些简化和限制, 它将问题分解为:
-- leader election : leader选举
-- log replication: 日志复制
-- membership changes : 成员关系变化
+raft属于 Multi-Paxos 算法, 但做了一些简化和限制, 也同样遵循上述思路.
 
 在 Raft 中，不是所有节点都能当选领导者，只有日志最完整的节点，才能当选领导者；其次，在 Raft 中，日志必须是连续的.
 
@@ -229,3 +227,10 @@ raft切成leader后除了已经提交的 LogEntry, 还可能有一些较新的 L
 由于 raft 不要求持久化 commit index，所以新 Leader 其实是不知道具体哪些 LogEntry 已经提交的. 但raft 只需要在当前 term 尝试对一条新的空日志（no-op LogEntry）达成共识即可，一旦它达成了共识，鉴于 commit index 的语义，所有之前的日志状态都可确认为已经达成quorum了.
 
 noop 日志，它作为一个分割线, 避免了拥有过时日志的节点当选 Leader, 以[主动地避免幽灵复现问题](https://zhuanlan.zhihu.com/p/652849109).
+
+### Consul 的 default、consistent 和 stale 三种一致性模式
+本质上是在数据的绝对准确性（一致性）与请求的响应速度和系统可用性之间提供了不同的权衡选项
+
+- stale : 允许集群中的任何节点（包括非 Leader 节点）直接响应客户端的读请求, 但不保证数据的一最新
+- consistent : Leader 节点在响应读请求前，必须先与集群中的其他节点进行一次心跳交互（或遍历），以确保自己依然保有最新的 Leader 身份，从而避免读取到过期数据
+- default : 通常基于 Leader 租约（Leader Lease）来实现，系统假设在特定时间窗口内主节点是稳定的. 在此期间，Leader 无需与其他节点确认即可直接响应读请求

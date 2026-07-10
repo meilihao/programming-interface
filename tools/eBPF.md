@@ -17,6 +17,8 @@
 - [**eunomia-bpf/awesome-ebpf-zh**](https://github.com/eunomia-bpf/awesome-ebpf-zh)
 - [**Linux超能力BPF技术介绍及学习分享（技术创作101训练营）**](https://cloud.tencent.com/developer/article/1698426)
 - [eCapture](https://www.oschina.net/news/341096/ecapture-v1-0-0)
+
+    无需CA证书即可捕获 HTTPS/TLS 加密通信的明文内容
 - [深入理解 Linux eBPF：一个完整阅读清单(转载)](https://blog.csdn.net/21cnbao/article/details/95585483)
 - [bpf_study:bpf 学习仓库](https://github.com/DavadDi/bpf_study)
 - [eBPF 完全入门指南.pdf](https://zhuanlan.zhihu.com/p/492185920)
