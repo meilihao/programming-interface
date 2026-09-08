@@ -59,6 +59,7 @@
 - [浅谈Linux设备虚拟化技术的演进之路](https://www.modb.pro/db/110904)
 - **[Intel Scalable IOV已计划取代SR-IOV - Intel Scalable IOV介绍及应用实例](https://mp.weixin.qq.com/s/u76IZhPSFdVtGt1ar5DR5g)**
 - [Scalable IOV：IO虚拟化的答案还是昙花一现？](https://mp.weixin.qq.com/s/aVvWGgAAPWwdtyjYT33aLQ)
+- [rust-vmm：用 Rust 重写虚拟化的"乐高积木"](https://mp.weixin.qq.com/s/KebzDpcDfs3MKpRnVtELaw)
 
 ## 迁移
 - [Nova实现虚拟机块迁移](http://niusmallnan.com/_build/html/_templates/openstack/block_migration.html)

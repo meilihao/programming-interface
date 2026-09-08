@@ -4,6 +4,7 @@
 - [Linux不同网卡名称详细讲解](https://mp.weixin.qq.com/s/T7giGF-oG_MG4FtUJ2BOIw)
 - [PVE SDN 完全指南：从入门到企业级，选对方案不踩坑](https://mp.weixin.qq.com/s/lzCMVETg9OKI5K6rME-QYA)
 - [Wireshark 排查 TCP 重传：超时重传、快速重传、重复 ACK 一次讲清](https://mp.weixin.qq.com/s/46U78i6cJmlAK-KcuykikA)
+- [网络工程师必须吃透的9个VXLAN术语：从VTEP、VNI到EVPN，一次理清数据中心网络逻辑](https://mp.weixin.qq.com/s/XrvUq-ltAOZNqkFADf92OQ)
 
 ## 打洞
 - [NAT 穿透是如何工作的：技术原理及企业级实践（Tailscale, 2020）](https://arthurchiao.art/blog/how-nat-traversal-works-zh/)
@@ -41,6 +42,7 @@
 - [QUIC 发生了什么](https://kiosk007.top/post/quic-%E5%8F%91%E7%94%9F%E4%BA%86%E4%BB%80%E4%B9%88/)
 
 ## next
+- [数据中心网络架构全解析](https://mp.weixin.qq.com/s/0Yfev0E-KPKcY7PCjD9B2w)
 - [阿里云如何构建高性能云原生容器网络](https://yq.aliyun.com/articles/755848)
 - [阿里云如何构建高性能云原生容器网络-直播](https://yq.aliyun.com/live/2626)
 - [超大规模云网络数据中心创新（上/下）](https://www.51openlab.com/article/28/)

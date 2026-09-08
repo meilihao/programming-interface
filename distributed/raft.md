@@ -11,6 +11,7 @@ ref:
 - [etcd教程(十五)---leader选取源码分析](https://www.lixueduan.com/posts/etcd/15-raft-leader-election/)
 - [simple-raft](https://github.com/nananatsu/simple-raft)
     - [用go实现Raft](https://juejin.cn/post/7239238662692569148)
+- [toyDB重写：一个用Rust构建的分布式SQL数据库，适用于教育](https://zhuanlan.zhihu.com/c_1724510082098999297)
 
 
 Paxos 协议有一个很大的设计假设, 它要求支持多个投票, 也就是数据库里的多条日志之间是可以**乱序**提交的, 可以**并行**处理的. 但是 raft 协议的做了一个约束, 数据库的多个投票多条日志一定要按照**顺序执行**, 只能前一个日志被确认了才能确认后一个日志.

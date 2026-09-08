@@ -3,10 +3,8 @@
 - [分布式系统设计中的通用方法](https://zhuanlan.zhihu.com/p/498068994)
 - [深入浅出paxos](https://rebootcat.com/2020/12/05/paxos/)
 - [分布式系统设计模式](https://colobu.com/2022/06/26/distributed-system-design-patterns/)
-- [可靠分布式系统-paxos的直观解释](https://blog.openacid.com/algo/paxos/)
-
-	- [200行代码实现基于paxos的kv存储](https://drmingdrmer.github.io/algo/2020/10/28/paxoskv.html)
 - [图解分布式系统原理](https://www.codedump.info/dist-system-cn/)
+- [**将 paxos 和 raft 统一为一个协议: abstract-paxos**](https://zhuanlan.zhihu.com/p/488629044)
 
 ## 进阶
 - [深度解析：分布式存储系统实现快照隔离的常见时钟方案](https://www.tuicool.com/articles/eEJB7rI)
@@ -88,6 +86,7 @@ ref:
 
 	- [**PolarDB-X存储节点三副本: 架构介绍、源码导读和搭建案例**](https://www.modb.pro/db/657955)
 	- [PolarDB-X 基于 X-Paxos 一致性协议的高可用](https://developer.aliyun.com/article/1040149)
+	- [PolarDB-X 存储架构之“基于Paxos的最佳生产实践”](https://zhuanlan.zhihu.com/p/315596644)
 	- [An Interpretation of PolarDB-X Source Codes (Extra): How to Implement a Paxos](https://www.alibabacloud.com/blog/an-interpretation-of-polardb-x-source-codes-extra-how-to-implement-a-paxos_599472)/[PolarDB-X 源码解读（番外）：如何实现一个 Paxos](https://zhuanlan.zhihu.com/p/490329189)
 	- ~~[XFT: Reimplementing XPaxos in Go](https://medium.com/princeton-systems-course/xft-implementation-evaluation-5d57b25c5c5f)~~
 	- ~~[x-paxos](https://github.com/rayaanshahid/x-paxos), XFT和olarDB-X 一致性共识协议 (X-Paxos)不是同一东西~~

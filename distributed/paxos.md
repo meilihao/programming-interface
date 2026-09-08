@@ -170,6 +170,18 @@ Raft 和 Multi-Paxos 都使用了任期形式的 Leader. 好处是性能很高�
   - [深入探讨Paxakos：基于Leslie Lamport的Paxos的分布式共识算法的Rust实现及其应用](https://blog.csdn.net/qq_38334677/article/details/132378290)
 - [Ceph monitor中实现了paxos算法，来选举一个leader负责监控集群的监控状态](https://github.com/ceph/ceph/blob/main/src/mon/Paxos.cc)
 - [Multi-Paxos](https://github.com/dywsjtu/Multi-Paxos)
+- [WPaxos](https://github.com/wuba/WPaxos)
+
+  WPaxos是Paxos一致性算法的生产级高性能Java实现，参考了微信团队C++语言开发的PhxPaxos类库，支持多分组，可用于解决高并发、高可靠分布式系统中多副本数据一致性问题以及分布式共识问题
+
+  [开源｜WPaxos：一致性算法Paxos的生产级高性能Java实现](https://zhuanlan.zhihu.com/p/302929164)
+  [WLock是一套基于一致性算法组件WPaxos 实现的高可靠、高吞吐分布式锁服务](https://github.com/wuba/WLock)/[如何设计高可用的分布式锁?|开源高可用分布式锁WLock设计详解！](https://juejin.cn/post/7130587814197985293)
+- [Klein是一个基于Paxos的分布式集合工具库，包括分布式Cache、分布式消息队列、分布式List、分布式Map、分布式Lock等](https://github.com/shihuili1218/klein)
+- [可靠分布式系统-paxos的直观解释](https://blog.openacid.com/algo/paxos/)
+
+	- [200行代码实现基于paxos的kv存储](https://drmingdrmer.github.io/algo/2020/10/28/paxoskv.html)
+- [【分布式系统百科】EPaxos 与 Flexible Paxos：打破 Leader 瓶颈的两条路](https://quant67.com/post/distributed/14-epaxos/epaxos.html)
+- [【分布式系统百科】共识协议的工程权衡：Raft vs Multi-Paxos vs EPaxos 实测对比](https://quant67.com/post/distributed/17-consensus-engineering/consensus-engineering.html)
 
 ## FAQ
 ### chubby vs zookeeper的一致性
