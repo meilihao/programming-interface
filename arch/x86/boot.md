@@ -71,8 +71,12 @@ XMM06=0000000000000000 0000000000000000 XMM07=0000000000000000 0000000000000000
 (qemu) xp /16xb 0xfffffff0
 00000000fffffff0: 0xea 0x5b 0xe0 0x00 0xf0 0x30 0x36 0x2f
 00000000fffffff8: 0x32 0x33 0x2f 0x39 0x39 0x00 0xfc 0x00
-(qemu) xp/1i 0xffff0 # 打印0xffff0处的指令. i,格式是指令. 不知道为什么QEMU 10.2.1这里会报错`0x000ffff0: Asm output not supported on this arch`, 这时可使用gdb查看
-0x00000000000ffff0:  ljmp   $0xf000,$0xe05b
+# 打印0xffff0处的指令. i,格式是指令. 不知道为什么AMD cpu + QEMU 10.2.1这里会报错`0x000ffff0: Asm output not supported on this arch`, 这时可使用gdb(可能还是无法识别)/直接看内存内容
+# intel cpu + QEMU 10.2.1 + fedora 44, 能正常反编译指令, 但使用gdb也无法识别
+(qemu) xp/1i 0xffff0
+0x000ffff0:  ea 5b e0 00 f0           ljmpw    $0xf000:$0xe05b
+(qemu) xp/1i 0xfffffff0
+0xfffffff0:  ea 5b e0 00 f0           ljmpw    $0xf000:$0xe05b
 (qemu) c # 继续执行
 ```
 
