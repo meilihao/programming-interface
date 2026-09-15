@@ -126,7 +126,7 @@ PC	x86	Windows	UEFI → Windows Boot Manager → winload.efi → NTOSKRNL
     嵌入式设备启动的特点：
 
     - 无标准固件：不像 PC 有 BIOS/UEFI，依赖 SoC 厂商提供的 BootROM。
-    - BootROM：固化在芯片中，上电后自动从预设介质（SD/eMMC/NAND/SPI Flash）加载第一段代码（通常是 SPL 或直接 U-Boot）。
+    - BootROM：固化在芯片内部ROM中的早期启动代码，上电后自动从预设介质（SD/eMMC/NAND/SPI Flash）加载第一段代码（通常是 SPL 或直接 U-Boot）。
     - U-Boot：最常用的嵌入式 Bootloader，支持命令行、脚本、设备树（DTB）传递。
     - 设备树（Device Tree）：ARM Linux 必须通过 Bootloader 传递 .dtb 文件描述硬件。
     - 无 ExitBootServices()：因为没有 UEFI，直接跳转到内核

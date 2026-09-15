@@ -306,11 +306,13 @@ ref:
 - [我的第一支 edk2 Application](https://damn99.com/2020-05-18-edk2-first-app/)
 - [Using EDK II with Native GCC](https://github.com/tianocore/tianocore.github.io/wiki/Using-EDK-II-with-Native-GCC)
 
+edksetup.sh是一个脚本，用于使EDK II的编译命令正常工作. Conf目录中包含target.txt和tools_def.txt, target.txt用于设置要编译的内容, tools_def.txt用于设置在编译时要使用的编译器。最初，这两个文件并不存在，但首次运行edksetup.sh时会生成一个模板.
+
 ```bash
 # git clone -b <release_version> --depth 1 https://github.com/tianocore/edk2.git
 # cd edk2
 # git submodule update --init
-# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` fro `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
+# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` from `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
 # ln -s /usr/bin/python3.8 /usr/bin/python # 如果安装python3-distutils而不是python-is-python3就需要这句, 因为EDK2还是用的python2.x版本，而其命令是python
 # make -C BaseTools # BaseTools contains all the tools required for building EDK II
 # source edksetup.sh # 执行两次原因: `_omb_alias_general_cp_init：未找到命令`部分命令依赖edksetup.sh先设置env
@@ -323,6 +325,8 @@ MAX_CONCURRENT_THREAD_NUMBER = 9 # 这个取决于你的机器 CPU 核心数量
 # build
 ls Build/MdeModule/DEBUG_*/*/HelloWorld.efi # 构建出HelloWorld.efi
 ```
+
+以后再进入edk2, 只需要执行一次`source edksetup.sh`即可
 
 > 当ACTIVE_PLATFORM=OvmfPkg/OvmfPkgX64.dsc, build时可构建出OVMF.fd(`Build/OvmfX64/DEBUG_GCC5/FV/OVMF.fd`)
 

@@ -6,6 +6,7 @@ ref:
 - [【重识云原生】第四章云网络4.3.10.4节——VXLAN报文转发过程](https://cloud.tencent.com/developer/article/2024108)
 - [【重识云原生】第四章云网络4.3.10.5节——VXlan组网架构](https://cloud.tencent.com/developer/article/2024109)
 - [【重识云原生】第四章云网络4.5节——大二层网络](https://cloud.tencent.com/developer/article/2030941)
+- [VXLAN+EVPN终极解码：一张数据包的奇幻漂流与BGP的“神级导航”](https://mp.weixin.qq.com/s/rLd5QtEb1W02lsc-UZLymg)
 
 	大二层网络基本上都是针对云时代下数据中心场景的，因为它实际上就是为了解决数据中心的服务器虚拟化之后的虚拟机动态迁移这一特定需求而出现的。对于普通的园区网之类网络而言，大二层网络并没有特殊的价值和意义（除了某些特殊场景，例如WIFI漫游等等）.
 
