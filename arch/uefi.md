@@ -311,8 +311,8 @@ edksetup.sh是一个脚本，用于使EDK II的编译命令正常工作. Conf目
 ```bash
 # git clone -b <release_version> --depth 1 https://github.com/tianocore/edk2.git
 # cd edk2
-# git submodule update --init
-# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 # `build-essential uuid-dev` from `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
+# git submodule update --init [--depth 1]
+# apt build-essential uuid-dev iasl git gcc nasm python-is-python3 /dnf install libuuid-devel # `build-essential uuid-dev` fro `/BaseTools/ReadMe.rst`; iasl for OvmfPkg
 # ln -s /usr/bin/python3.8 /usr/bin/python # 如果安装python3-distutils而不是python-is-python3就需要这句, 因为EDK2还是用的python2.x版本，而其命令是python
 # make -C BaseTools # BaseTools contains all the tools required for building EDK II
 # source edksetup.sh # 执行两次原因: `_omb_alias_general_cp_init：未找到命令`部分命令依赖edksetup.sh先设置env
@@ -724,3 +724,38 @@ x86 firmware build会创建3各不同镜像:
 	- UEFI 变量不是持久的
 	- 不适用于 SMM_REQUIRE=TRUE 构建
 
+### AllocatePages() AllocatePool()区别
+AllocatePages() 和 AllocatePool() 是 UEFI 提供的两种基础内存分配服务。最核心的区别在于：AllocatePool() 按字节分配，最安全便捷；AllocatePages() 按页（4KB）分配，对齐要求更严格且支持地址限定。
+
+主要区别对比
+分配粒度与对齐
+
+AllocatePool()：按字节分配。保证 8 字节对齐，非常适合分配任意大小的数据结构或临时缓冲区。
+
+AllocatePages()：按页分配（通常为 4KB 对齐）。适合需要页对齐的大块内存或 DMA 缓冲区。
+
+地址控制与兼容性
+
+AllocatePool()：不能指定地址。分配器自动选择位置，因此代码可移植性最好，不会因平台内存布局不同而失败。
+
+AllocatePages()：可以指定地址（如 AllocateAddress 或 AllocateMaxAddress）。但指定地址会降低代码在不同平台上的兼容性，通常只建议使用 AllocateAnyPages。
+
+典型用途
+
+AllocatePool()：分配驱动私有数据结构、协议实例、字符串缓冲区等。
+
+AllocatePages()：分配需要页对齐的内存、DMA 缓冲区，或需要绕过池分配器限制的大块连续内存。
+
+选择建议
+优先使用 AllocatePool()：大多数情况下，当你需要一块内存来存放数据时，用 AllocatePool() 最安全，代码也最通用。
+
+使用 AllocatePages() 的场景：
+
+硬件要求缓冲区必须页对齐（例如某些 DMA 引擎）。
+
+需要分配大块内存，且池分配器可能无法满足连续性要求。
+
+必须指定分配地址范围（谨慎使用，尽量用 AllocateAnyPages 而非固定地址）。
+
+特别注意
+在 32 位 UEFI 环境下，AllocatePool() 分配的内存保证在 4GB 以下；而 AllocatePages() 可能返回 4GB 以上的地址，在 32 位指针下可能导致无法访问。如果你的驱动要兼顾 32/64 位，这一点需要留意
