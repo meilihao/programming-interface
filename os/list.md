@@ -13,6 +13,7 @@
 1. [**耗时半月，终于把牛客网上的Linux内核进阶成神笔记整理好了**](https://zhuanlan.zhihu.com/p/635604961)
 1. [**牛客网论坛最具争议的Linux内核成神笔记，GitHub已下载量已过百万**](https://zhuanlan.zhihu.com/p/635315467)
 1. [Linux核心概念详解](https://s3.shizhz.me/linux-mm/3.2-wu-li-nei-cun/3.2.5-slab-slub-slob)
+1. [**linux-kernel-internals**](https://kernel-internals.org/)
 
 实践:
 1. [从零开始制作 Linux](https://juejin.im/entry/6844903600305635335)

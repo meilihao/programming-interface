@@ -759,3 +759,22 @@ AllocatePages()：分配需要页对齐的内存、DMA 缓冲区，或需要绕�
 
 特别注意
 在 32 位 UEFI 环境下，AllocatePool() 分配的内存保证在 4GB 以下；而 AllocatePages() 可能返回 4GB 以上的地址，在 32 位指针下可能导致无法访问。如果你的驱动要兼顾 32/64 位，这一点需要留意
+
+### 如何使用宏
+c代码:
+```c
+  #ifdef LOAD_KERNEL_BY_PART
+    #error "LOAD_KERNEL_BY_PART is defined" # 测试LOAD_KERNEL_BY_PART是否生效
+    status = LoadKernelByPart(kernel_file, kernel_file_size, &entry_addr);
+  #else
+    status = LoadKernelByWhole(kernel_file, kernel_file_size, &entry_addr);
+  #endif
+```
+
+宏配置:
+```conf
+[BuildOptions]
+  *_*_*_CC_FLAGS = -DMY_CUSTOM_FEATURE
+```
+
+根据作用范围放入`.dsc`(平台级, 全局有效)或`.inf`(模块级, 局部有效)
