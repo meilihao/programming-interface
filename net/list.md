@@ -5,6 +5,7 @@
 - [PVE SDN 完全指南：从入门到企业级，选对方案不踩坑](https://mp.weixin.qq.com/s/lzCMVETg9OKI5K6rME-QYA)
 - [Wireshark 排查 TCP 重传：超时重传、快速重传、重复 ACK 一次讲清](https://mp.weixin.qq.com/s/46U78i6cJmlAK-KcuykikA)
 - [网络工程师必须吃透的9个VXLAN术语：从VTEP、VNI到EVPN，一次理清数据中心网络逻辑](https://mp.weixin.qq.com/s/XrvUq-ltAOZNqkFADf92OQ)
+- [Linux网络编程从应用层到内核实现源码详解](https://mp.weixin.qq.com/s/HtWagqUCKBF8pW785INBYQ)
 
 ## 打洞
 - [NAT 穿透是如何工作的：技术原理及企业级实践（Tailscale, 2020）](https://arthurchiao.art/blog/how-nat-traversal-works-zh/)

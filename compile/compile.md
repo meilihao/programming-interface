@@ -21,7 +21,7 @@ int main()
 }
 ```
 
-1. 预处理
+1. 预处理(prepressing)
     C/C++源文件中，以#开头的命令被称为预处理命令，如"#include"、宏定义命令"#define"、条件编译命令"#if、#ifdef"等(`#pragma`会被保留).
 
     预处理是预编译器cpp将包含(include)的文件插入原文件中、将宏定义展开、根据条件编译命令选择要使用的代码，最后将这些东西输出到一个.i文件中并等待进一步处理. 因此能在这一步检查宏定义和头文件是否正确
@@ -31,19 +31,21 @@ int main()
     ```
 
     > 可通过`printf SYS_read | gcc -include sys/syscall.h -m32 -E -`, 查看`sys/syscall.h`涉及的相关头文件
-1. 编译
+1. 编译(compilation)
     编译器把C/C++代码(比如上述的.i文件)翻译成汇编代码, 即把预处理完的文件进行一系列词法分析、语法分析、语义分析及优化后生成相应的汇编代码文件. 这个过程是整个程序构建的核心部分，也是最复杂的部分之一
 
     ```
-    gcc -S hello.i -o hello.s # 包含预处理
+    gcc -S hello.i -o hello.s
     ```
 
-    > 目前gcc将预处理和编译合成了一个步骤, c语言由`/usr/lib/gcc/x86_64-linux-gnu/8/cc1`处理, c++由同目录的cc1plus处理.
-1. 汇编
+    > 目前gcc将预处理和编译合成了一个步骤, c语言由`/usr/<lib/libexec>/gcc/x86_64-linux-gnu/<version>/cc1`处理, c++由同目录的cc1plus处理, 也可通过`gcc -print-prog-name=cc1/g++ -print-prog-name=cc1plus`获取
+    > 词法分析工具: lex
+    > 语法分析工具: yacc(yet another compiler compliler)
+1. 汇编(assembly)
     汇编器将编译器输出的汇编代码翻译成符合一定格式的机器代码，在Linux系统上一般表现为ELF目标文件(OBJ文件即`.o`文件)
 
     ```
-    gcc -c hello.s -o hello.o <=> as hello.s -o hello.o # 包含预处理和编译
+    gcc -c hello.s -o hello.o <=> as hello.s -o hello.o
     ```
 
     在汇编阶段, 每个目标文件中指令和符号的地址都是相对于自身目标文件而言, 是一个临时的, 属于每个目标文件范围内的地址. 只有在链接时, 链接器将多个目标文件链接后, 才会为所有的符号同一分配地址.
@@ -53,13 +55,17 @@ int main()
     填充类型:
     1. R_X86_64_16: 填写操作数地点16位绝对地址
     1. R_X86_64_PC16: PC16表示相对指令指针的地址, 宽度是16位的
-1. 链接
+
+    > 常见可执行文件格式是windows的PE(portable executable)和linux的ELF(executable linkable format), 它们都是COFF(common file format)的变种.
+    > 常见可执行文件格式有windows的`.exe, .dll, .obj`, linux的`<可执行文件>, .so, .a, .o, <core dump>`
+1. 链接(linking)
     将汇编器生成的OBJ文件和系统库的OBJ文件、库文件链接起来，最终生成可以在特定平台运行的可执行文件
 
     ```
-    gcc hello.o -o hello # 包含预处理, 编译和汇编
+    gcc hello.o -o hello
     ```
 
+    链接过程主要包括地址和空间分配(address and storage allocation), 符号决议(symbol resolution)和重定位(relocation)等步骤.
     链接器的任务之一是为函数调用找到匹配的函数的可执行代码的位置.
 
     链接涉及到函数库.
@@ -122,6 +128,12 @@ gcc hello.c -o hello
 ```
 
 > 编译器优化选项分为4个级别，-O0表示没有优化，-O1为**缺省值**，建议使用-O2，-O3优化级别最高.
+
+中间代码使得编译器可分为前端和后端, 前端负责生成机器码无关的中间代码, 后端将中间代码转为目标机器代码. 跨平台编译器针对不同平台使用同一个前端和针对不同机器平台的若干后端.
+
+GCC 和 LLVM 都使用中间表示（IR）来连接编译器前端、优化器和目标架构后端，但两者的设计理念、IR 结构和优化机制有明显区别. 最核心的区别是：
+- GCC：主要使用 GENERIC、GIMPLE、RTL 等多层中间表示，逐步从高级语言语义降低到机器相关指令
+- LLVM：以统一的 LLVM IR 为核心，使用 SSA（静态单赋值）形式贯穿大部分通用优化流程，再降低到目标机器指令表示
 
 ![GCC编译过程详解](/misc/img/GCC编译过程详解.png), 可通过`gcc -v main.c`的编译日志详细了解.
 

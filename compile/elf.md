@@ -1,6 +1,7 @@
 # elf
 参考:
 - [ELF Format](http://www.skyfree.org/linux/references/ELF_Format.pdf)
+- [elf.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/elf.h)或`/usr/include/elf.h`
 - [Linux内核之ELF格式解析](https://mudongliang.github.io/2015/10/31/linuxelf.html)
 - [计算机那些事(4)——ELF文件结构](http://chuquan.me/2018/05/21/elf-introduce/)
 - [ELF文件格式](https://www.cntofu.com/book/114/Theory/ELF.md)
@@ -37,7 +38,7 @@ typedef struct elf64_hdr {
   Elf64_Word e_version; // Version
   Elf64_Addr e_entry;		/* Entry point virtual address */ 虚拟地址,是这个程序运行的入口即_start符号的地址
   Elf64_Off e_phoff;		/* Program header table file offset */
-  Elf64_Off e_shoff;		/* Section header table file offset */
+  Elf64_Off e_shoff;		/* Section header table file offset */ , 段表起点的偏移量
   Elf64_Word e_flags;   // 与文件关联的特定于处理器的标志, 格式是EF_<machin_flag>
   Elf64_Half e_ehsize;    // Size of this header
   Elf64_Half e_phentsize; // Size of program headers
@@ -53,7 +54,7 @@ elf Magic(`7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00`) elf解析器(通常
 - 0x454c46 : "elf"的ascii码
 - 0x01/0x02 : elf的class, 即32/64位
 - 0x01/0x02 : 字节序, 0x01表示小端
-- 0x01 : elf文件的主版本号
+- 0x01 : elf文件的主版本号, v1.2后没再更新(见[Linux Foundation Referenced Specifications](https://refspecs.linuxfoundation.org/))
 - 后续的9个字节elf标准未定义, 一般用0填充, 或作为自定义的扩展标志
 
 > [elf标准, v1.2后未更新](https://refspecs.linuxfoundation.org/elf/elf.pdf)
@@ -77,10 +78,11 @@ Align 大小对齐信息
 节头部表(Section Header Table)是sections的元数据, 在代码里面的定义是`struct elf32_shdr 和 [struct elf64_shdr](https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/elf.h#L316)`
 
 ```c
+// 段描述符(section descriptor)
 typedef struct elf64_shdr {
   Elf64_Word sh_name;   /* Section name, index in string tbl */ sh_name是段名在.shstrtab中的偏移量
-  Elf64_Word sh_type;   /* Type of section */
-  Elf64_Xword sh_flags;   /* Miscellaneous section attributes */
+  Elf64_Word sh_type;   /* Type of section */, 段类型
+  Elf64_Xword sh_flags;   /* Miscellaneous section attributes */ 段标志位
   Elf64_Addr sh_addr;   /* Section virtual addr at execution */ 如果该段可以被加载, 则sh_addr为该段被加载后在进程地址空间中的虚拟地址
   Elf64_Off sh_offset;    /* Section file offset */ 如果该段存在于文件中, 则表示在文件中的偏移; 否则无意义, 比如对bss段
   Elf64_Xword sh_size;    /* Size of section in bytes */
@@ -137,6 +139,8 @@ sh_flags会在`readelf -S xxx`的尾部显示:
 
   symtab和strtabsection并不是必不可少的，它们是用来调试的，最终发布软件之前一般会将它们去除，执行`strip <elf_file>`就可以去掉它们.
 
+  > ld链接时会插入一些特殊符号, 某些场景特别有用, 比如编写kernel时.
+
   在链接中, 将函数和变量统称为符号(symbol), 函数名和变量名是符号名(symbol name).
   符号表中定义的每个符号有一个对应的值叫符号值. 对于变量和函数, 符号值就是它们的地址.
 
@@ -175,6 +179,7 @@ sh_flags会在`readelf -S xxx`的尾部显示:
 - `.debug*/.rel.debug*` : 调试信息
 
   gcc使用`-g`参数生成的.o中就有不少debug相关的section. elfs文件使用DWARF(Debugging With Attributed Record Formats, 最新是v5, 通用是v4)组织调试信息. 在linux下可使用"strip"命令去除elf的调试信息.
+- .hash: 符号哈希表
 
 > .data与.bss没有本质区别, 都是用于存放静态变量, 只是.data是已初始化过的静态数据, 而.bss程序是运行时会分配空间并置零的静态数据.
 
@@ -182,9 +187,10 @@ sh_flags会在`readelf -S xxx`的尾部显示:
 
 > elf文件中可能存在多个同名的段.
 
-> gcc允许通过`__attribute__((section("name")))`属性把相应的变量或函数放到以"name"作为段名的段中.
+> gcc允许通过`__attribute__((section("name")))`属性把相应的变量或函数放到以"name"作为段名的自定义段中.
 
 ![.o文件的ELF](/misc/img/compile/1671100-20190512203047832-334199166.jpg)
+
 
 #### 强符号和弱符号
 在链接时经常会碰到重复定义, 多个目标文件中含有名字相同全局符号的定义，那么这些目标文件在链接的时候将会出现符号重复定义的错误, 此类符号被称之为强符号, 除此之外就是弱符号.
@@ -203,7 +209,7 @@ GCC通过`__attribute__((weak))`指令可将强符号的函数或变量定义为
 - 如果一个符号在所有目标文件中都是弱符号，那么选择其中占用空间最大的一个, 主要是针对不用类型的变量而言；对于函数，其对应的符号相当于一个只读指针变量，而指针类型大小是固定的，不存在这个问题.
 
 #### 强引用和弱引用
-一些对外部文件的符号引用，如果在被链接成可执行文件时，没有找到相关的符号，那么链接器就会报符号未定义错误，这种被称为强应用 (Strong Reference).
+一些对外部文件的符号引用，如果在被链接成可执行文件时，没有找到相关的符号，那么链接器就会报符号未定义错误，这种被称为强引用 (Strong Reference).
 
 与之相对应还有一种弱引用 (Weak Reference)，如果可以找到符号则连接，否则连接器会默认设置为 0 或者一个特殊值, 而不是报错.
 
@@ -235,6 +241,8 @@ typedef struct elf64_phdr {
   Elf64_Xword p_align;		/* Segment alignment, file & memory */
 } Elf64_Phdr;
 ```
+
+对于LOAD类型的segment,  p_memsz >=p_filesz, 大于部分(p_memsz-p_filesz)用0填充
 
 一个ELF文件被加载后，代码段、数据段以及堆栈便在虚拟地址空间的分配:
 ![](/misc/img/compile/3-3.png)
@@ -362,6 +370,8 @@ execve和execveat调用同名系统调用实现，二者的主要区别在于确
 exec函数族可以接受的文件除了可执行文件外还可以是脚本文件，也就是经常看到的以`#! interpreter [optional-arg]`开头的文件, interpreter必须指向一个可执行文件，相当于执行`interpreter
 [optional-arg] filename arg...`
 
+`cat /proc/<pid>/maps`可查看进程的虚拟空间分布, 但输出的设备`<主设备号>:<次设备号>`列为`00:00`时, 表示没有映射到文件中, 这种vma就是匿名虚拟内存区域(anonymous virtual memory area), 常见的有vdso, heap和stack
+
 #### 系统调用
 execve和execveat系统调用最终都调用__do_execve_file实现，在将处理权交给具体的fmt之前，`__do_execve_file`需要完成以下任务:
 1. 调用kzalloc申请为bprm内存。
@@ -465,7 +475,7 @@ GOT如何找到具体函数: GOT[y]开始时也没有地址, 但它又回调 PLT
 ### DWARF(Debugging With Attributed Record Formats)
 DWARF(Debugging With Attributed Record Formats, 最新版是实验性的v5, 常用是v4)是面向ELF文件的一种较新的调试信息格式，调试信息存储在对象文件的各个部分中，是可执行程序与源代码之间关系的简单表示.
 
-`objdump -g code.o`可以查看调试信息的细节.
+`objdump -g code.o`可以查看调试信息的细节. strip可去除elf的调试信息
 
 ## FAQ
 ### 如何使用readelf和objdump解析elf
